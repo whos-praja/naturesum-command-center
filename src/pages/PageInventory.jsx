@@ -32,16 +32,8 @@ const PageInventory = ({ subsection }) => {
     if (next === "unified") navigate("/inventory");
     else navigate(`/inventory/${next}`);
   };
-  const [trajectoryMode, setTrajectoryMode] = useState("current");
-  const [growth, setGrowth] = useState(20);
   const [forecastDays, setForecastDays] = useState(60);
-
-  const adjustedInventory = D.inventory.map(s => {
-    const vel = trajectoryMode === "current" ? s.velocity : s.velocity * (1 + growth / 100);
-    const runway = Math.round(s.totalStock / vel);
-    const status = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
-    return { ...s, adjRunway: runway, adjVelocity: Math.round(vel), adjStatus: status };
-  });
+  // RunwayTab now manages its own trajectory + per-row growth state.
 
   return (
     <div>
@@ -68,13 +60,7 @@ const PageInventory = ({ subsection }) => {
 
       {tab === "unified" && <UnifiedStockTab inventory={D.inventory}/>}
       {tab === "materials" && <MaterialsTab inventory={D.inventory}/>}
-      {tab === "runway" && (
-        <RunwayTab
-          inventory={adjustedInventory}
-          mode={trajectoryMode} setMode={setTrajectoryMode}
-          growth={growth} setGrowth={setGrowth}
-        />
-      )}
+      {tab === "runway" && <RunwayTab inventory={D.inventory}/>}
       {tab === "forecast" && (
         <ForecastTab inventory={D.inventory} days={forecastDays} setDays={setForecastDays}/>
       )}
@@ -128,7 +114,7 @@ const UnifiedStockTab = ({ inventory }) => {
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
               <div className="stock-meta-num mono">{activeSkus}</div>
-              <div className="stock-meta-label">active SKUs</div>
+              <div className="stock-meta-label">active Items</div>
             </div>
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
@@ -158,7 +144,7 @@ const UnifiedStockTab = ({ inventory }) => {
               <div className="stock-alert-main">
                 <span className="stock-alert-num mono">{skusRunningOut}</span>
                 <span className="stock-alert-main-label">
-                  SKU{skusRunningOut === 1 ? "" : "s"} running out
+                  Item{skusRunningOut === 1 ? "" : "s"} running out
                 </span>
               </div>
               <div className="stock-alert-sub">
@@ -174,9 +160,9 @@ const UnifiedStockTab = ({ inventory }) => {
             <>
               <div className="stock-alert-main">
                 <span className="stock-alert-num mono" style={{ color: "var(--success)" }}>0</span>
-                <span className="stock-alert-main-label">SKUs running out</span>
+                <span className="stock-alert-main-label">Items running out</span>
               </div>
-              <div className="stock-alert-sub">all SKUs above supplier lead-time floor</div>
+              <div className="stock-alert-sub">all Items above supplier lead-time floor</div>
               <div className="stock-alert-secondary">
                 <span className="stock-alert-num-sm mono">{materialsToReorder}</span>
                 material{materialsToReorder === 1 ? "" : "s"} need reordering
@@ -197,19 +183,19 @@ const UnifiedStockTab = ({ inventory }) => {
       </div>
 
       <Card
-        title="Inventory by SKU × location"
-        sub="Source: warehouse MIS sheet (live). Click any SKU for the full material breakdown."
+        title="Inventory by Item × location"
+        sub="Source: warehouse MIS sheet (live). Click any Item for the full material breakdown."
         padded={false}
         action={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input className="txt sm" placeholder="Filter SKU…" style={{ width: 160, height: 24, padding: "2px 9px", fontSize: 11.5 }}/>
+            <input className="txt sm" placeholder="Filter Item…" style={{ width: 160, height: 24, padding: "2px 9px", fontSize: 11.5 }}/>
             <button className="btn sm"><Icon name="filter" size={12}/>Status</button>
           </div>
         }>
         <table className="table">
           <thead>
             <tr>
-              <th>SKU</th>
+              <th>Item</th>
               <th className="num">Warehouse</th>
               <th className="num col-deferred">Amazon FBA</th>
               <th className="num col-deferred">Flipkart</th>
@@ -253,7 +239,7 @@ const UnifiedStockTab = ({ inventory }) => {
             <strong>Total</strong> currently reflects <strong>warehouse FG stock only</strong>.
             Amazon FBA, Flipkart, Blinkit and In-Transit columns are placeholders — they'll go live
             once each channel's integration is wired up. For the FG / Semi-FG / Raw / Packaging split,
-            click any SKU row or {" "}
+            click any Item row or {" "}
             <button className="link-btn" onClick={() => navigate("/inventory/materials")}>
               open the Materials breakdown
             </button>.
@@ -329,8 +315,8 @@ const MaterialsTab = ({ inventory }) => {
   return (
     <>
       <Card
-        title="Material composition by SKU"
-        sub="The bottleneck column is the input that caps Producible FG. Click any row for the per-SKU popover."
+        title="Material composition by Item"
+        sub="The bottleneck column is the input that caps Producible FG. Click any row for the per-Item popover."
         padded={false}
         action={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -339,7 +325,7 @@ const MaterialsTab = ({ inventory }) => {
               <option value="bottleneck">Tightest bottleneck</option>
               <option value="best">Producible FG (high → low)</option>
               <option value="fg">FG count (high → low)</option>
-              <option value="name">SKU name</option>
+              <option value="name">Item name</option>
             </select>
           </div>
         }
@@ -357,7 +343,7 @@ const MaterialsTab = ({ inventory }) => {
           </colgroup>
           <thead>
             <tr>
-              <th>SKU</th>
+              <th>Item</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.fg }}>FG</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.semiFg }}>Semi-FG</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.rawMaterial }}>Raw</th>
@@ -458,11 +444,14 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   // Which input is the bottleneck for producible FG?
   const bottleneck = wb.semiFg <= wb.packaging ? "Semi-FG" : "Packaging";
 
-  // Material rows — clean label + number + hint stack. The bottleneck row
-  // gets a subtle highlight so the eye lands on the constraint.
+  // Material rows — label + per-item code + number + hint stack.
+  // The bottleneck row gets a subtle highlight so the eye lands on the cap.
+  const codes = wb.codes || {};
   const row = (key, label, value, hint) => {
     const isBottleneck = (bottleneck === "Semi-FG" && key === "semiFg") ||
                           (bottleneck === "Packaging" && key === "packaging");
+    // For FG row, the code is the SKU itself; for others, look it up in wb.codes
+    const itemCode = key === "fg" ? sku.code : codes[key];
     return (
       <div className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "")} key={key}>
         <div className="wb-row-label">
@@ -470,6 +459,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           <div>
             <div className="wb-row-name">
               {label}
+              {itemCode && <span className="wb-row-code sku">{itemCode}</span>}
               {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
             </div>
             {hint && <div className="wb-row-hint muted">{hint}</div>}
@@ -532,103 +522,253 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   );
 };
 
-const RunwayTab = ({ inventory, mode, setMode, growth, setGrowth }) => {
+const RunwayTab = ({ inventory: rawInventory }) => {
   const D = NSData;
+
+  // Trajectory mode + per-row growth overrides — managed locally.
+  // - In "current" mode: growth column shows each item's recent actual
+  //   growth (read-only). Velocity uses base velocity.
+  // - In "custom" mode: growth column becomes editable per-row. Each
+  //   item's velocity = base × (1 + perRowGrowth / 100).
+  const [mode, setMode] = useState("current");
+  const [perRowGrowth, setPerRowGrowth] = useState({}); // { [code]: number }
+
+  // Compute the runway projection for every item using the current mode
+  // and per-row overrides.
+  const inventory = rawInventory.map(s => {
+    const actualGrowth = s.growth ?? 0;
+    // In current mode, growth is just informational — velocity is base.
+    // In custom mode, use the user's override (default = actual growth).
+    const effectiveGrowth = mode === "current"
+      ? actualGrowth
+      : (perRowGrowth[s.code] ?? actualGrowth);
+    const baseVel = s.velocity;
+    const vel = mode === "current"
+      ? baseVel
+      : baseVel * (1 + effectiveGrowth / 100);
+    const whFg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
+    const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
+    const maxFg = whFg + producibleFg;
+    const runway = vel > 0 ? Math.round(maxFg / vel) : 0;
+    const status = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
+    return {
+      ...s,
+      adjRunway: runway,
+      adjVelocity: Math.round(vel),
+      adjStatus: status,
+      whFg,
+      producibleFg,
+      maxFg,
+      actualGrowth,
+      effectiveGrowth,
+    };
+  });
+
   const reds = inventory.filter(s => s.adjStatus === "red");
   const ambers = inventory.filter(s => s.adjStatus === "amber");
+  const greens = inventory.filter(s => s.adjStatus === "green");
+
+  const [statusFilter, setStatusFilter] = useState("all"); // all | red | amber | green
+  const [popoverSku, setPopoverSku] = useState(null);
+
+  // Per-row growth input change handler
+  const setGrowthFor = (code, val) => {
+    setPerRowGrowth(prev => ({ ...prev, [code]: val }));
+  };
+  // Reset all overrides → back to actual growth
+  const resetGrowth = () => setPerRowGrowth({});
+
+  // Earliest reorder-by date across all at-risk SKUs (red + amber). The
+  // tightest deadline tells the founder when they need to act next.
+  const today = new Date();
+  const reorderByDate = (s) => {
+    // Reorder = stock runs out − lead time. If buffer < 0, already overdue.
+    const buffer = s.adjRunway - s.leadTime;
+    const d = new Date(today);
+    d.setDate(d.getDate() + buffer);
+    return { date: d, daysFromNow: buffer };
+  };
+  const atRisk = [...reds, ...ambers].map(s => ({ ...s, rb: reorderByDate(s) }));
+  atRisk.sort((a, b) => a.rb.daysFromNow - b.rb.daysFromNow);
+  const earliestReorder = atRisk[0] || null;
+
+  // Filter for the main table
+  const visible = inventory.filter(s => statusFilter === "all" || s.adjStatus === statusFilter);
+
+  const fmtReorderDate = (rb) => {
+    if (rb.daysFromNow < 0) return `Overdue by ${Math.abs(rb.daysFromNow)}d`;
+    if (rb.daysFromNow === 0) return "Today";
+    if (rb.daysFromNow === 1) return "Tomorrow";
+    if (rb.daysFromNow <= 14) return `In ${rb.daysFromNow}d`;
+    const opts = { month: "short", day: "numeric" };
+    return rb.date.toLocaleDateString("en-US", opts);
+  };
 
   return (
     <>
-      <Card title="Runway calculator" sub="Compares stock against rolling 30-day velocity, gated by supplier lead time"
-        action={
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <Card style={{ marginBottom: 12 }}>
+        <div className="runway-head">
+          <div className="runway-summary">
+            {earliestReorder ? (
+              <>
+                <div className="runway-summary-label">Next action</div>
+                <div className="runway-summary-main">
+                  <span className={"runway-summary-tag " + (earliestReorder.adjStatus === "red" ? "crit" : "warn")}>
+                    {earliestReorder.adjStatus === "red" ? "Overdue" : "Soon"}
+                  </span>
+                  <span className="runway-summary-text">
+                    {earliestReorder.name} · reorder {" "}
+                    <strong>{fmtReorderDate(earliestReorder.rb).toLowerCase()}</strong>
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="runway-summary-label">Status</div>
+                <div className="runway-summary-main">
+                  <span className="runway-summary-tag ok">All clear</span>
+                  <span className="runway-summary-text">No Items need reorder action in the next 30 days.</span>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="runway-controls">
             <div className="seg">
               <button className={mode === "current" ? "active" : ""} onClick={() => setMode("current")}>Current trajectory</button>
               <button className={mode === "custom" ? "active" : ""} onClick={() => setMode("custom")}>Custom trajectory</button>
             </div>
-            {mode === "custom" && (
-              <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5 }}>
-                <span className="muted">Velocity +</span>
-                <input className="txt" style={{ width: 50 }} value={growth} onChange={e => setGrowth(parseFloat(e.target.value) || 0)}/>
-                <span className="muted">%</span>
-              </div>
+            {mode === "custom" && Object.keys(perRowGrowth).length > 0 && (
+              <button className="btn sm ghost" onClick={resetGrowth} title="Reset all rows back to their actual growth rate">
+                Reset all
+              </button>
             )}
           </div>
-        } style={{ marginBottom: 14 }}>
-        <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-          <div>
-            <div className="stat-label">SKUs below lead time</div>
-            <div className="stat-num lg" style={{ color: "var(--critical)" }}>{reds.length}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Reorder window has passed</div>
-          </div>
-          <div>
-            <div className="stat-label">SKUs under 30 days</div>
-            <div className="stat-num lg" style={{ color: "var(--warning)" }}>{ambers.length}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Action needed within 1-2 weeks</div>
-          </div>
-          <div>
-            <div className="stat-label">Healthy SKUs</div>
-            <div className="stat-num lg" style={{ color: "var(--success)" }}>{inventory.length - reds.length - ambers.length}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>Above lead time & 30d buffer</div>
-          </div>
+        </div>
+
+        <div className="runway-filters">
+          {[
+            { id: "all",   label: "All",          count: inventory.length, cls: "" },
+            { id: "red",   label: "Below lead",   count: reds.length,      cls: "crit" },
+            { id: "amber", label: "Under 30d",    count: ambers.length,    cls: "warn" },
+            { id: "green", label: "Healthy",      count: greens.length,    cls: "ok" },
+          ].map(f => (
+            <button
+              key={f.id}
+              className={"runway-chip " + f.cls + (statusFilter === f.id ? " active" : "")}
+              onClick={() => setStatusFilter(f.id)}
+            >
+              <span className="runway-chip-label">{f.label}</span>
+              <span className="runway-chip-count">{f.count}</span>
+            </button>
+          ))}
         </div>
       </Card>
 
-      <Card padded={false}>
-        <table className="table">
+      <Card
+        title="Runway by Item"
+        sub={
+          mode === "current"
+            ? "(Warehouse FG + Producible FG) ÷ rolling 30-day velocity. Growth column shows actual recent trend per item."
+            : "(Warehouse FG + Producible FG) ÷ adjusted velocity. Edit each item's Growth % to stress-test runway independently."
+        }
+        padded={false}
+      >
+        <table className="table mat-table runway-table">
+          <colgroup>
+            <col className="rw-col-sku"/>
+            <col className="rw-col-num"/>
+            <col className="rw-col-num"/>
+            <col className="rw-col-max"/>
+            <col className="rw-col-num"/>
+            <col className="rw-col-growth"/>
+            <col className="rw-col-runway"/>
+            <col className="rw-col-num"/>
+            <col className="rw-col-reorder"/>
+          </colgroup>
           <thead>
             <tr>
-              <th>SKU</th>
-              <th className="num">Stock</th>
-              <th className="num">Velocity /d</th>
+              <th>Item</th>
+              <th className="num">FG</th>
+              <th className="num">Producible</th>
+              <th className="num rw-h-max">Max FG</th>
+              <th className="num">Velocity</th>
+              <th className="num rw-h-growth">Growth</th>
               <th className="num">Runway</th>
-              <th className="num">Lead time</th>
-              <th>Buffer (runway − lead)</th>
-              <th>Action</th>
+              <th className="num">Lead</th>
+              <th className="num rw-h-action">Action needed</th>
             </tr>
           </thead>
           <tbody>
-            {inventory.map(s => {
-              const buffer = s.adjRunway - s.leadTime;
+            {visible.length === 0 ? (
+              <tr><td colSpan={9}><div className="empty">No Items match this filter.</div></td></tr>
+            ) : visible.map(s => {
+              const rb = reorderByDate(s);
+              const reorderText = fmtReorderDate(rb);
+              const overdue = rb.daysFromNow < 0;
+              const growthVal = mode === "custom"
+                ? (perRowGrowth[s.code] ?? s.actualGrowth)
+                : s.actualGrowth;
+              const growthIsOverride = mode === "custom" && perRowGrowth[s.code] !== undefined && perRowGrowth[s.code] !== s.actualGrowth;
               return (
-                <tr key={s.code}>
-                  <td>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <span>{s.name}</span>
-                      <span className="sku">{s.code}</span>
-                    </div>
+                <tr
+                  key={s.code}
+                  className={"row-clickable runway-row runway-row-" + s.adjStatus}
+                  onClick={() => setPopoverSku(s)}
+                >
+                  <td className="mat-cell">
+                    <div className="mat-cell-name">{s.name}</div>
+                    <div className="sku">{s.code} · {s.variant}</div>
                   </td>
-                  <td className="num">{D.fmtN(s.totalStock)}</td>
-                  <td className="num">{s.adjVelocity}</td>
-                  <td className="num">
-                    <span className={"badge " + (s.adjStatus === "red" ? "red" : s.adjStatus === "amber" ? "amber" : "green") + " dot"}>
-                      {s.adjRunway} days
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{D.fmtN(s.whFg)}</div>
+                  </td>
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num" style={{ color: "var(--success)" }}>{D.fmtN(s.producibleFg)}</div>
+                  </td>
+                  <td className="num mat-cell rw-cell-max">
+                    <div className="mat-cell-num result max">{D.fmtN(s.maxFg)}</div>
+                  </td>
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{s.adjVelocity}</div>
+                  </td>
+                  <td className="num mat-cell rw-cell-growth" onClick={e => e.stopPropagation()}>
+                    {mode === "custom" ? (
+                      <div className={"rw-growth-input-wrap" + (growthIsOverride ? " is-override" : "")}>
+                        <input
+                          className="rw-growth-input mono"
+                          type="number"
+                          value={growthVal}
+                          onChange={e => setGrowthFor(s.code, parseFloat(e.target.value) || 0)}
+                          step="1"
+                        />
+                        <span className="rw-growth-pct">%</span>
+                      </div>
+                    ) : (
+                      <div className={"rw-growth-display mono " + (s.actualGrowth > 0 ? "up" : s.actualGrowth < 0 ? "down" : "flat")}>
+                        {s.actualGrowth > 0 ? "+" : ""}{s.actualGrowth.toFixed(1)}%
+                      </div>
+                    )}
+                  </td>
+                  <td className="num mat-cell">
+                    <span className={"runway-pill runway-pill-" + s.adjStatus}>
+                      {s.adjRunway}d
                     </span>
                   </td>
-                  <td className="num">{s.leadTime} d</td>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ flex: 1, position: "relative", height: 8, background: "var(--bg-sunken)", borderRadius: 4 }}>
-                        <div style={{
-                          position: "absolute", left: 0, top: 0, height: "100%",
-                          width: Math.min(100, Math.max(2, (s.adjRunway / 90) * 100)) + "%",
-                          background: s.adjStatus === "red" ? "var(--critical)" : s.adjStatus === "amber" ? "var(--warning)" : "var(--success)",
-                          borderRadius: 4
-                        }}/>
-                        <div style={{
-                          position: "absolute", left: ((s.leadTime / 90) * 100) + "%", top: -2, bottom: -2,
-                          width: 2, background: "var(--ink-2)", borderRadius: 1
-                        }} title="Supplier lead time"/>
-                      </div>
-                      <span className="mono" style={{ fontSize: 11, width: 38, textAlign: "right", color: buffer < 0 ? "var(--critical)" : "var(--ink)" }}>
-                        {buffer > 0 ? "+" : ""}{buffer}d
-                      </span>
-                    </div>
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{s.leadTime}d</div>
                   </td>
-                  <td>
-                    {s.adjStatus === "red" ? <button className="btn sm primary">Reorder now</button> :
-                     s.adjStatus === "amber" ? <button className="btn sm">Schedule PO</button> :
-                     <span className="muted" style={{ fontSize: 11.5 }}>—</span>}
+                  <td className="mat-cell rw-cell-action" onClick={e => e.stopPropagation()}>
+                    <div className="rw-action-stack">
+                      <div className={"runway-reorder" + (overdue ? " is-overdue" : "")}>
+                        {reorderText}
+                      </div>
+                      {s.adjStatus === "red"
+                        ? <button className="btn sm primary">Reorder now</button>
+                        : s.adjStatus === "amber"
+                          ? <button className="btn sm">Schedule PO</button>
+                          : <span className="muted" style={{ fontSize: 11 }}>—</span>}
+                    </div>
                   </td>
                 </tr>
               );
@@ -636,6 +776,10 @@ const RunwayTab = ({ inventory, mode, setMode, growth, setGrowth }) => {
           </tbody>
         </table>
       </Card>
+
+      {popoverSku && (
+        <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
+      )}
     </>
   );
 };
@@ -655,7 +799,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
         <table className="table">
           <thead>
             <tr>
-              <th>SKU</th>
+              <th>Item</th>
               <th className="num">Velocity /d</th>
               <th className="num">Trend</th>
               <th className="num">Forecast ({days}d)</th>
@@ -771,7 +915,7 @@ const BatchesTab = ({ batches }) => {
           <thead>
             <tr>
               <th>Batch ID</th>
-              <th>SKU</th>
+              <th>Item</th>
               <th>Manufacture</th>
               <th>Expiry</th>
               <th className="num">Units remaining</th>
@@ -834,7 +978,7 @@ const ReturnsTab = () => {
         <table className="table">
           <thead>
             <tr>
-              <th>Return ID</th><th>SKU</th><th>Channel</th><th className="num">Qty</th><th>Status</th><th>Action</th><th>Received</th><th></th>
+              <th>Return ID</th><th>Item</th><th>Channel</th><th className="num">Qty</th><th>Status</th><th>Action</th><th>Received</th><th></th>
             </tr>
           </thead>
           <tbody>

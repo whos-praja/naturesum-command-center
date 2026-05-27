@@ -12,20 +12,20 @@ const NSData = (function () {
 
   // ── SKUs ──────────────────────────────────────────────
   const skus = [
-    { code: "NS-WHT-CHO-1K", name: "Whey Protein — Chocolate", variant: "1 kg",   active: true,  velocity: 142 },
-    { code: "NS-WHT-VAN-1K", name: "Whey Protein — Vanilla",   variant: "1 kg",   active: true,  velocity:  98 },
-    { code: "NS-WHT-CHO-2K", name: "Whey Protein — Chocolate", variant: "2 kg",   active: true,  velocity:  64 },
-    { code: "NS-MUL-MEN-60", name: "Daily Multivitamin (Men)", variant: "60 ct",  active: true,  velocity: 211 },
-    { code: "NS-MUL-WMN-60", name: "Daily Multivitamin (Women)", variant: "60 ct", active: true, velocity: 184 },
-    { code: "NS-OMG-3-90",   name: "Omega-3 Fish Oil",         variant: "90 ct",  active: true,  velocity: 156 },
-    { code: "NS-BIO-HAIR-60",name: "Biotin + Hair Complex",    variant: "60 ct",  active: true,  velocity: 132 },
-    { code: "NS-COL-PEP-250",name: "Collagen Peptides",        variant: "250 g",  active: true,  velocity:  77 },
-    { code: "NS-ASH-500-60", name: "Ashwagandha 500mg",        variant: "60 ct",  active: true,  velocity:  88 },
-    { code: "NS-PRO-VEG-1K", name: "Plant Protein — Choco",    variant: "1 kg",   active: true,  velocity:  41 },
-    { code: "NS-CRT-MON-250",name: "Creatine Monohydrate",     variant: "250 g",  active: true,  velocity:  62 },
-    { code: "NS-VITD-2K-60", name: "Vitamin D3 2000 IU",       variant: "60 ct",  active: true,  velocity: 109 },
-    { code: "NS-PRE-GUT-30", name: "Pre-Probiotic Gut Health", variant: "30 ct",  active: true,  velocity:  54 },
-    { code: "NS-MAGNESIUM",  name: "Magnesium Glycinate",      variant: "60 ct",  active: false, velocity:   0 },
+    { code: "NSMP100",   name: "Moringa Powder",          variant: "100 g",  active: true,  velocity:  30 },
+    { code: "NSMP250",   name: "Moringa Powder",          variant: "250 g",  active: true,  velocity:  25 },
+    { code: "NSSB100",   name: "Sea Buckthorn Powder",    variant: "100 g",  active: true,  velocity:  40 },
+    { code: "NSSB250",   name: "Sea Buckthorn Powder",    variant: "250 g",  active: true,  velocity:  30 },
+    { code: "NSSB500",   name: "Sea Buckthorn Powder",    variant: "500 g",  active: true,  velocity:  20 },
+    { code: "NSSBDB100", name: "Sea Buckthorn Dry Berry", variant: "100 g",  active: true,  velocity:  50 },
+    { code: "NSSBDB250", name: "Sea Buckthorn Dry Berry", variant: "250 g",  active: true,  velocity:  40 },
+    { code: "NSSBDB500", name: "Sea Buckthorn Dry Berry", variant: "500 g",  active: true,  velocity:  30 },
+    { code: "NSSBJ300",  name: "Sea Buckthorn Juice",     variant: "300 ml", active: true,  velocity:  10 },
+    { code: "NSSBJ500",  name: "Sea Buckthorn Juice",     variant: "500 ml", active: true,  velocity:  25 },
+    { code: "NSSBBO15",  name: "Sea Buckthorn Berry Oil", variant: "15 ml",  active: true,  velocity:   3 },
+    { code: "NSSBBO30",  name: "Sea Buckthorn Berry Oil", variant: "30 ml",  active: true,  velocity:   2 },
+    { code: "NSJO100",   name: "Jatamansi Hair Oil",      variant: "100 ml", active: true,  velocity:  25 },
+    { code: "NSACDT30",  name: "Acacia Catechu Tea",      variant: "30 bags",active: true,  velocity:   3 },
   ];
 
   // ── Channels ──────────────────────────────────────────
@@ -117,22 +117,48 @@ const NSData = (function () {
   //   packaging   = bottles/jars/labels/cartons ready to fill
   //   perPacketRaw= raw units required to produce one FG pack (for future formula)
   // "Producible FG" today = min(semiFg, packaging) — what we could pack & ship right now.
+  // Input-item codes per FG, generated using the same naming style:
+  //   Semi-FG : NS<product>F<size>   → "filled, ready to pack"
+  //   Raw     : NS<product>R<size?>  → "raw / bulk ingredient"
+  //   Pkg     : NSPKG<purpose><size> → "empty containers / labels"
+  // For Moringa Powder + SB Powder + SB Dry Berry, there's no real Semi-FG
+  // stage in the actual production flow (raw → pack directly), so semiFg is
+  // tracked as the same raw bin under a Semi-FG label for now. Refine when
+  // BOM is finalised.
+  const inputCodes = {
+    NSMP100:   { semiFg: "NSMPF100",  rawMaterial: "NSMLPR",  packaging: "NSPKGMP100"  },
+    NSMP250:   { semiFg: "NSMPF250",  rawMaterial: "NSMLPR",  packaging: "NSPKGMP250"  },
+    NSSB100:   { semiFg: "NSSBPF100", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP100" },
+    NSSB250:   { semiFg: "NSSBPF250", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP250" },
+    NSSB500:   { semiFg: "NSSBPF500", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP500" },
+    NSSBDB100: { semiFg: "NSSBDBF100",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP100" },
+    NSSBDB250: { semiFg: "NSSBDBF250",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP250" },
+    NSSBDB500: { semiFg: "NSSBDBF500",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP500" },
+    NSSBJ300:  { semiFg: "NSSBJF300", rawMaterial: "NSSBJPLP",packaging: "NSPKGJB300"  },
+    NSSBJ500:  { semiFg: "NSSBJF500", rawMaterial: "NSSBJPLP",packaging: "NSPKGJB500"  },
+    NSSBBO15:  { semiFg: "NSSBBOF15", rawMaterial: "NSSBOR",  packaging: "NSPKGBOB15"  },
+    NSSBBO30:  { semiFg: "NSSBBOF30", rawMaterial: "NSSBOR",  packaging: "NSPKGBOB30"  },
+    NSJO100:   { semiFg: "NSJOF100",  rawMaterial: "NSJOR",   packaging: "NSPKGJOB100" },
+    NSACDT30:  { semiFg: "NSACDSF30", rawMaterial: "NSACR",   packaging: "NSPKGACTC30" },
+  };
+
   const inventory = skuSales.map((s, i) => {
-    const leadTime = [21, 21, 28, 18, 18, 25, 30, 35, 21, 28, 18, 25, 30][i] || 21;
+    const leadTime = [25, 25, 22, 22, 22, 28, 28, 28, 20, 20, 35, 35, 30, 30][i] || 25;
     const totalStock = {
-      warehouse: [420, 380, 240, 1450, 1860, 980, 620, 310, 580, 920, 410, 1240, 380][i] || 500,
-      amazonFBA: [610, 510, 220, 1480, 220, 920, 540, 380, 410, 380, 280, 880, 290][i] || 300,
-      flipkart:  [180, 140, 90,  420,  340,  310, 230, 140, 180, 220, 110, 380, 140][i] || 120,
-      blinkit:   [120, 90,  60,  280,  240,  210, 160, 80,  120, 140, 80,  240, 90][i]  || 80,
-      transit:   [0,   200, 0,   0,    0,    400, 0,   200, 0,   0,   0,   500, 0][i]   || 0,
+      warehouse: [200, 169, 140, 78, 91, 334, 1043, 642, 224, 432, 45, 0, 613, 55][i] || 100,
+      amazonFBA: [120, 95, 80, 60, 50, 220, 480, 380, 110, 200, 28, 0, 350, 35][i] || 60,
+      flipkart:  [55, 40, 35, 25, 20, 95, 210, 160, 45, 80, 12, 0, 140, 12][i] || 25,
+      blinkit:   [40, 28, 25, 18, 14, 70, 150, 110, 32, 55, 8, 0, 95, 8][i] || 18,
+      transit:   [0, 0, 0, 100, 0, 0, 0, 200, 0, 150, 0, 0, 0, 0][i] || 0,
     };
     const fg = totalStock.warehouse;
     const warehouseBreakdown = {
       fg,
-      semiFg:      [380, 290, 190, 1200, 1620, 820, 510, 240, 460, 720, 360, 1020, 320][i] || Math.round(fg * 0.85),
-      rawMaterial: [620, 540, 380, 2100, 2400, 1380, 880, 520, 760, 1140, 520, 1620, 480][i] || Math.round(fg * 1.4),
-      packaging:   [510, 410, 260, 1380, 1580, 940, 600, 280, 540, 800, 420, 1180, 360][i] || Math.round(fg * 1.1),
-      perPacketRaw:[1.05, 1.05, 2.10, 0.85, 0.85, 0.90, 0.95, 1.00, 1.10, 1.00, 0.95, 0.80, 1.05][i] || 1.0,
+      semiFg:      [180, 150, 120, 70, 80, 290, 880, 540, 200, 380, 38, 0, 480, 40][i] || Math.round(fg * 0.85),
+      rawMaterial: [320, 280, 220, 140, 160, 480, 1380, 820, 360, 620, 90, 30, 720, 95][i] || Math.round(fg * 1.4),
+      packaging:   [220, 195, 145, 100, 95, 360, 950, 620, 240, 410, 60, 25, 520, 65][i] || Math.round(fg * 1.1),
+      perPacketRaw:[0.10, 0.25, 0.10, 0.25, 0.50, 0.10, 0.25, 0.50, 0.30, 0.50, 0.015, 0.03, 0.10, 0.05][i] || 0.1,
+      codes:       inputCodes[s.code] || { semiFg: null, rawMaterial: null, packaging: null },
     };
     warehouseBreakdown.producibleFG = Math.min(warehouseBreakdown.semiFg, warehouseBreakdown.packaging);
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
@@ -152,15 +178,15 @@ const NSData = (function () {
 
   // ── Batches ───────────────────────────────────────────
   const batches = [
-    { id: "B-2503-WHT01", sku: "NS-WHT-CHO-1K", mfg: "Mar 2025", exp: "Mar 2027", units: 980,  loc: "Warehouse", risk: "green" },
-    { id: "B-2502-MUL-W", sku: "NS-MUL-WMN-60", mfg: "Feb 2025", exp: "Aug 2026", units: 1240, loc: "Amazon FBA", risk: "amber" },
-    { id: "B-2412-OMG3",  sku: "NS-OMG-3-90",   mfg: "Dec 2024", exp: "Jul 2026", units: 1840, loc: "Warehouse", risk: "red" },
-    { id: "B-2501-BIO",   sku: "NS-BIO-HAIR-60",mfg: "Jan 2025", exp: "Jan 2027", units: 720,  loc: "Warehouse", risk: "green" },
-    { id: "B-2410-COL",   sku: "NS-COL-PEP-250",mfg: "Oct 2024", exp: "Oct 2026", units: 310,  loc: "Mixed",     risk: "amber" },
-    { id: "B-2504-ASH",   sku: "NS-ASH-500-60", mfg: "Apr 2025", exp: "Apr 2027", units: 580,  loc: "Warehouse", risk: "green" },
-    { id: "B-2411-VEG-P", sku: "NS-PRO-VEG-1K", mfg: "Nov 2024", exp: "May 2026", units: 920,  loc: "Warehouse", risk: "red" },
-    { id: "B-2502-CRT",   sku: "NS-CRT-MON-250",mfg: "Feb 2025", exp: "Feb 2027", units: 410,  loc: "Warehouse", risk: "green" },
-    { id: "B-2503-VITD",  sku: "NS-VITD-2K-60", mfg: "Mar 2025", exp: "Mar 2027", units: 1240, loc: "Amazon FBA", risk: "green" },
+    { id: "B-2503-MOR-1", sku: "NSMP250",   mfg: "Mar 2026", exp: "Mar 2028", units: 100,  loc: "Warehouse", risk: "green" },
+    { id: "B-2502-SBP-1", sku: "NSSB250",   mfg: "Feb 2026", exp: "Aug 2027", units: 60,   loc: "Warehouse", risk: "amber" },
+    { id: "B-2412-SBDB",  sku: "NSSBDB500", mfg: "Dec 2025", exp: "Jul 2026", units: 400,  loc: "Warehouse", risk: "red" },
+    { id: "B-2501-JAT",   sku: "NSJO100",   mfg: "Jan 2026", exp: "Jan 2028", units: 500,  loc: "Warehouse", risk: "green" },
+    { id: "B-2410-AC",    sku: "NSACDT30",  mfg: "Oct 2025", exp: "Oct 2027", units: 50,   loc: "Warehouse", risk: "amber" },
+    { id: "B-2504-SBJ",   sku: "NSSBJ500",  mfg: "Apr 2026", exp: "Apr 2027", units: 300,  loc: "Warehouse", risk: "green" },
+    { id: "B-2411-SBO",   sku: "NSSBBO15",  mfg: "Nov 2025", exp: "Nov 2027", units: 40,   loc: "Warehouse", risk: "green" },
+    { id: "B-2502-MP",    sku: "NSMP100",   mfg: "Feb 2026", exp: "Feb 2028", units: 180,  loc: "Warehouse", risk: "green" },
+    { id: "B-2503-SBDB-1",sku: "NSSBDB250", mfg: "Mar 2026", exp: "Sep 2027", units: 800,  loc: "Warehouse", risk: "green" },
   ];
 
   // ── Suppliers ─────────────────────────────────────────
