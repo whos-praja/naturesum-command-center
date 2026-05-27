@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { UserButton } from "@clerk/clerk-react";
 import { Icon } from "./Shared.jsx";
+
+// Auth-aware flag — derived from the env var at import time. When false,
+// main.jsx doesn't mount a ClerkProvider, so we must NOT render any Clerk
+// components or call any Clerk hooks. We gate the UserButton on this.
+const AUTH_ENABLED = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
 
 // Sidebar and Topbar for Naturesum Command Center
 
@@ -155,6 +161,22 @@ const Topbar = ({ active, role, onRole, navLabel, previewMode, onTogglePreview, 
           </div>
         )}
       </div>
+
+      {AUTH_ENABLED && (
+        <>
+          <div className="topbar-divider"/>
+          <div className="topbar-user">
+            <UserButton
+              afterSignOutUrl="/sign-in"
+              appearance={{
+                elements: {
+                  avatarBox: { width: 28, height: 28 },
+                },
+              }}
+            />
+          </div>
+        </>
+      )}
     </header>
   );
 };

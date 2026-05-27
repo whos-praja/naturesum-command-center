@@ -1229,3 +1229,64 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   border-radius: 3px;
 }
 .nav-item.active .live-pill { background: rgba(93, 170, 118, 0.28); color: #C8E6A0; }
+
+/* ---------- SIGN-IN SHELL ---------- */
+.signin-shell {
+  min-height: 100vh;
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 18px;
+}
+.signin-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.signin-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #5C8E6E 0%, #2F5E47 60%, #1F4030 100%);
+  display: grid;
+  place-items: center;
+  color: #F5F2EA;
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+.signin-name {
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.signin-sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.signin-footnote {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  text-align: center;
+  margin-top: 8px;
+  max-width: 360px;
+}
+
+/* ---------- TOPBAR USER (Clerk) ---------- */
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.topbar-user {
+  display: flex;
+  align-items: center;
+}
