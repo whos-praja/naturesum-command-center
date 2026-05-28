@@ -76,6 +76,14 @@ const App = () => {
 
   const screenLabel = `${String(NAV.findIndex(n => n.id === active) + 1).padStart(2, "0")} ${navLabel}`;
 
+  // Browser tab title — defaults to "Naturesum Command Center", appends
+  // the active section name on every other page.
+  useEffect(() => {
+    document.title = active === "home"
+      ? "Naturesum Command Center"
+      : `${navLabel} · Naturesum Command Center`;
+  }, [active, navLabel]);
+
   return (
     <div className="app" data-screen-label={screenLabel}>
       <Sidebar active={active} onNav={goTo} role={role} alertsByRole={alertsByRole}/>
