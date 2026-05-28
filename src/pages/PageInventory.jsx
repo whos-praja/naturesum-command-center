@@ -6,7 +6,7 @@ import NSData from "../data.js";
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
 
-const VALID_TABS = ["unified", "materials", "runway", "forecast", "batches", "returns"];
+const VALID_TABS = ["unified", "materials", "runway", "simulator", "forecast", "batches", "returns"];
 
 // Color palette used by every warehouse-breakdown surface (mini-bar in the
 // Unified Stock table, the dedicated Materials tab, and the per-SKU popover).
@@ -53,6 +53,7 @@ const PageInventory = ({ subsection }) => {
         <button className={tab === "unified" ? "active" : ""} onClick={() => setTab("unified")}>Unified stock</button>
         <button className={tab === "materials" ? "active" : ""} onClick={() => setTab("materials")}>Materials breakdown</button>
         <button className={tab === "runway" ? "active" : ""} onClick={() => setTab("runway")}>Runway calculator</button>
+        <button className={tab === "simulator" ? "active" : ""} onClick={() => setTab("simulator")}>Simulator</button>
         <button className={tab === "forecast" ? "active" : ""} onClick={() => setTab("forecast")}>Demand forecast</button>
         <button className={tab === "batches" ? "active" : ""} onClick={() => setTab("batches")}>Batches & expiry</button>
         <button className={tab === "returns" ? "active" : ""} onClick={() => setTab("returns")}>Returns restocking</button>
@@ -61,6 +62,7 @@ const PageInventory = ({ subsection }) => {
       {tab === "unified" && <UnifiedStockTab inventory={D.inventory}/>}
       {tab === "materials" && <MaterialsTab inventory={D.inventory}/>}
       {tab === "runway" && <RunwayTab inventory={D.inventory}/>}
+      {tab === "simulator" && <SimulatorTab inventory={D.inventory}/>}
       {tab === "forecast" && (
         <ForecastTab inventory={D.inventory} days={forecastDays} setDays={setForecastDays}/>
       )}
@@ -522,6 +524,303 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   );
 };
 
+// Custom item picker (replaces native <select> which can't be styled when
+// open). Search-as-you-type, click-outside to close, Esc to dismiss.
+const ItemPicker = ({ items, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+
+  const selected = items.find(i => i.code === value);
+  const q = query.trim().toLowerCase();
+  const filtered = !q ? items : items.filter(i =>
+    i.code.toLowerCase().includes(q) ||
+    i.name.toLowerCase().includes(q) ||
+    (i.variant || "").toLowerCase().includes(q)
+  );
+
+  return (
+    <div className="ipick" ref={ref}>
+      <button
+        type="button"
+        className={"ipick-trigger" + (open ? " is-open" : "")}
+        onClick={() => setOpen(o => !o)}
+      >
+        <div className="ipick-trigger-text">
+          <span className="ipick-trigger-name">{selected?.name || "Pick item"}</span>
+          {selected && <span className="ipick-trigger-meta">{selected.variant} · {selected.code}</span>}
+        </div>
+        <Icon name="chev" size={14}/>
+      </button>
+      {open && (
+        <div className="ipick-menu">
+          <div className="ipick-search">
+            <Icon name="search" size={13}/>
+            <input
+              type="text"
+              placeholder="Search by name or code…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              autoFocus
+            />
+          </div>
+          <div className="ipick-list">
+            {filtered.length === 0 ? (
+              <div className="ipick-empty">No items match "{query}"</div>
+            ) : filtered.map(i => (
+              <button
+                key={i.code}
+                className={"ipick-item" + (i.code === value ? " is-active" : "")}
+                onClick={() => { onChange(i.code); setOpen(false); setQuery(""); }}
+              >
+                <div className="ipick-item-name">{i.name}</div>
+                <div className="ipick-item-meta sku">{i.variant} · {i.code}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── Simulator tab — full sandbox. Pick an item, tweak any value, see
+// every downstream number (Producible FG, Max FG, Runway, Reorder by,
+// Status) recompute instantly. Use "Reset" to snap back to baseline.
+const SimulatorTab = ({ inventory }) => {
+  const D = NSData;
+  const [selectedCode, setSelectedCode] = useState(inventory[0]?.code);
+  const baseline = inventory.find(i => i.code === selectedCode) || inventory[0];
+
+  // Local sandbox state — what the user is "playing with". Initialised
+  // from the selected item's baseline; resets when the item changes.
+  const [sim, setSim] = useState(() => baselineState(baseline));
+  useEffect(() => { setSim(baselineState(baseline)); }, [selectedCode]);
+
+  function baselineState(s) {
+    const wb = s?.warehouseBreakdown || {};
+    return {
+      fg:         s?.warehouseBreakdown?.fg ?? s?.stock?.warehouse ?? 0,
+      semiFg:     wb.semiFg ?? 0,
+      rawMaterial: wb.rawMaterial ?? 0,
+      packaging:  wb.packaging ?? 0,
+      perPacketRaw: wb.perPacketRaw ?? 1,
+      velocity:   s?.velocity ?? 0,
+      leadTime:   s?.leadTime ?? 21,
+      growth:     s?.growth ?? 0,
+    };
+  }
+
+  const set = (k) => (e) => {
+    const v = parseFloat(e.target.value);
+    setSim(prev => ({ ...prev, [k]: Number.isFinite(v) ? v : 0 }));
+  };
+  const reset = () => setSim(baselineState(baseline));
+
+  // Live computations
+  const producibleFg = Math.min(sim.semiFg, sim.packaging);
+  const maxFg = sim.fg + producibleFg;
+  const effectiveVel = sim.velocity * (1 + sim.growth / 100);
+  const runway = effectiveVel > 0 ? Math.round(maxFg / effectiveVel) : 0;
+  const status = runway <= sim.leadTime ? "red" : runway < 30 ? "amber" : "green";
+  const buffer = runway - sim.leadTime;
+  const overdue = buffer < 0;
+  const reorderByDays = buffer;
+
+  // What changed from baseline (highlight modified inputs)
+  const isDelta = (k) => sim[k] !== baselineState(baseline)[k];
+
+  // For input min/max so sliders feel sane
+  const fgMax = Math.max(2000, Math.round((baseline?.warehouseBreakdown?.fg || 100) * 5));
+
+  return (
+    <div className="sim-shell">
+      <Card style={{ overflow: "visible", position: "relative", zIndex: 50 }}>
+        <div className="sim-head">
+          <div>
+            <div className="sim-head-label">Sandbox</div>
+            <div className="sim-head-sub">Pick an item. Change any value. Watch the math.</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ItemPicker
+              items={inventory}
+              value={selectedCode}
+              onChange={setSelectedCode}
+            />
+            <button className="btn sm" onClick={reset} title="Snap all inputs back to current values">
+              Reset
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      <div className="sim-grid">
+        {/* INPUTS panel */}
+        <Card title="Inputs" sub="Edit any cell — outputs recompute instantly">
+          <div className="sim-inputs">
+            {[
+              { k: "fg",          label: "Warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
+              { k: "semiFg",      label: "Semi-FG",       unit: "units", min: 0, max: fgMax,  step: 1 },
+              { k: "rawMaterial", label: "Raw Material",  unit: "units", min: 0, max: fgMax * 2, step: 1 },
+              { k: "packaging",   label: "Packaging",     unit: "units", min: 0, max: fgMax * 1.5, step: 1 },
+              { k: "velocity",    label: "Daily velocity", unit: "/day", min: 0, max: 500,    step: 1 },
+              { k: "leadTime",    label: "Supplier lead time", unit: "days", min: 1, max: 120, step: 1 },
+              { k: "growth",      label: "Growth %",      unit: "%",     min: -100, max: 500, step: 1 },
+              { k: "perPacketRaw",label: "Raw per pack",  unit: "ratio", min: 0.01, max: 10,   step: 0.05 },
+            ].map(({ k, label, unit, min, max, step }) => (
+              <div key={k} className={"sim-input-row" + (isDelta(k) ? " is-delta" : "")}>
+                <div className="sim-input-label">
+                  <span>{label}</span>
+                  <span className="muted">{unit}</span>
+                </div>
+                <input
+                  type="range"
+                  className="sim-range"
+                  min={min} max={max} step={step}
+                  value={sim[k]}
+                  onChange={set(k)}
+                />
+                <input
+                  type="number"
+                  className="sim-number"
+                  min={min} max={max} step={step}
+                  value={sim[k]}
+                  onChange={set(k)}
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* OUTPUTS panel */}
+        <Card title="Live outputs" sub={status === "red" ? "Action needed — runway below lead time" : status === "amber" ? "Watch — under 30 days" : "Healthy — above lead time + 30d buffer"}>
+          <div className={"sim-out sim-out-" + status}>
+            <div className="sim-out-hero">
+              <div className="sim-out-hero-label">RUNWAY</div>
+              <div className="sim-out-hero-num mono">{runway}d</div>
+              <div className="sim-out-hero-sub">
+                at {Math.round(effectiveVel)} units/day
+                {sim.growth !== 0 && <span> ({sim.growth > 0 ? "+" : ""}{sim.growth}% growth)</span>}
+              </div>
+            </div>
+
+            <div className="sim-out-stats">
+              <div className="sim-out-stat">
+                <div className="sim-out-stat-label">Producible FG</div>
+                <div className="sim-out-stat-num mono">{D.fmtN(producibleFg)}</div>
+                <div className="sim-out-stat-sub">min(Semi-FG, Packaging)</div>
+              </div>
+              <div className="sim-out-stat">
+                <div className="sim-out-stat-label">Max FG today</div>
+                <div className="sim-out-stat-num mono" style={{ color: "var(--brand-deep)" }}>{D.fmtN(maxFg)}</div>
+                <div className="sim-out-stat-sub">FG + Producible</div>
+              </div>
+              <div className="sim-out-stat">
+                <div className="sim-out-stat-label">Reorder by</div>
+                <div className={"sim-out-stat-num mono" + (overdue ? " is-overdue" : "")}>
+                  {overdue ? `Overdue by ${Math.abs(reorderByDays)}d` :
+                    reorderByDays === 0 ? "Today" :
+                    reorderByDays === 1 ? "Tomorrow" :
+                    `In ${reorderByDays}d`}
+                </div>
+                <div className="sim-out-stat-sub">runway − lead time</div>
+              </div>
+              <div className="sim-out-stat">
+                <div className="sim-out-stat-label">Bottleneck</div>
+                <div className="sim-out-stat-num mono">{sim.semiFg <= sim.packaging ? "Semi-FG" : "Packaging"}</div>
+                <div className="sim-out-stat-sub">the input that caps producible FG</div>
+              </div>
+            </div>
+
+            <div className="sim-out-timeline">
+              <RunwayTimeline runway={runway} leadTime={sim.leadTime} status={status}/>
+            </div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+// Runway × Lead time infographic — single horizontal bar showing:
+//   • Filled colored segment (0 → runway days) = "we have stock until here"
+//   • Vertical marker at leadTime position = "must reorder by here"
+//   • If marker sits past the bar end → reorder overdue (gap visible)
+//   • If marker sits inside the bar → buffer days visible
+// Scale per-row to max(runway, leadTime) × 1.2 so both fit comfortably.
+const RunwayTimeline = ({ runway, leadTime, status }) => {
+  const scale = Math.max(runway, leadTime, 14) * 1.25;
+  const runwayPct = Math.max(2, (runway / scale) * 100);
+  const leadPct = (leadTime / scale) * 100;
+  const buffer = runway - leadTime;
+  const overdue = buffer < 0;
+  return (
+    <div
+      className={"rw-timeline rw-timeline-" + status}
+      title={`${runway}d runway · ${leadTime}d lead time · ${overdue ? "overdue by" : "buffer"} ${Math.abs(buffer)}d`}
+    >
+      <div className="rw-timeline-track">
+        <div className="rw-timeline-fill" style={{ width: runwayPct + "%" }}/>
+        <div className="rw-timeline-marker" style={{ left: leadPct + "%" }}/>
+      </div>
+      <div className="rw-timeline-labels">
+        <span className="rw-timeline-runway-label">
+          <span className="mono">{runway}d</span> runway
+        </span>
+        <span className="rw-timeline-lead-label" style={{ left: leadPct + "%" }}>
+          <span className="mono">{leadTime}d</span> lead
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// Per-row growth override input — uncontrolled, commits on Enter or blur.
+// Keeps the typed value local until the user confirms; only then does the
+// parent's perRowGrowth state update and the runway recalculate.
+const CustomGrowthInput = ({ code, initial, isOverride, onCommit }) => {
+  const [val, setVal] = useState(String(initial));
+  // When the upstream "actual growth" changes (e.g. mode toggle), reset
+  // the input to match unless the user is mid-edit and has a different value.
+  useEffect(() => { setVal(String(initial)); }, [code, initial]);
+
+  const commit = () => {
+    const n = parseFloat(val);
+    if (Number.isFinite(n)) onCommit(n);
+  };
+  return (
+    <div className={"rw-growth-input-wrap" + (isOverride ? " is-override" : "")}>
+      <input
+        className="rw-growth-input mono"
+        type="number"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); e.target.blur(); }
+          if (e.key === "Escape") { e.preventDefault(); setVal(String(initial)); e.target.blur(); }
+        }}
+        onBlur={commit}
+        step="any"
+        min={-100}
+        max={1000}
+        title="Type a growth % (negative values allowed for projected slowdown) and press Enter"
+      />
+      <span className="rw-growth-pct">%</span>
+    </div>
+  );
+};
+
 const RunwayTab = ({ inventory: rawInventory }) => {
   const D = NSData;
 
@@ -682,8 +981,8 @@ const RunwayTab = ({ inventory: rawInventory }) => {
             <col className="rw-col-max"/>
             <col className="rw-col-num"/>
             <col className="rw-col-growth"/>
-            <col className="rw-col-runway"/>
-            <col className="rw-col-num"/>
+            {mode === "custom" && <col className="rw-col-growth"/>}
+            <col className="rw-col-timeline"/>
             <col className="rw-col-reorder"/>
           </colgroup>
           <thead>
@@ -693,23 +992,21 @@ const RunwayTab = ({ inventory: rawInventory }) => {
               <th className="num">Producible</th>
               <th className="num rw-h-max">Max FG</th>
               <th className="num">Velocity</th>
-              <th className="num rw-h-growth">Growth</th>
-              <th className="num">Runway</th>
-              <th className="num">Lead</th>
+              <th className="num">Growth</th>
+              {mode === "custom" && <th className="num rw-h-custom">Custom %</th>}
+              <th className="rw-h-timeline">Runway × Lead time</th>
               <th className="num rw-h-action">Action needed</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 ? (
-              <tr><td colSpan={9}><div className="empty">No Items match this filter.</div></td></tr>
+              <tr><td colSpan={mode === "custom" ? 9 : 8}><div className="empty">No Items match this filter.</div></td></tr>
             ) : visible.map(s => {
               const rb = reorderByDate(s);
               const reorderText = fmtReorderDate(rb);
               const overdue = rb.daysFromNow < 0;
-              const growthVal = mode === "custom"
-                ? (perRowGrowth[s.code] ?? s.actualGrowth)
-                : s.actualGrowth;
-              const growthIsOverride = mode === "custom" && perRowGrowth[s.code] !== undefined && perRowGrowth[s.code] !== s.actualGrowth;
+              const customVal = perRowGrowth[s.code] ?? s.actualGrowth;
+              const isOverride = mode === "custom" && perRowGrowth[s.code] !== undefined && perRowGrowth[s.code] !== s.actualGrowth;
               return (
                 <tr
                   key={s.code}
@@ -732,41 +1029,37 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                   <td className="num mat-cell">
                     <div className="mat-cell-num">{s.adjVelocity}</div>
                   </td>
-                  <td className="num mat-cell rw-cell-growth" onClick={e => e.stopPropagation()}>
-                    {mode === "custom" ? (
-                      <div className={"rw-growth-input-wrap" + (growthIsOverride ? " is-override" : "")}>
-                        <input
-                          className="rw-growth-input mono"
-                          type="number"
-                          value={growthVal}
-                          onChange={e => setGrowthFor(s.code, parseFloat(e.target.value) || 0)}
-                          step="1"
-                        />
-                        <span className="rw-growth-pct">%</span>
-                      </div>
-                    ) : (
-                      <div className={"rw-growth-display mono " + (s.actualGrowth > 0 ? "up" : s.actualGrowth < 0 ? "down" : "flat")}>
-                        {s.actualGrowth > 0 ? "+" : ""}{s.actualGrowth.toFixed(1)}%
-                      </div>
-                    )}
+                  <td className="num mat-cell rw-cell-growth">
+                    <div className={"rw-growth-display mono " + (s.actualGrowth > 0 ? "up" : s.actualGrowth < 0 ? "down" : "flat")}>
+                      {s.actualGrowth > 0 ? "+" : ""}{s.actualGrowth.toFixed(1)}%
+                    </div>
                   </td>
-                  <td className="num mat-cell">
-                    <span className={"runway-pill runway-pill-" + s.adjStatus}>
-                      {s.adjRunway}d
-                    </span>
+                  {mode === "custom" && (
+                    <td className="num mat-cell rw-cell-custom" onClick={e => e.stopPropagation()}>
+                      <CustomGrowthInput
+                        code={s.code}
+                        initial={customVal}
+                        isOverride={isOverride}
+                        onCommit={(val) => setGrowthFor(s.code, val)}
+                      />
+                    </td>
+                  )}
+                  <td className="mat-cell rw-cell-timeline">
+                    <RunwayTimeline
+                      runway={s.adjRunway}
+                      leadTime={s.leadTime}
+                      status={s.adjStatus}
+                    />
                   </td>
-                  <td className="num mat-cell">
-                    <div className="mat-cell-num">{s.leadTime}d</div>
-                  </td>
-                  <td className="mat-cell rw-cell-action" onClick={e => e.stopPropagation()}>
+                  <td className="mat-cell rw-cell-action">
                     <div className="rw-action-stack">
                       <div className={"runway-reorder" + (overdue ? " is-overdue" : "")}>
                         {reorderText}
                       </div>
                       {s.adjStatus === "red"
-                        ? <button className="btn sm primary">Reorder now</button>
+                        ? <span className="rw-action-flag rw-action-flag-crit">Reorder now</span>
                         : s.adjStatus === "amber"
-                          ? <button className="btn sm">Schedule PO</button>
+                          ? <span className="rw-action-flag rw-action-flag-warn">Schedule PO</span>
                           : <span className="muted" style={{ fontSize: 11 }}>—</span>}
                     </div>
                   </td>
