@@ -485,10 +485,20 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
 
         <div className="modal-body">
           <div className="wb-best">
-            <div className="wb-best-label">Producible FG · today</div>
-            <div className="wb-best-num mono">{D.fmtN(wb.producibleFG)}</div>
+            <div className="wb-best-label">Max FG · today</div>
+            <div className="wb-best-num mono">{D.fmtN(wb.fg + wb.producibleFG)}</div>
             <div className="wb-best-formula muted">
-              <span className="mono">min(Semi-FG, Packaging)</span> · bottleneck: <strong>{bottleneck}</strong>
+              <span className="mono">FG + Producible</span> · bottleneck: <strong>{bottleneck}</strong>
+            </div>
+            <div className="wb-best-substats">
+              <div className="wb-best-sub">
+                <span className="wb-best-sub-label">Current FG</span>
+                <span className="wb-best-sub-num mono">{D.fmtN(wb.fg)}</span>
+              </div>
+              <div className="wb-best-sub">
+                <span className="wb-best-sub-label">Producible FG</span>
+                <span className="wb-best-sub-num mono">{D.fmtN(wb.producibleFG)}</span>
+              </div>
             </div>
           </div>
 
@@ -667,7 +677,7 @@ const SimulatorTab = ({ inventory }) => {
 
       <div className="sim-grid">
         {/* INPUTS panel */}
-        <Card title="Inputs" sub="Edit any cell — outputs recompute instantly">
+        <Card title="Inputs" sub="Edit any cell — outputs recompute instantly. Baseline (sheet value) shown on the right.">
           <div className="sim-inputs">
             {[
               { k: "fg",          label: "Warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
@@ -678,28 +688,58 @@ const SimulatorTab = ({ inventory }) => {
               { k: "leadTime",    label: "Supplier lead time", unit: "days", min: 1, max: 120, step: 1 },
               { k: "growth",      label: "Growth %",      unit: "%",     min: -100, max: 500, step: 1 },
               { k: "perPacketRaw",label: "Raw per pack",  unit: "ratio", min: 0.01, max: 10,   step: 0.05 },
-            ].map(({ k, label, unit, min, max, step }) => (
-              <div key={k} className={"sim-input-row" + (isDelta(k) ? " is-delta" : "")}>
-                <div className="sim-input-label">
-                  <span>{label}</span>
-                  <span className="muted">{unit}</span>
+            ].map(({ k, label, unit, min, max, step }) => {
+              const base = baselineState(baseline)[k];
+              const delta = isDelta(k);
+              const absDelta = sim[k] - base;
+              const pctDelta = base !== 0 ? (absDelta / Math.abs(base)) * 100 : 0;
+              const sign = absDelta > 0 ? "+" : "";
+              // Slider tick at baseline position (visual marker on the track)
+              const tickPct = ((base - min) / (max - min)) * 100;
+              return (
+                <div key={k} className={"sim-input-row" + (delta ? " is-delta" : "")}>
+                  <div className="sim-input-label">
+                    <span>{label}</span>
+                    <span className="muted">{unit}</span>
+                  </div>
+                  <div className="sim-range-wrap">
+                    <input
+                      type="range"
+                      className="sim-range"
+                      min={min} max={max} step={step}
+                      value={sim[k]}
+                      onChange={set(k)}
+                    />
+                    <span
+                      className="sim-range-tick"
+                      style={{ left: `clamp(0%, ${tickPct}%, 100%)` }}
+                      title={`Baseline: ${base}`}
+                    />
+                  </div>
+                  <input
+                    type="number"
+                    className="sim-number"
+                    min={min} max={max} step={step}
+                    value={sim[k]}
+                    onChange={set(k)}
+                  />
+                  <div className="sim-input-base" title={`Baseline value: ${base}`}>
+                    {delta ? (
+                      <>
+                        <span className={"sim-delta-pct " + (absDelta > 0 ? "up" : "down")}>
+                          {sign}{Math.abs(pctDelta) >= 100
+                            ? Math.round(pctDelta) + "%"
+                            : pctDelta.toFixed(0) + "%"}
+                        </span>
+                        <span className="sim-delta-from mono">vs {base}</span>
+                      </>
+                    ) : (
+                      <span className="sim-input-base-val mono">{Number.isFinite(base) ? base : "—"}</span>
+                    )}
+                  </div>
                 </div>
-                <input
-                  type="range"
-                  className="sim-range"
-                  min={min} max={max} step={step}
-                  value={sim[k]}
-                  onChange={set(k)}
-                />
-                <input
-                  type="number"
-                  className="sim-number"
-                  min={min} max={max} step={step}
-                  value={sim[k]}
-                  onChange={set(k)}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Card>
 
@@ -775,10 +815,16 @@ const RunwayTimeline = ({ runway, leadTime, status }) => {
         <div className="rw-timeline-marker" style={{ left: leadPct + "%" }}/>
       </div>
       <div className="rw-timeline-labels">
-        <span className="rw-timeline-runway-label">
+        <span
+          className="rw-timeline-runway-label"
+          style={{ left: `clamp(0%, ${runwayPct}%, 100%)` }}
+        >
           <span className="mono">{runway}d</span> runway
         </span>
-        <span className="rw-timeline-lead-label" style={{ left: leadPct + "%" }}>
+        <span
+          className="rw-timeline-lead-label"
+          style={{ left: `clamp(0%, ${leadPct}%, 100%)` }}
+        >
           <span className="mono">{leadTime}d</span> lead
         </span>
       </div>
@@ -832,19 +878,19 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   const [mode, setMode] = useState("current");
   const [perRowGrowth, setPerRowGrowth] = useState({}); // { [code]: number }
 
-  // Compute the runway projection for every item using the current mode
-  // and per-row overrides.
+  // Runway = MaxFG ÷ projected velocity, where projected velocity =
+  // base velocity × (1 + MoM growth %). MoM growth represents the
+  // observed month-over-month trend; applying it projects next month's
+  // expected sales rate.
+  //   • Current mode  → uses each item's actual MoM growth
+  //   • Custom mode   → defaults to actual MoM; user can override per row
+  // Toggling without overriding = identical numbers (no surprise jumps).
   const inventory = rawInventory.map(s => {
     const actualGrowth = s.growth ?? 0;
-    // In current mode, growth is just informational — velocity is base.
-    // In custom mode, use the user's override (default = actual growth).
-    const effectiveGrowth = mode === "current"
-      ? actualGrowth
-      : (perRowGrowth[s.code] ?? actualGrowth);
+    const customGrowth = perRowGrowth[s.code] ?? actualGrowth;
+    const effectiveGrowth = mode === "custom" ? customGrowth : actualGrowth;
     const baseVel = s.velocity;
-    const vel = mode === "current"
-      ? baseVel
-      : baseVel * (1 + effectiveGrowth / 100);
+    const vel = baseVel * (1 + effectiveGrowth / 100);
     const whFg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = whFg + producibleFg;
@@ -968,8 +1014,8 @@ const RunwayTab = ({ inventory: rawInventory }) => {
         title="Runway by Item"
         sub={
           mode === "current"
-            ? "(Warehouse FG + Producible FG) ÷ rolling 30-day velocity. Growth column shows actual recent trend per item."
-            : "(Warehouse FG + Producible FG) ÷ adjusted velocity. Edit each item's Growth % to stress-test runway independently."
+            ? "Max FG ÷ (velocity × (1 + MoM growth %)). Growth column drives the projection."
+            : "Max FG ÷ (velocity × (1 + Custom %)). Override any item's growth to stress-test runway."
         }
         padded={false}
       >
@@ -1079,9 +1125,63 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
 const ForecastTab = ({ inventory, days, setDays }) => {
   const D = NSData;
+
+  // Per-item forecast math (same logic used in table below — pre-computed
+  // here so the summary cards can aggregate across the portfolio).
+  const trendForIdx = (idx) =>
+    [1.18, 0.94, 1.22, 1.06, 1.32, 0.98, 1.45, 0.82, 1.12, 0.66, 1.08, 1.18, 1.04, 0.92][idx] || 1;
+  const rows = inventory.map((s, i) => {
+    const trend = trendForIdx(i);
+    const forecast = Math.round(s.velocity * days * trend);
+    const required = Math.round(s.velocity * (days + 30) * trend);
+    const reorder = Math.max(0, required - s.totalStock);
+    return { ...s, trend, forecast, required, reorder, trendPct: (trend - 1) * 100 };
+  });
+
+  // Summary metrics shown as cards at the top of the tab.
+  //   Underperforming  = trend < -5% (sales declining materially)
+  //   Overperforming   = trend > +20% (strong growth — may need more stock)
+  //   At-risk          = current stock < forecast (won't meet projected demand)
+  //   Total demand     = sum of forecast units
+  //   Total reorder    = sum of recommended reorder
+  const underperforming = rows.filter(r => r.trendPct < -5).length;
+  const overperforming = rows.filter(r => r.trendPct > 20).length;
+  const atRisk = rows.filter(r => r.totalStock < r.forecast).length;
+  const totalDemand = rows.reduce((a, r) => a + r.forecast, 0);
+  const totalReorder = rows.reduce((a, r) => a + r.reorder, 0);
+
   return (
     <>
-      <Card title="Demand forecast" sub={`Per SKU per channel · projected ${days}-day demand`}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
+        <Card title={`Projected demand · ${days}d`} sub="across all SKUs">
+          <div className="stat-num lg">{D.fmtN(totalDemand)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>units to ship over next {days} days</div>
+        </Card>
+        <Card title="At-risk SKUs" sub="current stock < forecast demand">
+          <div className="stat-num lg" style={{ color: atRisk > 0 ? "var(--critical)" : "var(--success)" }}>
+            {atRisk}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            of {rows.length} won't meet projected demand
+          </div>
+        </Card>
+        <Card title="Underperforming SKUs" sub="trend < −5% (sales declining)">
+          <div className="stat-num lg" style={{ color: underperforming > 0 ? "var(--warning)" : "var(--success)" }}>
+            {underperforming}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            {overperforming > 0 && <>· {overperforming} overperforming (&gt;+20%)</>}
+          </div>
+        </Card>
+        <Card title="Recommended reorder" sub={`to cover ${days}d + 30d buffer`}>
+          <div className="stat-num lg" style={{ color: totalReorder > 0 ? "var(--warning)" : "var(--ink-3)" }}>
+            {D.fmtN(totalReorder)}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>units across all suppliers</div>
+        </Card>
+      </div>
+
+      <Card title="Demand forecast" sub={`Per SKU · projected ${days}-day demand`}
         action={
           <div className="seg">
             {[30, 60, 90].map(d => (
@@ -1103,11 +1203,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
             </tr>
           </thead>
           <tbody>
-            {inventory.map(s => {
-              const trend = [1.18, 0.94, 1.22, 1.06, 1.32, 0.98, 1.45, 0.82, 1.12, 0.66, 1.08, 1.18, 1.04][D.inventory.indexOf(s)] || 1;
-              const forecast = Math.round(s.velocity * days * trend);
-              const required = Math.round(s.velocity * (days + 30) * trend);
-              const reorder = Math.max(0, required - s.totalStock);
+            {rows.map(s => {
               const supplier = D.suppliers.find(sup => sup.skus.includes(s.code))?.name || "—";
               return (
                 <tr key={s.code}>
@@ -1117,14 +1213,14 @@ const ForecastTab = ({ inventory, days, setDays }) => {
                   </td>
                   <td className="num">{s.velocity}</td>
                   <td className="num">
-                    <Delta value={(trend - 1) * 100}/>
+                    <Delta value={s.trendPct}/>
                   </td>
-                  <td className="num">{D.fmtN(forecast)}</td>
+                  <td className="num">{D.fmtN(s.forecast)}</td>
                   <td className="num">{D.fmtN(s.totalStock)}</td>
-                  <td className="num">{D.fmtN(required)}</td>
+                  <td className="num">{D.fmtN(s.required)}</td>
                   <td className="num">
-                    {reorder > 0
-                      ? <span className="mono" style={{ color: reorder > s.totalStock ? "var(--critical)" : "var(--warning)", fontWeight: 500 }}>{D.fmtN(reorder)}</span>
+                    {s.reorder > 0
+                      ? <span className="mono" style={{ color: s.reorder > s.totalStock ? "var(--critical)" : "var(--warning)", fontWeight: 500 }}>{D.fmtN(s.reorder)}</span>
                       : <span className="muted">—</span>}
                   </td>
                   <td className="muted" style={{ fontSize: 11.5 }}>{supplier}</td>
