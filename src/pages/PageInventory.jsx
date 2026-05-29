@@ -66,8 +66,8 @@ const PageInventory = ({ subsection }) => {
       {tab === "forecast" && (
         <ForecastTab inventory={D.inventory} days={forecastDays} setDays={setForecastDays}/>
       )}
-      {tab === "batches" && <BatchesTab batches={D.batches}/>}
-      {tab === "returns" && <ReturnsTab/>}
+      {tab === "batches"  && <SubtabPreviewGate label="Batches & expiry"><BatchesTab batches={D.batches}/></SubtabPreviewGate>}
+      {tab === "returns"  && <SubtabPreviewGate label="Returns restocking"><ReturnsTab/></SubtabPreviewGate>}
     </div>
   );
 };
@@ -531,6 +531,32 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
         </div>
       </div>
     </div>
+  );
+};
+
+// Localised preview gate for Inventory sub-tabs that aren't yet polished.
+// Mirrors the global preview pattern (amber banner + blurred content +
+// jump-to-live CTA) but contained inside the page so the top tabs + page
+// header stay sharp and clickable. No more dead-end navigation.
+const SubtabPreviewGate = ({ label, children }) => {
+  const navigate = useNavigate();
+  return (
+    <>
+      <div className="preview-banner" style={{ marginBottom: 12, borderRadius: 10, border: "1px solid #DBC487" }}>
+        <span className="preview-stripe" aria-hidden="true"/>
+        <span className="preview-pill">Sub-tab preview</span>
+        <span className="preview-text">
+          <strong>{label}</strong> isn't built yet — the layout is from the initial
+          design and uses static data. Other Inventory sub-tabs are live.
+        </span>
+        <button className="preview-cta" onClick={() => navigate("/inventory")}>
+          Unified stock →
+        </button>
+      </div>
+      <div className="subtab-preview-content">
+        {children}
+      </div>
+    </>
   );
 };
 
@@ -1180,16 +1206,25 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 const ForecastTab = ({ inventory, days, setDays }) => {
   const D = NSData;
 
-  // Per-item forecast math (same logic used in table below — pre-computed
-  // here so the summary cards can aggregate across the portfolio).
+  // Per-item forecast math.
+  //   - forecast: units we expect to ship over `days` (trend-adjusted)
+  //   - maxFg:    units we can actually ship from warehouse (FG + Producible).
+  //               Inventory is warehouse-only scope; this is the relevant
+  //               supply number, NOT total across all channels.
+  //   - required: units we need to cover the period + 30d buffer
+  //   - reorder:  max(0, required − maxFg)
+  //   - atRisk:   maxFg < forecast → can't meet projected demand
   const trendForIdx = (idx) =>
     [1.18, 0.94, 1.22, 1.06, 1.32, 0.98, 1.45, 0.82, 1.12, 0.66, 1.08, 1.18, 1.04, 0.92][idx] || 1;
   const rows = inventory.map((s, i) => {
     const trend = trendForIdx(i);
+    const fg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
+    const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
+    const maxFg = fg + producibleFg;
     const forecast = Math.round(s.velocity * days * trend);
     const required = Math.round(s.velocity * (days + 30) * trend);
-    const reorder = Math.max(0, required - s.totalStock);
-    return { ...s, trend, forecast, required, reorder, trendPct: (trend - 1) * 100 };
+    const reorder = Math.max(0, required - maxFg);
+    return { ...s, trend, forecast, required, reorder, maxFg, trendPct: (trend - 1) * 100 };
   });
 
   // Summary metrics shown as cards at the top of the tab.
@@ -1200,7 +1235,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
   //   Total reorder    = sum of recommended reorder
   const underperforming = rows.filter(r => r.trendPct < -5).length;
   const overperforming = rows.filter(r => r.trendPct > 20).length;
-  const atRisk = rows.filter(r => r.totalStock < r.forecast).length;
+  const atRisk = rows.filter(r => r.maxFg < r.forecast).length;
   const totalDemand = rows.reduce((a, r) => a + r.forecast, 0);
   const totalReorder = rows.reduce((a, r) => a + r.reorder, 0);
 
@@ -1211,7 +1246,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
           <div className="stat-num lg">{D.fmtN(totalDemand)}</div>
           <div className="muted" style={{ fontSize: 11.5 }}>units to ship over next {days} days</div>
         </Card>
-        <Card title="At-risk SKUs" sub="current stock < forecast demand">
+        <Card title="At-risk SKUs" sub="Max FG (today) < forecast demand">
           <div className="stat-num lg" style={{ color: atRisk > 0 ? "var(--critical)" : "var(--success)" }}>
             {atRisk}
           </div>
@@ -1235,49 +1270,75 @@ const ForecastTab = ({ inventory, days, setDays }) => {
         </Card>
       </div>
 
-      <Card title="Demand forecast" sub={`Per SKU · projected ${days}-day demand`}
+      <Card
+        title="Demand forecast"
+        sub={`Per item · projected ${days}-day demand. Red Max-FG cell = available supply won't meet forecast.`}
         action={
           <div className="seg">
             {[30, 60, 90].map(d => (
               <button key={d} className={days === d ? "active" : ""} onClick={() => setDays(d)}>{d} days</button>
             ))}
           </div>
-        } padded={false}>
-        <table className="table">
+        }
+        padded={false}
+      >
+        <table className="table mat-table fc-table">
+          <colgroup>
+            <col className="fc-col-sku"/>
+            <col className="fc-col-num"/>
+            <col className="fc-col-num"/>
+            <col className="fc-col-num"/>
+            <col className="fc-col-num"/>
+            <col className="fc-col-num"/>
+            <col className="fc-col-result"/>
+          </colgroup>
           <thead>
             <tr>
               <th>Item</th>
-              <th className="num">Velocity /d</th>
+              <th className="num">Velocity</th>
               <th className="num">Trend</th>
               <th className="num">Forecast ({days}d)</th>
-              <th className="num">Current stock</th>
-              <th className="num">Required (with 30d buffer)</th>
-              <th className="num">Recommended reorder</th>
-              <th>Supplier</th>
+              <th className="num">Max FG today</th>
+              <th className="num">Required</th>
+              <th className="num fc-h-result">Reorder</th>
             </tr>
           </thead>
           <tbody>
             {rows.map(s => {
-              const supplier = D.suppliers.find(sup => sup.skus.includes(s.code))?.name || "—";
+              const atRisk = s.maxFg < s.forecast;
               return (
-                <tr key={s.code}>
-                  <td>
-                    <span>{s.name}</span>
+                <tr key={s.code} className="fc-row">
+                  <td className="mat-cell">
+                    <div className="mat-cell-name">{s.name}</div>
                     <div className="sku">{s.code}</div>
                   </td>
-                  <td className="num">{s.velocity}</td>
-                  <td className="num">
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{s.velocity}</div>
+                  </td>
+                  <td className="num mat-cell">
                     <Delta value={s.trendPct}/>
                   </td>
-                  <td className="num">{D.fmtN(s.forecast)}</td>
-                  <td className="num">{D.fmtN(s.totalStock)}</td>
-                  <td className="num">{D.fmtN(s.required)}</td>
-                  <td className="num">
-                    {s.reorder > 0
-                      ? <span className="mono" style={{ color: s.reorder > s.totalStock ? "var(--critical)" : "var(--warning)", fontWeight: 500 }}>{D.fmtN(s.reorder)}</span>
-                      : <span className="muted">—</span>}
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{D.fmtN(s.forecast)}</div>
                   </td>
-                  <td className="muted" style={{ fontSize: 11.5 }}>{supplier}</td>
+                  <td className={"num mat-cell" + (atRisk ? " fc-cell-atrisk" : "")}>
+                    <div className="mat-cell-num">{D.fmtN(s.maxFg)}</div>
+                  </td>
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{D.fmtN(s.required)}</div>
+                  </td>
+                  <td className="num mat-cell fc-cell-result">
+                    {s.reorder > 0 ? (
+                      <div
+                        className="mat-cell-num result"
+                        style={{ color: s.reorder > s.maxFg ? "var(--critical)" : "var(--warning)" }}
+                      >
+                        {D.fmtN(s.reorder)}
+                      </div>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
