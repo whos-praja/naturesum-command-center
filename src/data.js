@@ -85,7 +85,7 @@ const NSData = (function () {
     { id: "a6", sev: "warn", cat: "Inventory",  title: "Batch B-2412-OMG3 expiring in 47 days", detail: "1,840 units remaining · velocity won't clear · move to flash sale?", module: "inventory", time: "8h ago", roles: ["founder","ops"] },
     { id: "a7", sev: "warn", cat: "Sales",      title: "Returns spike — Plant Protein up 3.2× vs 30-day avg", detail: "12 returns in last 7d · 'lumpy when mixed' cited 8×", module: "sales", time: "yesterday", roles: ["founder","ops","marketplace"] },
     { id: "a8", sev: "info", cat: "Marketing",  title: "ROAS up 45% on Biotin+Hair — consider scaling budget", detail: "Meta creative #BIO-V3 driving CAC ₹312 vs blended ₹486", module: "marketing", time: "yesterday", roles: ["founder","ads"] },
-    { id: "a9", sev: "info", cat: "Inventory",  title: "Whey Choc 1kg — 8 days FBA, 45 days warehouse", detail: "Recommend FBA replenishment shipment of 600 units", module: "inventory", time: "yesterday", roles: ["founder","ops","marketplace"] },
+    { id: "a9", sev: "info", cat: "Inventory",  title: "Whey Choc 1kg — 8 days FBA, 45 days central warehouse", detail: "Recommend FBA replenishment shipment of 600 units", module: "inventory", time: "yesterday", roles: ["founder","ops","marketplace"] },
     { id: "a10",sev: "info", cat: "Sales",      title: "Blinkit revenue +60% WoW", detail: "Ashwagandha + Multivitamin driving lift · check ad support", module: "sales", time: "2d ago", roles: ["founder"] },
   ];
 
@@ -110,83 +110,166 @@ const NSData = (function () {
   });
 
   // ── Inventory ─────────────────────────────────────────
-  // Mock warehouse breakdown per SKU:
-  //   fg          = finished goods, ready to ship (this is the current "warehouse" number)
-  //   semiFg      = bulk product made, not yet packed/labelled
-  //   rawMaterial = ingredient stock (units roughly equivalent to potential FG units)
-  //   packaging   = bottles/jars/labels/cartons ready to fill
-  //   perPacketRaw= raw units required to produce one FG pack (for future formula)
-  // "Producible FG" today = min(semiFg, packaging) — what we could pack & ship right now.
-  // Input-item codes per FG, generated using the same naming style:
-  //   Semi-FG : NS<product>F<size>   → "filled, ready to pack"
-  //   Raw     : NS<product>R<size?>  → "raw / bulk ingredient"
-  //   Pkg     : NSPKG<purpose><size> → "empty containers / labels"
-  // For Moringa Powder + SB Powder + SB Dry Berry, there's no real Semi-FG
-  // stage in the actual production flow (raw → pack directly), so semiFg is
-  // tracked as the same raw bin under a Semi-FG label for now. Refine when
-  // BOM is finalised.
-  const inputCodes = {
-    NSMP100:   { semiFg: "NSMPF100",  rawMaterial: "NSMLPR",  packaging: "NSPKGMP100"  },
-    NSMP250:   { semiFg: "NSMPF250",  rawMaterial: "NSMLPR",  packaging: "NSPKGMP250"  },
-    NSSB100:   { semiFg: "NSSBPF100", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP100" },
-    NSSB250:   { semiFg: "NSSBPF250", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP250" },
-    NSSB500:   { semiFg: "NSSBPF500", rawMaterial: "NSSBPR",  packaging: "NSPKGSBP500" },
-    NSSBDB100: { semiFg: "NSSBDBF100",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP100" },
-    NSSBDB250: { semiFg: "NSSBDBF250",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP250" },
-    NSSBDB500: { semiFg: "NSSBDBF500",rawMaterial: "NSSBDBR", packaging: "NSPKGDBP500" },
-    NSSBJ300:  { semiFg: "NSSBJF300", rawMaterial: "NSSBJPLP",packaging: "NSPKGJB300"  },
-    NSSBJ500:  { semiFg: "NSSBJF500", rawMaterial: "NSSBJPLP",packaging: "NSPKGJB500"  },
-    NSSBBO15:  { semiFg: "NSSBBOF15", rawMaterial: "NSSBOR",  packaging: "NSPKGBOB15"  },
-    NSSBBO30:  { semiFg: "NSSBBOF30", rawMaterial: "NSSBOR",  packaging: "NSPKGBOB30"  },
-    NSJO100:   { semiFg: "NSJOF100",  rawMaterial: "NSJOR",   packaging: "NSPKGJOB100" },
-    NSACDT30:  { semiFg: "NSACDSF30", rawMaterial: "NSACR",   packaging: "NSPKGACTC30" },
+  // REAL-WORLD SNAPSHOT — extracted from the Naturesum Live Inventory sheet
+  // (Master tab "Live" column + Daily Movement of FG 30-day average) and the
+  // Naturesum Daily Ad Report (May 2026 per-channel unit totals) + the
+  // Shopify product-wise monthly export.
+  //   - fg/semiFg/raw/pkg quantities  → Master Live column
+  //   - velocity (warehouse sell-out) → Daily Movement of FG, last 30 days
+  //   - splits (per-channel mix)      → Ad Report May totals + Shopify CSV
+  //   - growth (MoM %)                → Shopify Net sales May vs April
+  //   - perPacketRaw                  → BOM tab
+  // SKUs not present in the May data keep zero velocity/growth.
+  const LIVE_SNAPSHOT = {
+    NSMP100:   { fg: 0,   semiFg: 0,    raw: 200,    pkg: 0,    perRaw: 0.10,  vel: 0,    leadTime: 25 },
+    NSMP250:   { fg: 0,   semiFg: 0,    raw: 200,    pkg: 0,    perRaw: 0.25,  vel: 0,    leadTime: 25 },
+    NSSB100:   { fg: 37,  semiFg: 0,    raw: 0,      pkg: 1481, perRaw: 0.10,  vel: 14.3, leadTime: 22 },
+    NSSB250:   { fg: 185, semiFg: 0,    raw: 0,      pkg: 2997, perRaw: 0.25,  vel: 17.9, leadTime: 22 },
+    NSSB500:   { fg: 99,  semiFg: 0,    raw: 0,      pkg: 2972, perRaw: 0.50,  vel: 7.8,  leadTime: 22 },
+    NSSBDB100: { fg: 620, semiFg: 0,    raw: 946.79, pkg: 67,   perRaw: 0.10,  vel: 21.2, leadTime: 28 },
+    NSSBDB250: { fg: 493, semiFg: 0,    raw: 946.79, pkg: 916,  perRaw: 0.25,  vel: 18.9, leadTime: 28 },
+    NSSBDB500: { fg: 725, semiFg: 0,    raw: 946.79, pkg: 3055, perRaw: 0.50,  vel: 16.7, leadTime: 28 },
+    NSSBJ300:  { fg: 0,   semiFg: 0,    raw: 0,      pkg: 1025, perRaw: 0.30,  vel: 0,    leadTime: 20 },
+    NSSBJ500:  { fg: 677, semiFg: 0,    raw: 0,      pkg: 483,  perRaw: 0.50,  vel: 0,    leadTime: 20 },
+    NSSBBO15:  { fg: 0,   semiFg: 0,    raw: 5,      pkg: 1014, perRaw: 0.015, vel: 0,    leadTime: 35 },
+    NSSBBO30:  { fg: 0,   semiFg: 0,    raw: 5,      pkg: 123,  perRaw: 0.030, vel: 0.5,  leadTime: 35 },
+    NSJO100:   { fg: 788, semiFg: 0,    raw: 0,      pkg: 533,  perRaw: 1.00,  vel: 8.3,  leadTime: 30 },
+    NSACDT30:  { fg: 39,  semiFg: 9073, raw: 0,      pkg: 2543, perRaw: 30,    vel: 3.3,  leadTime: 30 },
   };
 
-  const inventory = skuSales.map((s, i) => {
-    const leadTime = [25, 25, 22, 22, 22, 28, 28, 28, 20, 20, 35, 35, 30, 30][i] || 25;
+  // May 2026 per-channel unit totals — drives the per-channel velocity split
+  // shown in PlatformCell / Runway calculator / popover channel breakdown.
+  const CHANNEL_MIX = {
+    NSMP100:   { amazon: 0,   shopify: 5,   flipkart: 0,  blinkit: 0   },
+    NSMP250:   { amazon: 0,   shopify: 0,   flipkart: 0,  blinkit: 0   },
+    NSSB100:   { amazon: 112, shopify: 67,  flipkart: 20, blinkit: 95  },
+    NSSB250:   { amazon: 175, shopify: 42,  flipkart: 47, blinkit: 33  },
+    NSSB500:   { amazon: 99,  shopify: 50,  flipkart: 4,  blinkit: 0   },
+    NSSBDB100: { amazon: 127, shopify: 82,  flipkart: 80, blinkit: 0   },
+    NSSBDB250: { amazon: 54,  shopify: 78,  flipkart: 63, blinkit: 101 },
+    NSSBDB500: { amazon: 282, shopify: 79,  flipkart: 55, blinkit: 68  },
+    NSSBJ300:  { amazon: 92,  shopify: 92,  flipkart: 54, blinkit: 14  },
+    NSSBJ500:  { amazon: 240, shopify: 227, flipkart: 12, blinkit: 0   },
+    NSSBBO15:  { amazon: 0,   shopify: 0,   flipkart: 0,  blinkit: 0   },
+    NSSBBO30:  { amazon: 0,   shopify: 0,   flipkart: 0,  blinkit: 0   },
+    NSJO100:   { amazon: 25,  shopify: 11,  flipkart: 1,  blinkit: 0   },
+    NSACDT30:  { amazon: 31,  shopify: 0,   flipkart: 1,  blinkit: 0   },
+  };
+
+  // MoM revenue growth (Shopify CSV: May 2026 / April 2026). Capped at ±200%
+  // because some SKUs went from near-zero base → display would explode.
+  const cap = (v) => Math.max(-100, Math.min(200, v));
+  const MOM_GROWTH = {
+    NSMP100: 0,            NSMP250: 0,
+    NSSB100:   cap(1497.3),  NSSB250: -46.2,  NSSB500: 0,
+    NSSBDB100: -37.1,        NSSBDB250: -67.7, NSSBDB500: -4.3,
+    NSSBJ300:  cap(739.2),   NSSBJ500: cap(1597.9),
+    NSSBBO15: 0,             NSSBBO30: 0,
+    NSJO100:   55.4,         NSACDT30: -100,
+  };
+
+  // Avg sell price per unit (derived from May Shopify revenue ÷ orders).
+  // Used for the Stock value column. Defaults to ₹500 if no data.
+  const SKU_PRICE = {
+    NSMP100: 254,  NSMP250: 280,
+    NSSB100: 354,  NSSB250: 550,  NSSB500: 1131,
+    NSSBDB100: 293,NSSBDB250: 517,NSSBDB500: 1043,
+    NSSBJ300: 611, NSSBJ500: 883,
+    NSSBBO15: 500, NSSBBO30: 800,
+    NSJO100:  1068,
+    NSACDT30: 975,
+  };
+
+  // Map each FG to its real input items (codes that match what's in the
+  // central warehouse sheet). For SKUs that go raw → pack direct (powders,
+  // berries), semiFg is null — Producible FG falls back to min(raw, pkg).
+  const inputCodes = {
+    NSMP100:   { semiFg: null,         rawMaterial: "NSMLPR",   packaging: "NSPKGMP100"  },
+    NSMP250:   { semiFg: null,         rawMaterial: "NSMLPR",   packaging: "NSPKGMP250"  },
+    NSSB100:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP100" },
+    NSSB250:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP250" },
+    NSSB500:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP500" },
+    NSSBDB100: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP100" },
+    NSSBDB250: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP250" },
+    NSSBDB500: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP500" },
+    NSSBJ300:  { semiFg: null,         rawMaterial: "NSSBJPLP", packaging: "NSPKGJB300"  },
+    NSSBJ500:  { semiFg: null,         rawMaterial: "NSSBJPLP", packaging: "NSPKGJB500"  },
+    NSSBBO15:  { semiFg: null,         rawMaterial: "NSSBOR",   packaging: "NSPKGBOB15"  },
+    NSSBBO30:  { semiFg: null,         rawMaterial: "NSSBOR",   packaging: "NSPKGBOB30"  },
+    NSJO100:   { semiFg: "NSJOF100",   rawMaterial: null,       packaging: "NSPKGJOB100" },
+    NSACDT30:  { semiFg: "NSACDSF30",  rawMaterial: null,       packaging: "NSPKGACTC30" },
+  };
+
+  const inventory = skus.map((s, i) => {
+    const snap = LIVE_SNAPSHOT[s.code] || { fg: 0, semiFg: 0, raw: 0, pkg: 0, perRaw: 0.1, vel: 0, leadTime: 25 };
+    const ch = CHANNEL_MIX[s.code] || { amazon: 0, shopify: 0, flipkart: 0, blinkit: 0 };
+    const totalChUnits = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) || 0;
+    // Marketplace stock estimates — until real per-channel inventory feeds
+    // land, hold approximately 7 days of cover at each channel's run rate.
+    // The current Inventory tab's footnote already calls these placeholders.
+    const dailyByCh = totalChUnits ? totalChUnits / 30 : 0;
+    const ESTCOVER = 7;
     const totalStock = {
-      warehouse: [200, 169, 140, 78, 91, 334, 1043, 642, 224, 432, 45, 0, 613, 55][i] || 100,
-      amazonFBA: [120, 95, 80, 60, 50, 220, 480, 380, 110, 200, 28, 0, 350, 35][i] || 60,
-      flipkart:  [55, 40, 35, 25, 20, 95, 210, 160, 45, 80, 12, 0, 140, 12][i] || 25,
-      blinkit:   [40, 28, 25, 18, 14, 70, 150, 110, 32, 55, 8, 0, 95, 8][i] || 18,
-      transit:   [0, 0, 0, 100, 0, 0, 0, 200, 0, 150, 0, 0, 0, 0][i] || 0,
+      warehouse: snap.fg,
+      amazonFBA: Math.round(dailyByCh * (ch.amazon  / (totalChUnits || 1)) * ESTCOVER) || 0,
+      flipkart:  Math.round(dailyByCh * (ch.flipkart / (totalChUnits || 1)) * ESTCOVER) || 0,
+      blinkit:   Math.round(dailyByCh * (ch.blinkit  / (totalChUnits || 1)) * ESTCOVER) || 0,
+      transit:   0,
     };
-    const fg = totalStock.warehouse;
     const warehouseBreakdown = {
-      fg,
-      semiFg:      [180, 150, 120, 70, 80, 290, 880, 540, 200, 380, 38, 0, 480, 40][i] || Math.round(fg * 0.85),
-      rawMaterial: [320, 280, 220, 140, 160, 480, 1380, 820, 360, 620, 90, 30, 720, 95][i] || Math.round(fg * 1.4),
-      packaging:   [220, 195, 145, 100, 95, 360, 950, 620, 240, 410, 60, 25, 520, 65][i] || Math.round(fg * 1.1),
-      perPacketRaw:[0.10, 0.25, 0.10, 0.25, 0.50, 0.10, 0.25, 0.50, 0.30, 0.50, 0.015, 0.03, 0.10, 0.05][i] || 0.1,
-      codes:       inputCodes[s.code] || { semiFg: null, rawMaterial: null, packaging: null },
+      fg:           snap.fg,
+      semiFg:       snap.semiFg,
+      rawMaterial:  snap.raw,
+      packaging:    snap.pkg,
+      perPacketRaw: snap.perRaw,
+      codes:        inputCodes[s.code] || { semiFg: null, rawMaterial: null, packaging: null },
     };
-    warehouseBreakdown.producibleFG = Math.min(warehouseBreakdown.semiFg, warehouseBreakdown.packaging);
+    // Producible FG = the most we could pack & ship right now given inputs.
+    // When semiFg is meaningful (e.g. Jatamansi has filled bottles, AC Tea
+    // has filled sachets), it's the cap. Otherwise the cap is min(raw, pkg)
+    // because we go straight raw → pack.
+    if (snap.semiFg > 0) {
+      warehouseBreakdown.producibleFG = Math.min(snap.semiFg, snap.pkg || Infinity);
+    } else if (snap.raw > 0 || snap.pkg > 0) {
+      // Convert raw to pack-equivalent units before comparing with packaging
+      const packEq = snap.perRaw > 0 ? Math.floor(snap.raw / snap.perRaw) : 0;
+      warehouseBreakdown.producibleFG = Math.min(packEq, snap.pkg);
+    } else {
+      warehouseBreakdown.producibleFG = 0;
+    }
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
-    const runway = Math.round(total / s.velocity);
-    const runwayStatus = runway <= leadTime ? "red" : runway < 30 ? "amber" : "green";
+    const vel = snap.vel;
+    const runway = vel > 0 ? Math.round(total / vel) : 0;
+    const runwayStatus = vel <= 0 ? "amber" : runway <= snap.leadTime ? "red" : runway < 30 ? "amber" : "green";
+    const price = SKU_PRICE[s.code] || 500;
     return {
       ...s,
-      leadTime,
-      stock: totalStock,
+      velocity:    vel,
+      growth:      MOM_GROWTH[s.code] ?? 0,
+      // Reuse the channel units as the "splits" object so PlatformCell's
+      // per-channel velocity derivation works the same way it did with synth.
+      splits:      { amazon: ch.amazon, shopify: ch.shopify, flipkart: ch.flipkart, blinkit: ch.blinkit },
+      leadTime:    snap.leadTime,
+      stock:       totalStock,
       warehouseBreakdown,
-      totalStock: total,
+      totalStock:  total,
       runway,
       runwayStatus,
-      stockValue: total * (i % 3 === 0 ? 480 : i % 3 === 1 ? 280 : 180),
+      stockValue:  total * price,
     };
   });
 
   // ── Batches ───────────────────────────────────────────
   const batches = [
-    { id: "B-2503-MOR-1", sku: "NSMP250",   mfg: "Mar 2026", exp: "Mar 2028", units: 100,  loc: "Warehouse", risk: "green" },
-    { id: "B-2502-SBP-1", sku: "NSSB250",   mfg: "Feb 2026", exp: "Aug 2027", units: 60,   loc: "Warehouse", risk: "amber" },
-    { id: "B-2412-SBDB",  sku: "NSSBDB500", mfg: "Dec 2025", exp: "Jul 2026", units: 400,  loc: "Warehouse", risk: "red" },
-    { id: "B-2501-JAT",   sku: "NSJO100",   mfg: "Jan 2026", exp: "Jan 2028", units: 500,  loc: "Warehouse", risk: "green" },
-    { id: "B-2410-AC",    sku: "NSACDT30",  mfg: "Oct 2025", exp: "Oct 2027", units: 50,   loc: "Warehouse", risk: "amber" },
-    { id: "B-2504-SBJ",   sku: "NSSBJ500",  mfg: "Apr 2026", exp: "Apr 2027", units: 300,  loc: "Warehouse", risk: "green" },
-    { id: "B-2411-SBO",   sku: "NSSBBO15",  mfg: "Nov 2025", exp: "Nov 2027", units: 40,   loc: "Warehouse", risk: "green" },
-    { id: "B-2502-MP",    sku: "NSMP100",   mfg: "Feb 2026", exp: "Feb 2028", units: 180,  loc: "Warehouse", risk: "green" },
-    { id: "B-2503-SBDB-1",sku: "NSSBDB250", mfg: "Mar 2026", exp: "Sep 2027", units: 800,  loc: "Warehouse", risk: "green" },
+    { id: "B-2503-MOR-1", sku: "NSMP250",   mfg: "Mar 2026", exp: "Mar 2028", units: 100,  loc: "Central warehouse", risk: "green" },
+    { id: "B-2502-SBP-1", sku: "NSSB250",   mfg: "Feb 2026", exp: "Aug 2027", units: 60,   loc: "Central warehouse", risk: "amber" },
+    { id: "B-2412-SBDB",  sku: "NSSBDB500", mfg: "Dec 2025", exp: "Jul 2026", units: 400,  loc: "Central warehouse", risk: "red" },
+    { id: "B-2501-JAT",   sku: "NSJO100",   mfg: "Jan 2026", exp: "Jan 2028", units: 500,  loc: "Central warehouse", risk: "green" },
+    { id: "B-2410-AC",    sku: "NSACDT30",  mfg: "Oct 2025", exp: "Oct 2027", units: 50,   loc: "Central warehouse", risk: "amber" },
+    { id: "B-2504-SBJ",   sku: "NSSBJ500",  mfg: "Apr 2026", exp: "Apr 2027", units: 300,  loc: "Central warehouse", risk: "green" },
+    { id: "B-2411-SBO",   sku: "NSSBBO15",  mfg: "Nov 2025", exp: "Nov 2027", units: 40,   loc: "Central warehouse", risk: "green" },
+    { id: "B-2502-MP",    sku: "NSMP100",   mfg: "Feb 2026", exp: "Feb 2028", units: 180,  loc: "Central warehouse", risk: "green" },
+    { id: "B-2503-SBDB-1",sku: "NSSBDB250", mfg: "Mar 2026", exp: "Sep 2027", units: 800,  loc: "Central warehouse", risk: "green" },
   ];
 
   // ── Suppliers ─────────────────────────────────────────
@@ -319,7 +402,7 @@ const NSData = (function () {
         { name: "Packaging material procured",             owner: "Ops",       start: 22, end: 36, status: "progress" },
         { name: "Raw materials procured",                  owner: "Ops",       start: 24, end: 38, status: "progress" },
         { name: "Production / manufacturing complete",     owner: "Ops",       start: 38, end: 52, status: "notstarted" },
-        { name: "Inventory received at main warehouse",    owner: "Ops",       start: 52, end: 58, status: "notstarted" },
+        { name: "Inventory received at central warehouse", owner: "Ops",       start: 52, end: 58, status: "notstarted" },
         { name: "Listing copy written",                    owner: "Marketing", start: 30, end: 44, status: "delayed"  },
         { name: "Listing creatives ready (A+ / EBC)",      owner: "Design",    start: 38, end: 56, status: "notstarted" },
         { name: "Ad creatives ready",                      owner: "Agency",    start: 44, end: 60, status: "notstarted" },

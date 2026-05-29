@@ -164,7 +164,7 @@ const DigestPreview = () => {
         <div className="stat-label" style={{ marginBottom: 4, color: "var(--info)" }}>🔵 Insights (3)</div>
         <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11.5 }}>
           <li>Biotin+Hair ROAS +45% — scale Meta budget?</li>
-          <li>Whey Choc 1K — FBA 8d, warehouse 45d → replenish</li>
+          <li>Whey Choc 1K — FBA 8d, central warehouse 45d → replenish</li>
           <li>Blinkit revenue +60% WoW — investigate driver</li>
         </ul>
       </div>

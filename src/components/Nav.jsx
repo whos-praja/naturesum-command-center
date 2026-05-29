@@ -82,7 +82,7 @@ const Sidebar = ({ active, onNav, role, alertsByRole }) => {
   );
 };
 
-const Topbar = ({ active, role, onRole, navLabel, previewMode, onTogglePreview, isPreviewPage }) => {
+const Topbar = ({ active, role, onRole, navLabel, previewMode, onTogglePreview, isPreviewPage, theme, onToggleTheme }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -130,7 +130,14 @@ const Topbar = ({ active, role, onRole, navLabel, previewMode, onTogglePreview, 
       </button>
 
       <button className="btn ghost icon" title="Refresh data"><Icon name="refresh"/></button>
-      <button className="btn ghost icon" title="Settings"><Icon name="settings"/></button>
+      <button
+        className="btn ghost icon"
+        onClick={onToggleTheme}
+        title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        aria-label="Toggle theme"
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"}/>
+      </button>
 
       <div className="role-switch" ref={ref} onClick={() => setOpen(o => !o)}>
         <div className="avatar">{initials}</div>

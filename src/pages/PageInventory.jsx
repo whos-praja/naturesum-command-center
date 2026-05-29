@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon, Delta, Card, Sparkline, BarChart, Progress, ChannelPill } from "../components/Shared.jsx";
 import NSData from "../data.js";
+import { UploadModal, DataAsOfPill } from "../components/UploadModal.jsx";
+import { useLiveData } from "../contexts/LiveDataContext.jsx";
+import { applyLiveData } from "../lib/liveInventory.js";
 
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
@@ -35,6 +38,24 @@ const PageInventory = ({ subsection }) => {
   const [forecastDays, setForecastDays] = useState(60);
   // RunwayTab now manages its own trajectory + per-row growth state.
 
+  // Live data: read the most recent uploaded MIS sheet from context and
+  // overlay it onto the synth inventory. When no upload exists, everything
+  // falls through to the sample data. Memoised to avoid re-computing the
+  // merged list every render.
+  const { live } = useLiveData();
+  const liveInventory = useMemo(
+    () => applyLiveData(D.inventory, live),
+    [D.inventory, live]
+  );
+  // Shallow override so all child tabs see the merged inventory without
+  // each one having to import the merger separately.
+  const dataForTabs = useMemo(
+    () => ({ ...D, inventory: liveInventory }),
+    [D, liveInventory]
+  );
+
+  const [uploadOpen, setUploadOpen] = useState(false);
+
   return (
     <div>
       <div className="page-head">
@@ -43,11 +64,16 @@ const PageInventory = ({ subsection }) => {
           <div className="page-sub">Unified stock · runway · batch & expiry · reorder logic</div>
         </div>
         <div className="actions">
-          <button className="btn"><Icon name="download" size={13}/>Upload MIS</button>
-          <button className="btn"><Icon name="refresh" size={13}/>Sync warehouses</button>
+          <DataAsOfPill onClick={() => setUploadOpen(true)}/>
+          <button className="btn" onClick={() => setUploadOpen(true)}>
+            <Icon name="download" size={13}/>Upload MIS
+          </button>
+          <button className="btn"><Icon name="refresh" size={13}/>Sync central warehouse</button>
           <button className="btn primary"><Icon name="plus" size={13}/>Place PO</button>
         </div>
       </div>
+
+      {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)}/>}
 
       <div className="tabs">
         <button className={tab === "unified" ? "active" : ""} onClick={() => setTab("unified")}>Unified stock</button>
@@ -59,12 +85,12 @@ const PageInventory = ({ subsection }) => {
         <button className={tab === "returns" ? "active" : ""} onClick={() => setTab("returns")}>Returns restocking</button>
       </div>
 
-      {tab === "unified" && <UnifiedStockTab inventory={D.inventory}/>}
-      {tab === "materials" && <MaterialsTab inventory={D.inventory}/>}
-      {tab === "runway" && <RunwayTab inventory={D.inventory}/>}
-      {tab === "simulator" && <SimulatorTab inventory={D.inventory}/>}
+      {tab === "unified" && <UnifiedStockTab inventory={liveInventory}/>}
+      {tab === "materials" && <MaterialsTab inventory={liveInventory}/>}
+      {tab === "runway" && <RunwayTab inventory={liveInventory}/>}
+      {tab === "simulator" && <SimulatorTab inventory={liveInventory}/>}
       {tab === "forecast" && (
-        <ForecastTab inventory={D.inventory} days={forecastDays} setDays={setForecastDays}/>
+        <ForecastTab inventory={liveInventory} days={forecastDays} setDays={setForecastDays}/>
       )}
       {tab === "batches"  && <SubtabPreviewGate label="Batches & expiry"><BatchesTab batches={D.batches}/></SubtabPreviewGate>}
       {tab === "returns"  && <SubtabPreviewGate label="Returns restocking"><ReturnsTab/></SubtabPreviewGate>}
@@ -72,8 +98,51 @@ const PageInventory = ({ subsection }) => {
   );
 };
 
+// ── PlatformCell — one channel's stock + runway + velocity + growth stack ──
+// Used inside the Unified Stock table for every location column. Renders:
+//   1. Units on hand (hero) — with an optional inline breakdown caption to
+//      the LEFT (warehouse cell uses this to expose its FG + Producible
+//      composition without adding a third row that would misalign the cell
+//      against the simpler marketplace cells).
+//   2. Runway pill + per-channel velocity + MoM growth chip (when velocity > 0)
+// Runway color tier: <14d red, <30d amber, otherwise neutral.
+const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) => {
+  const D = NSData;
+  const hasVel = velocity != null && velocity > 0;
+  const runway = hasVel ? Math.round(units / velocity) : null;
+  const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
+  return (
+    <div className="pf-cell">
+      <div className="pf-cell-units-row">
+        {breakdown && (
+          <span className="pf-cell-bd-inline" title={breakdownLabel}>{breakdown}</span>
+        )}
+        <div className="pf-cell-units mono">{units != null ? D.fmtN(units) : "—"}</div>
+      </div>
+      {hasVel && (
+        <div className="pf-cell-meta">
+          <span className={"pf-cell-runway" + tier}>{runway}d</span>
+          <span className="pf-cell-vel mono">{velocity.toFixed(1)}/d</span>
+          {growth != null && (
+            <span className="pf-cell-growth">
+              <Delta value={growth} hideArrow/>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const UnifiedStockTab = ({ inventory }) => {
   const D = NSData;
+  const { live } = useLiveData();
+  // Format the "data as of" line for the stock-meta strip.
+  // Prefers the date the sheet itself says it represents; falls back to
+  // upload timestamp; finally to a placeholder when no upload exists.
+  const dataAsOfLabel = live
+    ? (live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }))
+    : "sample data";
   // Warehouse-only scope.
   const warehouseUnits = inventory.reduce((a, b) => a + b.stock.warehouse, 0);
   const unitCost = (s) => (s.totalStock ? s.stockValue / s.totalStock : 0);
@@ -98,20 +167,86 @@ const UnifiedStockTab = ({ inventory }) => {
   });
   const hasCriticalAlerts = skusRunningOut > 0;
 
+  // Top mover — the SKU with the highest sell-through velocity. Tie-breaker
+  // by stock value so we surface the bigger revenue contributor when two
+  // SKUs have the same per-day rate.
+  const topMover = [...inventory].sort((a, b) => {
+    if (b.velocity !== a.velocity) return b.velocity - a.velocity;
+    return (b.stockValue || 0) - (a.stockValue || 0);
+  })[0];
+  const topMoverRev = topMover
+    ? Math.round((topMover.velocity * 30) * ((topMover.stockValue || 0) / Math.max(1, topMover.totalStock || 1)))
+    : 0;
+
   // Clicking any SKU row opens the breakdown popover.
   const [popoverSku, setPopoverSku] = useState(null);
   const navigate = useNavigate();
 
+  // ── Filter state ────────────────────────────────────────────
+  // searchText: free-text filter on SKU name / code / variant
+  // statusFilter: Set of runway statuses to include; empty = show all
+  // statusOpen: dropdown visibility
+  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState(new Set()); // {} = all visible
+  const [statusOpen, setStatusOpen] = useState(false);
+  const statusRef = useRef(null);
+  useEffect(() => {
+    const onDoc = (e) => { if (statusRef.current && !statusRef.current.contains(e.target)) setStatusOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const toggleStatus = (status) => {
+    setStatusFilter(prev => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
+  // Apply both filters: matches the search query AND (if any statuses are
+  // selected) has one of the selected statuses.
+  const q = searchText.trim().toLowerCase();
+  const filteredInventory = inventory.filter(s => {
+    const matchesSearch = !q
+      || s.name.toLowerCase().includes(q)
+      || s.code.toLowerCase().includes(q)
+      || (s.variant || "").toLowerCase().includes(q);
+    const matchesStatus = statusFilter.size === 0 || statusFilter.has(s.runwayStatus);
+    return matchesSearch && matchesStatus;
+  });
+
+  // Status counts for the dropdown row labels (across the unfiltered set so
+  // the user can see all available options regardless of current filter).
+  const statusCounts = {
+    red:   inventory.filter(s => s.runwayStatus === "red").length,
+    amber: inventory.filter(s => s.runwayStatus === "amber").length,
+    green: inventory.filter(s => s.runwayStatus === "green").length,
+  };
+
   return (
     <>
-      <div className="grid stat-row-3" style={{ marginBottom: 14 }}>
-        {/* Stock-value summary: ₹ headline + FG-units / SKU-count / sync meta */}
-        <Card title="Total stock value">
-          <div className="stat-num xl">{D.fmtINR(warehouseStockValue)}</div>
+      {/* Top stat row — same .rw-risk-card family as Runway + Forecast tabs
+          so all three live tabs feel like one product. Three cards covering
+          scale (value), threats (alerts), and concentration (top mover) so
+          the founder can answer "how much / what's burning / where's the
+          volume" in one glance. */}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
+        {/* 1. Total stock value — neutral hero, brand-green tint */}
+        <div className="rw-risk-card ok">
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="finance" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">Total stock value</div>
+              <div className="rw-risk-sub">central warehouse FG, valued at unit cost</div>
+            </div>
+          </div>
+          <div className="rw-risk-num" style={{ color: "var(--ink)" }}>{D.fmtINR(warehouseStockValue)}</div>
           <div className="stock-meta">
             <div className="stock-meta-item">
               <div className="stock-meta-num mono">{D.fmtN(warehouseUnits)}</div>
-              <div className="stock-meta-label">FG units · main warehouse</div>
+              <div className="stock-meta-label">FG units · central warehouse</div>
             </div>
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
@@ -120,128 +255,232 @@ const UnifiedStockTab = ({ inventory }) => {
             </div>
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
-              <div className="stock-meta-num mono" style={{ fontSize: 13 }}>4d ago</div>
-              <div className="stock-meta-label">last MIS sync</div>
+              <div className="stock-meta-num mono" style={{ fontSize: 13 }}>{dataAsOfLabel}</div>
+              <div className="stock-meta-label">{live ? "data as of" : "last MIS sync"}</div>
             </div>
           </div>
-        </Card>
+        </div>
 
-        {/* Stock-runway critical alerts */}
-        <div className={"stock-alert-card" + (hasCriticalAlerts ? " is-critical" : " is-clear")}>
-          <div className="stock-alert-head">
-            <div className="stock-alert-title">
-              <span className={"stock-alert-dot" + (hasCriticalAlerts ? " crit" : " ok")}/>
-              Stock alerts
+        {/* 2. Stock alerts — crit when items are running out, ok otherwise */}
+        <div className={"rw-risk-card " + (hasCriticalAlerts ? "crit" : "ok")}>
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="alerts" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">Stock alerts</div>
+              <div className="rw-risk-sub">
+                {hasCriticalAlerts
+                  ? "runway ≤ supplier lead time"
+                  : "all Items above lead-time floor"}
+              </div>
             </div>
             <button
               className="btn sm ghost"
-              onClick={() => navigate("/inventory/runway")}
+              onClick={(e) => { e.stopPropagation(); navigate("/inventory/runway"); }}
               title="Open Runway calculator"
+              style={{ marginLeft: "auto", flexShrink: 0 }}
             >
               View runway <Icon name="arrowRight" size={11}/>
             </button>
           </div>
-          {hasCriticalAlerts ? (
-            <>
-              <div className="stock-alert-main">
-                <span className="stock-alert-num mono">{skusRunningOut}</span>
-                <span className="stock-alert-main-label">
-                  Item{skusRunningOut === 1 ? "" : "s"} running out
-                </span>
-              </div>
-              <div className="stock-alert-sub">
-                runway ≤ supplier lead time — reorder window has already closed
-              </div>
-              <div className="stock-alert-secondary">
-                <span className="stock-alert-num-sm mono">{materialsToReorder}</span>
-                material{materialsToReorder === 1 ? "" : "s"} need reordering
-                <span className="muted"> · &lt; 30 days coverage</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="stock-alert-main">
-                <span className="stock-alert-num mono" style={{ color: "var(--success)" }}>0</span>
-                <span className="stock-alert-main-label">Items running out</span>
-              </div>
-              <div className="stock-alert-sub">all Items above supplier lead-time floor</div>
-              <div className="stock-alert-secondary">
-                <span className="stock-alert-num-sm mono">{materialsToReorder}</span>
-                material{materialsToReorder === 1 ? "" : "s"} need reordering
-                <span className="muted"> · &lt; 30 days coverage</span>
-              </div>
-            </>
-          )}
+          <div className="rw-risk-num" style={{ color: hasCriticalAlerts ? "var(--critical)" : "var(--success)" }}>
+            {skusRunningOut}
+          </div>
+          <div className="rw-risk-detail">
+            <strong>{skusRunningOut === 1 ? "Item" : "Items"}</strong> running out
+            <span className="muted"> · {materialsToReorder} material{materialsToReorder === 1 ? "" : "s"} need reordering (&lt; 30d coverage)</span>
+          </div>
         </div>
 
-        {/* In transit (deferred — comes online once the integration is wired up) */}
-        <div className="is-deferred">
-          <span className="deferred-tag" title="Pending integration">Pending integration</span>
-          <Card title="In transit">
-            <div className="stat-num lg">{D.fmtN(inventory.reduce((a,b)=>a+b.stock.transit,0))}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>units · arriving over next 7 days</div>
-          </Card>
+        {/* 3. Top mover — where the volume is concentrated. Hero shows the
+            daily sell-through; detail names the SKU + monthly contribution. */}
+        <div className="rw-risk-card ok">
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="up" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">Top mover</div>
+              <div className="rw-risk-sub">highest sell-through right now</div>
+            </div>
+          </div>
+          <div className="rw-risk-num" style={{ color: "var(--success)" }}>
+            {topMover ? `${topMover.velocity}/d` : "—"}
+          </div>
+          <div className="rw-risk-detail">
+            {topMover
+              ? <><strong>{topMover.name}</strong> {topMover.variant} <span className="muted">· {topMover.code} · ~{D.fmtINR(topMoverRev)}/mo</span></>
+              : "no data"}
+          </div>
         </div>
+
       </div>
 
       <Card
         title="Inventory by Item × location"
-        sub="Source: warehouse MIS sheet (live). Click any Item for the full material breakdown."
+        sub="Source: central warehouse MIS sheet (live). Click any Item for the full material breakdown."
         padded={false}
         action={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <input className="txt sm" placeholder="Filter Item…" style={{ width: 160, height: 24, padding: "2px 9px", fontSize: 11.5 }}/>
-            <button className="btn sm"><Icon name="filter" size={12}/>Status</button>
+            <input
+              className="txt sm"
+              placeholder="Filter Item…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              style={{ width: 160, height: 24, padding: "2px 9px", fontSize: 11.5 }}
+            />
+            {/* Status dropdown — multi-select filter on runway status. Counts
+                next to each row are the totals in the underlying inventory
+                (not the post-filter result) so the user can see how many
+                items fall into each bucket regardless of current selection. */}
+            <div style={{ position: "relative" }} ref={statusRef}>
+              <button
+                className={"btn sm" + (statusFilter.size > 0 ? " is-active" : "")}
+                onClick={() => setStatusOpen(o => !o)}
+              >
+                <Icon name="filter" size={12}/>
+                Status
+                {statusFilter.size > 0 && (
+                  <span className="us-filter-chip-count">{statusFilter.size}</span>
+                )}
+              </button>
+              {statusOpen && (
+                <div className="us-status-menu">
+                  <div className="us-status-menu-head">
+                    <span className="us-status-menu-title">Filter by runway status</span>
+                    {statusFilter.size > 0 && (
+                      <button
+                        className="us-status-menu-clear"
+                        onClick={() => setStatusFilter(new Set())}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {[
+                    { key: "red",   label: "Critical",  hint: "runway ≤ lead time",  cls: "crit" },
+                    { key: "amber", label: "Watch",     hint: "< 30d cover",         cls: "warn" },
+                    { key: "green", label: "Healthy",   hint: "above lead + 30d",    cls: "ok"   },
+                  ].map(opt => {
+                    const checked = statusFilter.has(opt.key);
+                    return (
+                      <label key={opt.key} className={"us-status-menu-row " + opt.cls + (checked ? " is-checked" : "")}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleStatus(opt.key)}
+                        />
+                        <span className={"us-status-menu-dot " + opt.cls}/>
+                        <div className="us-status-menu-text">
+                          <div className="us-status-menu-label">{opt.label}</div>
+                          <div className="us-status-menu-hint">{opt.hint}</div>
+                        </div>
+                        <span className="us-status-menu-count">{statusCounts[opt.key]}</span>
+                      </label>
+                    );
+                  })}
+                  {statusFilter.size > 0 && (
+                    <div className="us-status-menu-foot muted">
+                      Showing {filteredInventory.length} of {inventory.length} Items
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         }>
-        <table className="table">
+        <table className="table mat-table us-table">
           <thead>
             <tr>
               <th>Item</th>
-              <th className="num">Warehouse</th>
-              <th className="num col-deferred">Amazon FBA</th>
-              <th className="num col-deferred">Flipkart</th>
-              <th className="num col-deferred">Blinkit</th>
-              <th className="num col-deferred">In Transit</th>
-              <th className="num">Total<span className="footnote-ref">*</span></th>
-              <th className="num">Velocity /d</th>
-              <th>Runway</th>
+              <th className="num">Central warehouse</th>
+              <th className="num">Amazon FBA<span className="footnote-ref">*</span></th>
+              <th className="num">Flipkart<span className="footnote-ref">*</span></th>
+              <th className="num">Blinkit<span className="footnote-ref">*</span></th>
               <th className="num">Stock value</th>
             </tr>
           </thead>
           <tbody>
-            {inventory.map(s => (
-              <tr key={s.code} className="row-clickable" onClick={() => setPopoverSku(s)}>
-                <td>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span>{s.name}</span>
-                    <span className="sku">{s.code} · {s.variant}</span>
+            {filteredInventory.length === 0 ? (
+              <tr>
+                <td colSpan={6}>
+                  <div className="empty">
+                    No Items match your filter.{" "}
+                    {(searchText || statusFilter.size > 0) && (
+                      <button
+                        className="link-btn"
+                        onClick={() => { setSearchText(""); setStatusFilter(new Set()); }}
+                      >
+                        Clear filters
+                      </button>
+                    )}
                   </div>
                 </td>
-                <td className="num">{D.fmtN(s.stock.warehouse)}</td>
-                <td className="num col-deferred">{D.fmtN(s.stock.amazonFBA)}</td>
-                <td className="num col-deferred">{D.fmtN(s.stock.flipkart)}</td>
-                <td className="num col-deferred">{D.fmtN(s.stock.blinkit)}</td>
-                <td className="num col-deferred">{s.stock.transit ? <span className="badge blue">{D.fmtN(s.stock.transit)}</span> : <span className="muted">—</span>}</td>
-                <td className="num strong">{D.fmtN(s.stock.warehouse)}</td>
-                <td className="num">{s.velocity}</td>
-                <td>
-                  <span className={"badge " + (s.runwayStatus === "red" ? "red" : s.runwayStatus === "amber" ? "amber" : "green") + " dot"}>
-                    {s.runway}d
-                  </span>
-                </td>
-                <td className="num">{D.fmtINR(s.stock.warehouse * unitCost(s))}</td>
               </tr>
-            ))}
+            ) : filteredInventory.map(s => {
+              // Warehouse hero number = Max FG (current FG + Producible FG).
+              const fg          = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
+              const producible  = s.warehouseBreakdown?.producibleFG ?? 0;
+              const maxFg       = fg + producible;
+
+              // Per-channel velocity = total velocity × that channel's revenue
+              // share. Shopify share approximates the warehouse channel (D2C
+              // ships from warehouse). Synthesised — replace once per-channel
+              // sales data is wired in.
+              const sp = s.splits || {};
+              const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+              const vel = {
+                warehouse: s.velocity * ((sp.shopify  || 0) / revTotal),
+                amazonFBA: s.velocity * ((sp.amazon   || 0) / revTotal),
+                flipkart:  s.velocity * ((sp.flipkart || 0) / revTotal),
+                blinkit:   s.velocity * ((sp.blinkit  || 0) / revTotal),
+              };
+
+              return (
+                <tr key={s.code} className="row-clickable" onClick={() => setPopoverSku(s)}>
+                  <td className="mat-cell">
+                    <div className="mat-cell-name">{s.name}</div>
+                    <div className="sku">{s.code} · {s.variant}</div>
+                  </td>
+                  <td className="num mat-cell">
+                    <PlatformCell
+                      units={maxFg}
+                      breakdown={
+                        <>
+                          <span className="pf-cell-bd-tag">FG</span>
+                          <span className="pf-cell-bd-num">{D.fmtN(fg)}</span>
+                          <span className="pf-cell-bd-op">+</span>
+                          <span className="pf-cell-bd-tag">Prod</span>
+                          <span className="pf-cell-bd-num">{D.fmtN(producible)}</span>
+                        </>
+                      }
+                      breakdownLabel="Current FG + Producible FG"
+                      velocity={vel.warehouse}
+                      growth={s.growth}
+                    />
+                  </td>
+                  <td className="num mat-cell">
+                    <PlatformCell units={s.stock.amazonFBA} velocity={vel.amazonFBA} growth={s.growth}/>
+                  </td>
+                  <td className="num mat-cell">
+                    <PlatformCell units={s.stock.flipkart} velocity={vel.flipkart} growth={s.growth}/>
+                  </td>
+                  <td className="num mat-cell">
+                    <PlatformCell units={s.stock.blinkit} velocity={vel.blinkit} growth={s.growth}/>
+                  </td>
+                  <td className="num mat-cell">
+                    <div className="mat-cell-num">{D.fmtINR(s.stock.warehouse * unitCost(s))}</div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="table-footnote">
           <span className="footnote-ref">*</span>
           <span>
-            <strong>Total</strong> currently reflects <strong>warehouse FG stock only</strong>.
-            Amazon FBA, Flipkart, Blinkit and In-Transit columns are placeholders — they'll go live
-            once each channel's integration is wired up. For the FG / Semi-FG / Raw / Packaging split,
-            click any Item row or {" "}
+            Amazon FBA, Flipkart and Blinkit numbers are placeholders. Per-channel velocity
+            is currently estimated from the SKU's 30-day revenue mix and growth is mirrored
+            from the SKU's overall MoM — once each marketplace integration is wired up, these
+            values will be replaced with the real per-channel figures. For the FG / Semi-FG /
+            Raw / Packaging split, click any Item row or {" "}
             <button className="link-btn" onClick={() => navigate("/inventory/materials")}>
               open the Materials breakdown
             </button>.
@@ -433,6 +672,10 @@ const MaterialsTab = ({ inventory }) => {
 // ── Per-SKU warehouse breakdown popover ─────────────────────────────────
 const SkuBreakdownModal = ({ sku, onClose }) => {
   const D = NSData;
+  const { live } = useLiveData();
+  const sourceLine = live
+    ? `Source: ${live.fileName || "uploaded MIS sheet"} · data as of ${live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN")}`
+    : "Source: sample data · upload the MIS sheet to see live numbers";
   const wb = sku.warehouseBreakdown;
   const unitCost = sku.totalStock ? sku.stockValue / sku.totalStock : 0;
 
@@ -446,6 +689,21 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   // Which input is the bottleneck for producible FG?
   const bottleneck = wb.semiFg <= wb.packaging ? "Semi-FG" : "Packaging";
 
+  // Per-channel velocity split — same logic as the Unified Stock table.
+  // Channel velocity = total velocity × that channel's revenue share, with
+  // shopify mapped to warehouse (D2C ships from warehouse).
+  const sp = sku.splits || {};
+  const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+  const maxFg = wb.fg + wb.producibleFG;
+  const channels = [
+    { key: "warehouse", name: "Central warehouse", hint: "Max FG · D2C + B2B direct",  color: "#2F5E47", units: maxFg,                vel: sku.velocity * ((sp.shopify  || 0) / revTotal) },
+    { key: "amazon",    name: "Amazon FBA", hint: "fulfilled by Amazon",        color: "#FF9900", units: sku.stock.amazonFBA,  vel: sku.velocity * ((sp.amazon   || 0) / revTotal) },
+    { key: "flipkart",  name: "Flipkart",   hint: "FK warehouse",               color: "#2874F0", units: sku.stock.flipkart,   vel: sku.velocity * ((sp.flipkart || 0) / revTotal) },
+    { key: "blinkit",   name: "Blinkit",    hint: "10-min delivery",            color: "#F8CB46", units: sku.stock.blinkit,    vel: sku.velocity * ((sp.blinkit  || 0) / revTotal) },
+    { key: "transit",   name: "In Transit", hint: "arriving · 7 days",          color: "#9CA098", units: sku.stock.transit,    vel: 0 },
+  ];
+  const runwayTier = (days) => days < 14 ? " crit" : days < 30 ? " warn" : "";
+
   // Material rows — label + per-item code + number + hint stack.
   // The bottleneck row gets a subtle highlight so the eye lands on the cap.
   const codes = wb.codes || {};
@@ -455,16 +713,13 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
     // For FG row, the code is the SKU itself; for others, look it up in wb.codes
     const itemCode = key === "fg" ? sku.code : codes[key];
     return (
-      <div className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "")} key={key}>
+      <div className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "")} key={key} title={hint}>
         <div className="wb-row-label">
           <span className="wb-row-swatch" style={{ background: MATERIAL_COLORS[key] }}/>
-          <div>
-            <div className="wb-row-name">
-              {label}
-              {itemCode && <span className="wb-row-code sku">{itemCode}</span>}
-              {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
-            </div>
-            {hint && <div className="wb-row-hint muted">{hint}</div>}
+          <div className="wb-row-name">
+            {label}
+            {itemCode && <span className="wb-row-code sku">{itemCode}</span>}
+            {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
           </div>
         </div>
         <div className="wb-row-value mono">{D.fmtN(value)}</div>
@@ -484,29 +739,61 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
         </div>
 
         <div className="modal-body">
-          <div className="wb-best">
-            <div className="wb-best-label">Max FG · today</div>
-            <div className="wb-best-num mono">{D.fmtN(wb.fg + wb.producibleFG)}</div>
-            <div className="wb-best-formula muted">
-              <span className="mono">FG + Producible</span> · bottleneck: <strong>{bottleneck}</strong>
-            </div>
-            <div className="wb-best-substats">
-              <div className="wb-best-sub">
-                <span className="wb-best-sub-label">Current FG</span>
-                <span className="wb-best-sub-num mono">{D.fmtN(wb.fg)}</span>
-              </div>
-              <div className="wb-best-sub">
-                <span className="wb-best-sub-label">Producible FG</span>
-                <span className="wb-best-sub-num mono">{D.fmtN(wb.producibleFG)}</span>
-              </div>
-            </div>
+          {/* Materials section — title bar carries the Max FG headline + the
+              bottleneck flag so we don't need a separate hero card stealing
+              vertical space (Warehouse channel row below shows the same Max
+              FG number anyway). */}
+          <div className="wb-section-bar">
+            <span className="wb-section-bar-label">Materials breakdown</span>
+            <span className="wb-section-bar-stat">
+              <span className="wb-section-bar-tag">Max FG</span>
+              <span className="wb-section-bar-num mono">{D.fmtN(wb.fg + wb.producibleFG)}</span>
+              <span className="wb-section-bar-formula muted">
+                · FG {D.fmtN(wb.fg)} + Prod {D.fmtN(wb.producibleFG)} · bottleneck: <strong>{bottleneck}</strong>
+              </span>
+            </span>
           </div>
-
           <div className="wb-rows">
-            {row("fg", "FG (ready to ship)", wb.fg, "shippable today — this is the warehouse number")}
+            {row("fg", "FG (ready to ship)", wb.fg, "shippable today — this is the central warehouse number")}
             {row("semiFg", "Semi-FG", wb.semiFg, "bulk product, needs packing")}
             {row("rawMaterial", "Raw Material", wb.rawMaterial, `${wb.perPacketRaw} unit(s) raw → 1 pack`)}
             {row("packaging", "Packaging", wb.packaging, "containers + labels ready")}
+          </div>
+
+          {/* Channel breakdown — where stock sits across warehouse + marketplaces,
+              with per-channel runway + velocity. Growth is mirrored from the
+              SKU's overall MoM (per-channel growth will land with real data). */}
+          <div className="wb-section-bar">
+            <span className="wb-section-bar-label">By channel</span>
+            <span className="wb-section-bar-stat muted" style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              units · runway · velocity · MoM growth
+            </span>
+          </div>
+          <div className="wb-channels">
+            {channels.map(ch => {
+              const hasVel = ch.vel > 0;
+              const runway = hasVel ? Math.round(ch.units / ch.vel) : null;
+              return (
+                <div className="wb-ch-row" key={ch.key} title={ch.hint}>
+                  <div className="wb-ch-label">
+                    <span className="wb-ch-swatch" style={{ background: ch.color }}/>
+                    <div className="wb-ch-name">{ch.name}</div>
+                  </div>
+                  <div className="wb-ch-stats">
+                    <div className="wb-ch-units mono">{D.fmtN(ch.units)}</div>
+                    {hasVel ? (
+                      <div className="wb-ch-meta">
+                        <span className={"pf-cell-runway" + runwayTier(runway)}>{runway}d</span>
+                        <span className="wb-ch-vel mono">{ch.vel.toFixed(1)}/d</span>
+                        <Delta value={sku.growth} hideArrow/>
+                      </div>
+                    ) : (
+                      <span className="wb-ch-vel muted" style={{ fontSize: 10.5 }}>transit only</span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="wb-meta">
@@ -515,7 +802,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
               <dd>{D.fmtINR(wb.fg * unitCost)}</dd>
               <dt>Rolling daily velocity</dt>
               <dd>{sku.velocity} units/day</dd>
-              <dt>Runway (warehouse FG)</dt>
+              <dt>Runway (central warehouse FG)</dt>
               <dd>{Math.round(wb.fg / sku.velocity)} days</dd>
               <dt>Supplier lead time</dt>
               <dd>{sku.leadTime} days</dd>
@@ -524,9 +811,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
         </div>
 
         <div className="modal-foot">
-          <span className="muted" style={{ fontSize: 11.5 }}>
-            Source: warehouse MIS sheet · last sync 4d ago
-          </span>
+          <span className="muted" style={{ fontSize: 11.5 }}>{sourceLine}</span>
           <button className="btn" onClick={onClose}>Close</button>
         </div>
       </div>
@@ -714,7 +999,7 @@ const SimulatorTab = ({ inventory }) => {
               </div>
             </div>
             {[
-              { k: "fg",          label: "Warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
+              { k: "fg",          label: "Central warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
               { k: "semiFg",      label: "Semi-FG",       unit: "units", min: 0, max: fgMax,  step: 1 },
               { k: "rawMaterial", label: "Raw Material",  unit: "units", min: 0, max: fgMax * 2, step: 1 },
               { k: "packaging",   label: "Packaging",     unit: "units", min: 0, max: fgMax * 1.5, step: 1 },
@@ -909,6 +1194,43 @@ const CustomGrowthInput = ({ code, initial, isOverride, onCommit }) => {
   );
 };
 
+// ── RunwayChannelCell — stacked cell for a marketplace column in the
+// Runway calculator table. Three short lines: stock units, runway pill
+// inline with lead time, then velocity + growth. Reused across Amazon
+// FBA / Flipkart / Blinkit columns.
+const RunwayChannelCell = ({ units, vel, leadTime, growth }) => {
+  const D = NSData;
+  const hasVel = vel != null && vel > 0;
+  const runway = hasVel ? Math.round(units / vel) : null;
+  // Use the channel's own lead time for severity, not the warehouse one.
+  const tier = runway == null
+    ? ""
+    : runway < leadTime
+      ? " crit"
+      : runway < leadTime + 14
+        ? " warn"
+        : "";
+  return (
+    <div className="rw-ch-cell">
+      <div className="rw-ch-cell-stock mono">{units != null ? D.fmtN(units) : "—"}</div>
+      {hasVel ? (
+        <>
+          <div className="rw-ch-cell-rl">
+            <span className={"pf-cell-runway" + tier}>{runway}d</span>
+            <span className="rw-ch-cell-lead muted">· {leadTime}d lead</span>
+          </div>
+          <div className="rw-ch-cell-vg">
+            <span className="mono rw-ch-cell-vel">{vel.toFixed(1)}/d</span>
+            {growth != null && <Delta value={growth} hideArrow/>}
+          </div>
+        </>
+      ) : (
+        <span className="muted" style={{ fontSize: 10.5 }}>no velocity</span>
+      )}
+    </div>
+  );
+};
+
 const RunwayTab = ({ inventory: rawInventory }) => {
   const D = NSData;
 
@@ -919,6 +1241,11 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   //   item's velocity = base × (1 + perRowGrowth / 100).
   const [mode, setMode] = useState("current");
   const [perRowGrowth, setPerRowGrowth] = useState({}); // { [code]: number }
+
+  // Marketplace lead times — how long replenishment to that channel takes.
+  // These are placeholders; replace with real per-channel SLAs when the
+  // marketplace integrations come online.
+  const CHANNEL_LEAD = { amazonFBA: 3, flipkart: 2, blinkit: 1 };
 
   // Runway = MaxFG ÷ projected velocity, where projected velocity =
   // base velocity × (1 + MoM growth %). MoM growth represents the
@@ -938,6 +1265,19 @@ const RunwayTab = ({ inventory: rawInventory }) => {
     const maxFg = whFg + producibleFg;
     const runway = vel > 0 ? Math.round(maxFg / vel) : 0;
     const status = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
+
+    // Per-channel velocity split — channel velocity = total velocity ×
+    // that channel's revenue share. Shopify maps to warehouse (D2C ships
+    // from the main warehouse). Synthesised from `splits` until real
+    // per-channel sales feeds are wired in.
+    const sp = s.splits || {};
+    const revTotal = (sp.amazon||0) + (sp.shopify||0) + (sp.flipkart||0) + (sp.blinkit||0) || 1;
+    const chVel = {
+      amazonFBA: vel * ((sp.amazon   || 0) / revTotal),
+      flipkart:  vel * ((sp.flipkart || 0) / revTotal),
+      blinkit:   vel * ((sp.blinkit  || 0) / revTotal),
+    };
+
     return {
       ...s,
       adjRunway: runway,
@@ -948,6 +1288,8 @@ const RunwayTab = ({ inventory: rawInventory }) => {
       maxFg,
       actualGrowth,
       effectiveGrowth,
+      chVel,
+      chLead: CHANNEL_LEAD,
     };
   });
 
@@ -1010,49 +1352,100 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
   return (
     <>
-      {/* Risk summary — 4 stat cards covering different facets of urgency */}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
-        <Card title="Earliest reorder" sub="most urgent action">
-          {earliestReorder ? (
-            <>
-              <div className={"stat-num lg " + (earliestReorder.adjStatus === "red" ? "rw-stat-crit" : "rw-stat-warn")}>
-                {fmtReorderDate(earliestReorder.rb)}
+      {/* Risk summary — 4 severity-tinted cards covering different facets of
+          urgency. Each carries an icon, severity-tinted left border + soft
+          BG, and a coloured hero number so a quick glance reads "what is
+          on fire" before the eye has to parse the labels. */}
+      <div className="grid rw-risk-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+        {/* 1. Earliest reorder — when is the next action due */}
+        {(() => {
+          const sev = earliestReorder
+            ? (earliestReorder.adjStatus === "red" ? "crit" : "warn")
+            : "ok";
+          return (
+            <div className={"rw-risk-card " + sev}>
+              <div className="rw-risk-head">
+                <span className="rw-risk-icon"><Icon name="calendar" size={14}/></span>
+                <div>
+                  <div className="rw-risk-title">Earliest reorder</div>
+                  <div className="rw-risk-sub">most urgent action</div>
+                </div>
               </div>
-              <div className="muted" style={{ fontSize: 11.5 }}>
-                {earliestReorder.name} · {earliestReorder.code}
+              <div className="rw-risk-num">
+                {earliestReorder ? fmtReorderDate(earliestReorder.rb) : "All clear"}
               </div>
-            </>
-          ) : (
-            <>
-              <div className="stat-num lg" style={{ color: "var(--success)" }}>All clear</div>
-              <div className="muted" style={{ fontSize: 11.5 }}>No items need reorder in 30d</div>
-            </>
-          )}
-        </Card>
-        <Card title="First stockout" sub="smallest runway right now">
-          <div className="stat-num lg" style={{ color: firstToStockout?.adjStatus === "red" ? "var(--critical)" : firstToStockout?.adjStatus === "amber" ? "var(--warning)" : "var(--success)" }}>
-            {firstToStockout?.adjRunway ?? 0}d
-          </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            {firstToStockout ? `${firstToStockout.name} · runs out in ${firstToStockout.adjRunway}d` : "—"}
-          </div>
-        </Card>
-        <Card title="Stock value at risk" sub="overdue items only">
-          <div className="stat-num lg" style={{ color: stockValueAtRisk > 0 ? "var(--critical)" : "var(--success)" }}>
-            {D.fmtINR(stockValueAtRisk)}
-          </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            across {reds.length} overdue item{reds.length === 1 ? "" : "s"}
-          </div>
-        </Card>
-        <Card title="Reorder volume needed" sub="to cover lead + 30d buffer">
-          <div className="stat-num lg" style={{ color: reorderUnitsNeeded > 0 ? "var(--warning)" : "var(--ink-3)" }}>
-            {D.fmtN(Math.round(reorderUnitsNeeded))}
-          </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            units · {suppliersToContact} supplier{suppliersToContact === 1 ? "" : "s"} to contact
-          </div>
-        </Card>
+              <div className="rw-risk-detail">
+                {earliestReorder
+                  ? <>{earliestReorder.name} <span className="sku">· {earliestReorder.code}</span></>
+                  : "No items need reorder in the next 30 days"}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 2. First stockout — when does the soonest item actually run out */}
+        {(() => {
+          const sev = firstToStockout?.adjStatus === "red" ? "crit"
+                    : firstToStockout?.adjStatus === "amber" ? "warn"
+                    : "ok";
+          return (
+            <div className={"rw-risk-card " + sev}>
+              <div className="rw-risk-head">
+                <span className="rw-risk-icon"><Icon name="alerts" size={14}/></span>
+                <div>
+                  <div className="rw-risk-title">First stockout</div>
+                  <div className="rw-risk-sub">smallest runway right now</div>
+                </div>
+              </div>
+              <div className="rw-risk-num">{firstToStockout?.adjRunway ?? 0}d</div>
+              <div className="rw-risk-detail">
+                {firstToStockout
+                  ? <>{firstToStockout.name} · runs out in {firstToStockout.adjRunway}d</>
+                  : "—"}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 3. Stock value at risk — what's the financial exposure */}
+        {(() => {
+          const sev = stockValueAtRisk > 0 ? "crit" : "ok";
+          return (
+            <div className={"rw-risk-card " + sev}>
+              <div className="rw-risk-head">
+                <span className="rw-risk-icon"><Icon name="finance" size={14}/></span>
+                <div>
+                  <div className="rw-risk-title">Stock value at risk</div>
+                  <div className="rw-risk-sub">overdue items only</div>
+                </div>
+              </div>
+              <div className="rw-risk-num">{D.fmtINR(stockValueAtRisk)}</div>
+              <div className="rw-risk-detail">
+                across {reds.length} overdue item{reds.length === 1 ? "" : "s"}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* 4. Reorder volume needed — how much to actually order */}
+        {(() => {
+          const sev = reorderUnitsNeeded > 0 ? "warn" : "ok";
+          return (
+            <div className={"rw-risk-card " + sev}>
+              <div className="rw-risk-head">
+                <span className="rw-risk-icon"><Icon name="box" size={14}/></span>
+                <div>
+                  <div className="rw-risk-title">Reorder volume needed</div>
+                  <div className="rw-risk-sub">to cover lead + 30d buffer</div>
+                </div>
+              </div>
+              <div className="rw-risk-num">{D.fmtN(Math.round(reorderUnitsNeeded))}</div>
+              <div className="rw-risk-detail">
+                units · {suppliersToContact} supplier{suppliersToContact === 1 ? "" : "s"} to contact
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Filter + trajectory controls */}
@@ -1102,81 +1495,101 @@ const RunwayTab = ({ inventory: rawInventory }) => {
         <table className="table mat-table runway-table">
           <colgroup>
             <col className="rw-col-sku"/>
-            <col className="rw-col-num"/>
-            <col className="rw-col-num"/>
-            <col className="rw-col-max"/>
-            <col className="rw-col-num"/>
-            <col className="rw-col-growth"/>
-            {mode === "custom" && <col className="rw-col-growth"/>}
-            <col className="rw-col-timeline"/>
-            <col className="rw-col-reorder"/>
+            <col className="rw-col-wh"/>
+            <col className="rw-col-vg"/>
+            <col className="rw-col-wh-rl"/>
+            <col className="rw-col-mp"/>
+            <col className="rw-col-mp"/>
+            <col className="rw-col-mp"/>
+            <col className="rw-col-action"/>
           </colgroup>
           <thead>
             <tr>
               <th>Item</th>
-              <th className="num">FG</th>
-              <th className="num">Producible</th>
-              <th className="num rw-h-max">Max FG</th>
-              <th className="num">Velocity</th>
-              <th className="num">Growth</th>
-              {mode === "custom" && <th className="num rw-h-custom">Custom %</th>}
-              <th className="rw-h-timeline">Runway × Lead time</th>
+              <th className="num rw-h-wh">Central warehouse</th>
+              <th className="num">Velocity {mode === "custom" && <span className="muted" style={{ fontWeight: 400 }}>· Custom %</span>}</th>
+              <th className="num">Runway · Lead</th>
+              <th className="num">Amazon FBA</th>
+              <th className="num">Flipkart</th>
+              <th className="num">Blinkit</th>
               <th className="num rw-h-action">Action needed</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 ? (
-              <tr><td colSpan={mode === "custom" ? 9 : 8}><div className="empty">No Items match this filter.</div></td></tr>
+              <tr><td colSpan={8}><div className="empty">No Items match this filter.</div></td></tr>
             ) : visible.map(s => {
               const rb = reorderByDate(s);
               const reorderText = fmtReorderDate(rb);
               const overdue = rb.daysFromNow < 0;
               const customVal = perRowGrowth[s.code] ?? s.actualGrowth;
               const isOverride = mode === "custom" && perRowGrowth[s.code] !== undefined && perRowGrowth[s.code] !== s.actualGrowth;
+              const whTier = s.adjStatus === "red" ? " crit" : s.adjStatus === "amber" ? " warn" : "";
               return (
                 <tr
                   key={s.code}
                   className={"row-clickable runway-row runway-row-" + s.adjStatus}
                   onClick={() => setPopoverSku(s)}
                 >
+                  {/* 1. Item */}
                   <td className="mat-cell">
                     <div className="mat-cell-name">{s.name}</div>
                     <div className="sku">{s.code} · {s.variant}</div>
                   </td>
-                  <td className="num mat-cell">
-                    <div className="mat-cell-num">{D.fmtN(s.whFg)}</div>
-                  </td>
-                  <td className="num mat-cell">
-                    <div className="mat-cell-num" style={{ color: "var(--success)" }}>{D.fmtN(s.producibleFg)}</div>
-                  </td>
+
+                  {/* 2. Warehouse Max FG (with FG + Prod breakdown under) */}
                   <td className="num mat-cell rw-cell-max">
-                    <div className="mat-cell-num result max">{D.fmtN(s.maxFg)}</div>
-                  </td>
-                  <td className="num mat-cell">
-                    <div className="mat-cell-num">{s.adjVelocity}</div>
-                  </td>
-                  <td className="num mat-cell rw-cell-growth">
-                    <div className={"rw-growth-display mono " + (s.actualGrowth > 0 ? "up" : s.actualGrowth < 0 ? "down" : "flat")}>
-                      {s.actualGrowth > 0 ? "+" : ""}{s.actualGrowth.toFixed(1)}%
+                    <div className="rw-wh-stack">
+                      <div className="rw-wh-max mono">{D.fmtN(s.maxFg)}</div>
+                      <div className="rw-wh-sub">
+                        <span className="rw-wh-tag">FG</span>
+                        <span className="mono">{D.fmtN(s.whFg)}</span>
+                        <span className="rw-wh-op">+</span>
+                        <span className="rw-wh-tag">Prod</span>
+                        <span className="mono">{D.fmtN(s.producibleFg)}</span>
+                      </div>
                     </div>
                   </td>
-                  {mode === "custom" && (
-                    <td className="num mat-cell rw-cell-custom" onClick={e => e.stopPropagation()}>
-                      <CustomGrowthInput
-                        code={s.code}
-                        initial={customVal}
-                        isOverride={isOverride}
-                        onCommit={(val) => setGrowthFor(s.code, val)}
-                      />
-                    </td>
-                  )}
-                  <td className="mat-cell rw-cell-timeline">
-                    <RunwayTimeline
-                      runway={s.adjRunway}
-                      leadTime={s.leadTime}
-                      status={s.adjStatus}
-                    />
+
+                  {/* 3. Velocity & Growth — growth becomes editable in Custom mode */}
+                  <td className="num mat-cell rw-cell-vg" onClick={mode === "custom" ? (e => e.stopPropagation()) : undefined}>
+                    <div className="rw-vg-stack">
+                      <div className="rw-vg-vel mono">{s.adjVelocity}</div>
+                      {mode === "custom" ? (
+                        <CustomGrowthInput
+                          code={s.code}
+                          initial={customVal}
+                          isOverride={isOverride}
+                          onCommit={(val) => setGrowthFor(s.code, val)}
+                        />
+                      ) : (
+                        <div className={"rw-vg-growth mono " + (s.actualGrowth > 0 ? "up" : s.actualGrowth < 0 ? "down" : "flat")}>
+                          {s.actualGrowth > 0 ? "+" : ""}{s.actualGrowth.toFixed(1)}%
+                        </div>
+                      )}
+                    </div>
                   </td>
+
+                  {/* 4. Warehouse Runway · Lead (compact) */}
+                  <td className="num mat-cell rw-cell-wh-rl">
+                    <div className="rw-rl-stack">
+                      <span className={"pf-cell-runway" + whTier}>{s.adjRunway}d</span>
+                      <span className="rw-rl-lead muted">{s.leadTime}d lead</span>
+                    </div>
+                  </td>
+
+                  {/* 5-7. Marketplace channels */}
+                  <td className="num mat-cell">
+                    <RunwayChannelCell units={s.stock.amazonFBA} vel={s.chVel.amazonFBA} leadTime={s.chLead.amazonFBA} growth={s.actualGrowth}/>
+                  </td>
+                  <td className="num mat-cell">
+                    <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
+                  </td>
+                  <td className="num mat-cell">
+                    <RunwayChannelCell units={s.stock.blinkit} vel={s.chVel.blinkit} leadTime={s.chLead.blinkit} growth={s.actualGrowth}/>
+                  </td>
+
+                  {/* 8. Action needed */}
                   <td className="mat-cell rw-cell-action">
                     <div className="rw-action-stack">
                       <div className={"runway-reorder" + (overdue ? " is-overdue" : "")}>
@@ -1241,33 +1654,62 @@ const ForecastTab = ({ inventory, days, setDays }) => {
 
   return (
     <>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
-        <Card title={`Projected demand · ${days}d`} sub="across all SKUs">
-          <div className="stat-num lg">{D.fmtN(totalDemand)}</div>
-          <div className="muted" style={{ fontSize: 11.5 }}>units to ship over next {days} days</div>
-        </Card>
-        <Card title="At-risk SKUs" sub="Max FG (today) < forecast demand">
-          <div className="stat-num lg" style={{ color: atRisk > 0 ? "var(--critical)" : "var(--success)" }}>
-            {atRisk}
+      {/* Forecast risk summary — reuses the .rw-risk-card pattern from the
+          Runway calculator so the two tabs feel like the same product.
+          Severity-tinted left accent + soft BG + icon chip + colored hero
+          number. */}
+      <div className="grid rw-risk-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 14 }}>
+        <div className="rw-risk-card ok">
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="sales" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">{`Projected demand · ${days}d`}</div>
+              <div className="rw-risk-sub">across all SKUs</div>
+            </div>
           </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            of {rows.length} won't meet projected demand
+          <div className="rw-risk-num" style={{ color: "var(--ink)" }}>{D.fmtN(totalDemand)}</div>
+          <div className="rw-risk-detail">units to ship over next {days} days</div>
+        </div>
+
+        <div className={"rw-risk-card " + (atRisk > 0 ? "crit" : "ok")}>
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="alerts" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">At-risk SKUs</div>
+              <div className="rw-risk-sub">Max FG (today) &lt; forecast demand</div>
+            </div>
           </div>
-        </Card>
-        <Card title="Underperforming SKUs" sub="trend < −5% (sales declining)">
-          <div className="stat-num lg" style={{ color: underperforming > 0 ? "var(--warning)" : "var(--success)" }}>
-            {underperforming}
+          <div className="rw-risk-num">{atRisk}</div>
+          <div className="rw-risk-detail">of {rows.length} won't meet projected demand</div>
+        </div>
+
+        <div className={"rw-risk-card " + (underperforming > 0 ? "warn" : "ok")}>
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="down" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">Underperforming SKUs</div>
+              <div className="rw-risk-sub">trend &lt; −5% (sales declining)</div>
+            </div>
           </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            {overperforming > 0 && <>· {overperforming} overperforming (&gt;+20%)</>}
+          <div className="rw-risk-num">{underperforming}</div>
+          <div className="rw-risk-detail">
+            {overperforming > 0
+              ? <>{overperforming} overperforming (&gt;+20%) on the other end</>
+              : "no overperformers"}
           </div>
-        </Card>
-        <Card title="Recommended reorder" sub={`to cover ${days}d + 30d buffer`}>
-          <div className="stat-num lg" style={{ color: totalReorder > 0 ? "var(--warning)" : "var(--ink-3)" }}>
-            {D.fmtN(totalReorder)}
+        </div>
+
+        <div className={"rw-risk-card " + (totalReorder > 0 ? "warn" : "ok")}>
+          <div className="rw-risk-head">
+            <span className="rw-risk-icon"><Icon name="box" size={14}/></span>
+            <div>
+              <div className="rw-risk-title">Recommended reorder</div>
+              <div className="rw-risk-sub">to cover {days}d + 30d buffer</div>
+            </div>
           </div>
-          <div className="muted" style={{ fontSize: 11.5 }}>units across all suppliers</div>
-        </Card>
+          <div className="rw-risk-num">{D.fmtN(totalReorder)}</div>
+          <div className="rw-risk-detail">units across all suppliers</div>
+        </div>
       </div>
 
       <Card
@@ -1473,7 +1915,7 @@ const ReturnsTab = () => {
     <>
       <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 14 }}>
         <Card title="Returns this month"><div className="stat-num lg">142</div><div className="muted" style={{ fontSize: 11.5 }}>units · 2.6% blended rate</div></Card>
-        <Card title="Pending inspection"><div className="stat-num lg" style={{ color: "var(--warning)" }}>24</div><div className="muted" style={{ fontSize: 11.5 }}>queued at warehouse</div></Card>
+        <Card title="Pending inspection"><div className="stat-num lg" style={{ color: "var(--warning)" }}>24</div><div className="muted" style={{ fontSize: 11.5 }}>queued at central warehouse</div></Card>
         <Card title="Restocked this month"><div className="stat-num lg" style={{ color: "var(--success)" }}>96</div><div className="muted" style={{ fontSize: 11.5 }}>units back to inventory</div></Card>
         <Card title="Written off"><div className="stat-num lg" style={{ color: "var(--critical)" }}>22</div><div className="muted" style={{ fontSize: 11.5 }}>units · {D.fmtINR(38000)} P&L impact</div></Card>
       </div>

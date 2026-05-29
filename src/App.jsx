@@ -41,6 +41,19 @@ const App = () => {
     window.localStorage.setItem("ns.previewMode", String(previewMode));
   }, [previewMode]);
 
+  // Dark / light theme toggle (persisted). data-theme on <html> drives the
+  // CSS-variable override under html[data-theme="dark"] in index.css, so
+  // every component picks up the new palette automatically — no per-page
+  // logic needed.
+  const [theme, setTheme] = useState(() => {
+    if (typeof window === "undefined") return "light";
+    return window.localStorage.getItem("ns.theme") || "light";
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    window.localStorage.setItem("ns.theme", theme);
+  }, [theme]);
+
   const D = NSData;
   const isPreviewPage = active !== "inventory";
   const showPreviewUI = isPreviewPage && previewMode;
@@ -96,6 +109,8 @@ const App = () => {
           previewMode={previewMode}
           onTogglePreview={() => setPreviewMode(p => !p)}
           isPreviewPage={isPreviewPage}
+          theme={theme}
+          onToggleTheme={() => setTheme(t => t === "dark" ? "light" : "dark")}
         />
         {showPreviewUI && (
           <div className="preview-banner">

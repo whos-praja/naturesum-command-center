@@ -10,6 +10,7 @@ import {
 import "./index.css";
 import App from "./App.jsx";
 import SignInPage from "./pages/SignInPage.jsx";
+import { LiveDataProvider } from "./contexts/LiveDataContext.jsx";
 
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const AUTH_ENABLED = Boolean(PUBLISHABLE_KEY);
@@ -38,29 +39,31 @@ if (!AUTH_ENABLED) {
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <BrowserRouter>
-      {AUTH_ENABLED ? (
-        <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/sign-in">
-          <Routes>
-            <Route path="/sign-in/*" element={<SignInPage />} />
-            <Route
-              path="/*"
-              element={
-                <>
-                  <SignedIn>
-                    <Routed />
-                  </SignedIn>
-                  <SignedOut>
-                    <RedirectToSignIn />
-                  </SignedOut>
-                </>
-              }
-            />
-          </Routes>
-        </ClerkProvider>
-      ) : (
-        <Routed />
-      )}
-    </BrowserRouter>
+    <LiveDataProvider>
+      <BrowserRouter>
+        {AUTH_ENABLED ? (
+          <ClerkProvider publishableKey={PUBLISHABLE_KEY} afterSignOutUrl="/sign-in">
+            <Routes>
+              <Route path="/sign-in/*" element={<SignInPage />} />
+              <Route
+                path="/*"
+                element={
+                  <>
+                    <SignedIn>
+                      <Routed />
+                    </SignedIn>
+                    <SignedOut>
+                      <RedirectToSignIn />
+                    </SignedOut>
+                  </>
+                }
+              />
+            </Routes>
+          </ClerkProvider>
+        ) : (
+          <Routed />
+        )}
+      </BrowserRouter>
+    </LiveDataProvider>
   </StrictMode>
 );

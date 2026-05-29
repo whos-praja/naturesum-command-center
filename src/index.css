@@ -47,6 +47,151 @@
   --shadow: 0 1px 0 rgba(26,31,27,0.04), 0 2px 6px rgba(26,31,27,0.06);
 }
 
+/* ── DARK THEME ──────────────────────────────────────────────────
+   Quiet Ops, but at night. Warm-tinted dark backgrounds (slight green
+   cast to match the brand), distinct step-up from canvas → card so
+   surfaces visibly layer, bumped chroma on brand + status colours so
+   they pop instead of looking muddy. Triggered by data-theme="dark"
+   on <html>. */
+html[data-theme="dark"] {
+  /* Surfaces — three clear steps: base (page) → canvas (topbar/area) →
+     card (content). Each step ~10-12% lighter so layering is obvious. */
+  --bg-base:     #0E1311;     /* page root */
+  --bg-canvas:   #161B18;     /* topbar / content gutter */
+  --bg-card:     #232A26;     /* cards, tables, modals — distinctly higher */
+  --bg-sunken:   #0A0E0C;     /* inputs, hover sunken states */
+
+  --bg-sidebar:        #090C0B;
+  --bg-sidebar-hover:  #161B18;
+  --bg-sidebar-active: #232A26;
+
+  /* Text — brighter primary so it really stands above card BG */
+  --ink:   #F2EFE5;           /* primary — strong cream, ~88% lum */
+  --ink-2: #C9C5BA;           /* secondary */
+  --ink-3: #8E8A7E;           /* muted */
+  --ink-4: #5C5854;           /* disabled */
+
+  /* Borders — visible enough to define cards without screaming */
+  --border:        #2F3633;
+  --border-soft:   #252B28;
+  --border-strong: #404742;
+
+  /* Brand + status — chroma bumped so they pop on dark. Soft variants
+     at 0.18 alpha (was 0.14) so the tinted BGs actually register. */
+  --brand:       #7BC498;
+  --brand-deep:  #B6E0C5;
+  --brand-soft:  rgba(123, 196, 152, 0.18);
+  --brand-line:  rgba(123, 196, 152, 0.45);
+
+  --critical:      #E97070;
+  --critical-soft: rgba(233, 112, 112, 0.18);
+  --warning:       #DBA850;
+  --warning-soft:  rgba(219, 168, 80, 0.18);
+  --success:       #7BC498;
+  --success-soft:  rgba(123, 196, 152, 0.18);
+  --info:          #79B0CC;
+  --info-soft:     rgba(121, 176, 204, 0.18);
+
+  --shadow-sm: 0 1px 0 rgba(0,0,0,0.40), 0 1px 2px rgba(0,0,0,0.30);
+  --shadow:    0 1px 0 rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.45);
+}
+
+/* Patches for components that hardcoded light-mode amber/green tints
+   (mostly preview-banner, deferred tags, runway pills) so they stay
+   readable on dark BG. */
+html[data-theme="dark"] .is-deferred > .card {
+  /* The 2px blur over dark text on a dark card turns the content into
+     mush. Drop the blur and use opacity + slight saturation reduction
+     instead, which keeps the shape readable. */
+  filter: saturate(0.7) opacity(0.65);
+}
+html[data-theme="dark"] .table .col-deferred {
+  filter: saturate(0.7) opacity(0.7);
+}
+html[data-theme="dark"] .is-deferred .deferred-tag {
+  border-color: var(--warning-soft);
+}
+html[data-theme="dark"] .preview-banner {
+  /* Re-tint the amber banner so it doesn't blast cream over dark. */
+  background: rgba(219, 168, 80, 0.10);
+  border-color: rgba(219, 168, 80, 0.30);
+  color: var(--ink);
+}
+html[data-theme="dark"] .preview-pill {
+  background: rgba(219, 168, 80, 0.25);
+  color: var(--warning);
+  border-color: rgba(219, 168, 80, 0.40);
+}
+/* Runway risk cards — hardcoded light-mode rgba tints look muddy on
+   dark BG. Re-tint using the dark palette's accent colours so the
+   severity is still readable at a glance. */
+html[data-theme="dark"] .rw-risk-card.crit {
+  background: linear-gradient(180deg, rgba(233,112,112,0.10) 0%, var(--bg-card) 60%);
+}
+html[data-theme="dark"] .rw-risk-card.warn {
+  background: linear-gradient(180deg, rgba(219,168,80,0.10) 0%, var(--bg-card) 60%);
+}
+html[data-theme="dark"] .rw-risk-card.ok {
+  background: linear-gradient(180deg, rgba(123,196,152,0.10) 0%, var(--bg-card) 60%);
+}
+html[data-theme="dark"] .rw-risk-card.crit .rw-risk-icon { background: rgba(233,112,112,0.20); }
+html[data-theme="dark"] .rw-risk-card.warn .rw-risk-icon { background: rgba(219,168,80,0.20); }
+html[data-theme="dark"] .rw-risk-card.ok   .rw-risk-icon { background: rgba(123,196,152,0.20); }
+html[data-theme="dark"] .rw-risk-card:hover {
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+}
+/* Per-cell runway pill tints (used in PlatformCell + popover channel rows) */
+html[data-theme="dark"] .pf-cell-runway.crit {
+  background: rgba(233,112,112,0.16);
+  border-color: rgba(233,112,112,0.40);
+  color: var(--critical);
+}
+html[data-theme="dark"] .pf-cell-runway.warn {
+  background: rgba(219,168,80,0.16);
+  border-color: rgba(219,168,80,0.40);
+  color: var(--warning);
+}
+/* Stock-alert card on Unified Stock */
+html[data-theme="dark"] .stock-alert-card.is-critical {
+  background: linear-gradient(180deg, rgba(233,112,112,0.10) 0%, var(--bg-card) 60%);
+  border-top: 2px solid var(--critical);
+}
+/* Forecast table at-risk cells */
+html[data-theme="dark"] .fc-table td.fc-cell-atrisk {
+  background: rgba(233,112,112,0.10);
+}
+html[data-theme="dark"] .fc-table tbody tr:hover td.fc-cell-atrisk {
+  background: rgba(233,112,112,0.16);
+}
+/* Forecast result column (Reorder) — amber tint */
+html[data-theme="dark"] .fc-table td.fc-cell-result {
+  background: rgba(219,168,80,0.07);
+  border-left-color: rgba(219,168,80,0.35);
+}
+html[data-theme="dark"] .fc-table .fc-h-result {
+  background: rgba(219,168,80,0.18) !important;
+  border-bottom-color: rgba(219,168,80,0.35) !important;
+  border-left-color: rgba(219,168,80,0.35);
+}
+/* Materials breakdown popover — bottleneck row + Max FG header tint */
+html[data-theme="dark"] .wb-row-bottleneck {
+  background: rgba(219,168,80,0.08);
+}
+html[data-theme="dark"] .wb-section-bar-tag {
+  background: var(--success-soft);
+  color: var(--success);
+}
+/* Table row hover */
+html[data-theme="dark"] .fc-table tbody tr:hover td { background: rgba(123,196,152,0.06); }
+html[data-theme="dark"] .table .row-clickable:hover { background: rgba(123,196,152,0.05); }
+
+/* Smooth the colour swap so the toggle feels intentional, not jarring.
+   Only animate the canvas-level surfaces — not borders/text individually
+   (which would create a slow cascade). */
+html { color-scheme: light; transition: background-color 0.20s ease; }
+html[data-theme="dark"] { color-scheme: dark; }
+body { transition: background-color 0.20s ease, color 0.20s ease; }
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 
@@ -627,6 +772,176 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   user-select: none;
 }
 
+/* ───── Data-as-of pill + Upload modal ─────
+   The pill sits in the Inventory page header — it's the founder's
+   constant reminder of how fresh the dashboard data is. Two states:
+     - .is-sample → cream BG, amber dot, label "Sample data"
+     - .is-live   → green BG, green dot, label "Data as of <date>"
+   Clicking either opens the Upload modal. */
+.data-asof-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink-2);
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.data-asof-pill:hover { border-color: var(--border-strong); background: var(--bg-sunken); }
+.data-asof-pill.is-live {
+  background: var(--success-soft);
+  border-color: var(--brand-line);
+  color: var(--success);
+}
+.data-asof-pill.is-live:hover { background: var(--brand-soft); }
+.data-asof-pill.is-sample {
+  background: var(--warning-soft);
+  border-color: rgba(176, 122, 31, 0.32);
+  color: var(--warning);
+}
+.data-asof-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.data-asof-pill-dot.is-live   { background: var(--success); box-shadow: 0 0 0 3px rgba(63, 114, 80, 0.18); }
+.data-asof-pill-dot.is-sample { background: var(--warning); }
+.data-asof-pill-label .mono { font-size: 12px; font-weight: 600; }
+
+/* Upload modal — slightly wider than the SKU breakdown modal because
+   it shows a drop zone and a 6-cell summary grid. */
+.upload-modal { width: min(640px, 94vw) !important; }
+
+.upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 36px 24px;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-canvas);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.upload-dropzone:hover,
+.upload-dropzone.is-dragging {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+}
+.upload-dropzone-icon { color: var(--brand); }
+.upload-dropzone-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.upload-dropzone-sub  { font-size: 12.5px; color: var(--ink-2); }
+.upload-dropzone-hint { font-size: 11px; max-width: 380px; line-height: 1.4; }
+.upload-dropzone-hint code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  background: var(--bg-sunken);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--ink);
+}
+
+.upload-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 24px;
+}
+.upload-state-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-soft);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.upload-state-icon { color: var(--brand); }
+.upload-state-icon.crit { color: var(--critical); }
+.upload-state-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.upload-state-sub   { font-size: 12px; max-width: 420px; }
+
+.upload-preview { display: flex; flex-direction: column; gap: 14px; }
+.upload-preview-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.upload-preview-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.upload-preview-sub   { font-size: 11px; margin-top: 2px; }
+.upload-preview-asof {
+  text-align: right;
+  flex-shrink: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--border-soft);
+}
+.upload-preview-asof-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.upload-preview-asof-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--success);
+  margin-top: 2px;
+}
+
+.upload-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.upload-preview-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+.upload-preview-stat-num { font-size: 18px; font-weight: 600; color: var(--ink); line-height: 1; }
+.upload-preview-stat-num.warn { color: var(--warning); }
+.upload-preview-stat-label { font-size: 10.5px; color: var(--ink-3); }
+
+.upload-unmapped {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 11.5px;
+}
+.upload-unmapped summary { cursor: pointer; color: var(--warning); font-weight: 500; }
+.upload-unmapped summary::marker { color: var(--ink-4); }
+.upload-unmapped ul {
+  margin: 8px 0 0 0;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow-y: auto;
+  color: var(--ink-2);
+}
+.upload-unmapped li { padding: 2px 0; }
+
 /* Sub-tab preview blur — used by SubtabPreviewGate to mark specific tabs
    inside a live module as not-yet-built. The wrapper above (banner +
    tabs) stays interactive; only the actual tab content is blurred. */
@@ -762,36 +1077,14 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 }
 .link-btn:hover { color: var(--brand-deep); text-decoration-color: var(--brand); }
 
-/* ---------- DEMAND FORECAST TABLE ---------- */
-.fc-table { table-layout: fixed; }
+/* ---------- DEMAND FORECAST TABLE ----------
+   Only the bits unique to this view: column widths and the result-column
+   tint. Header height, font, alignment, cell padding, severity rows all
+   inherit from .mat-table for visual consistency with every other
+   Inventory table. */
 .fc-table .fc-col-sku    { width: 28%; }
 .fc-table .fc-col-num    { width: 12%; }
 .fc-table .fc-col-result { width: 12%; }
-
-.fc-table thead th {
-  height: 44px;
-  padding: 0 12px;
-  vertical-align: middle;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
-/* Center-align numeric headers + cells (scoped to fc-table only). The
-   item column stays left-aligned via the default. Override mat-cell-num's
-   right-align inside this table specifically. */
-.fc-table thead th.num             { text-align: center; }
-.fc-table tbody td.num             { text-align: center; }
-.fc-table tbody td.mat-cell {
-  vertical-align: top;
-  padding: 14px 12px;
-}
-.fc-table tbody td.num .mat-cell-num { text-align: center; }
-
-.fc-table .mat-cell-name {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--ink);
-}
 
 /* "Reorder" column treated as the result — soft warning tint + bold mono */
 .fc-table .fc-h-result {
@@ -820,16 +1113,311 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   font-weight: 600;
 }
 
-.fc-table tbody tr:hover td { background: rgba(47, 94, 71, 0.04); }
+/* Per-column hover tints layer on top of the base mat-table hover */
 .fc-table tbody tr:hover td.fc-cell-atrisk { background: rgba(183, 56, 56, 0.10); }
 .fc-table tbody tr:hover td.fc-cell-result { background: rgba(176, 122, 31, 0.09); }
-
-.fc-table tbody tr td { border-bottom: 1px solid var(--border-soft); }
-.fc-table tbody tr:last-child td { border-bottom: 0; }
 
 /* Stat-num color helpers for risk cards */
 .rw-stat-crit { color: var(--critical); }
 .rw-stat-warn { color: var(--warning); }
+
+/* ---------- Runway risk cards ----------
+   Severity-tinted hero cards. The left accent + soft BG let the founder
+   scan four cards in one glance and immediately see what's on fire (red),
+   what's approaching (amber), and what's calm (green). */
+.rw-risk-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-soft);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.rw-risk-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(26,31,27,0.06);
+}
+.rw-risk-card.crit {
+  border-left-color: var(--critical);
+  background: linear-gradient(180deg, rgba(183,56,56,0.045) 0%, var(--bg-card) 60%);
+}
+.rw-risk-card.warn {
+  border-left-color: var(--warning);
+  background: linear-gradient(180deg, rgba(176,122,31,0.045) 0%, var(--bg-card) 60%);
+}
+.rw-risk-card.ok {
+  border-left-color: var(--success);
+  background: linear-gradient(180deg, rgba(47,94,71,0.035) 0%, var(--bg-card) 60%);
+}
+.rw-risk-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rw-risk-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--border-soft);
+  color: var(--ink-3);
+}
+.rw-risk-card.crit .rw-risk-icon { background: rgba(183,56,56,0.12); color: var(--critical); }
+.rw-risk-card.warn .rw-risk-icon { background: rgba(176,122,31,0.12); color: var(--warning); }
+.rw-risk-card.ok   .rw-risk-icon { background: rgba(47,94,71,0.12);  color: var(--success); }
+.rw-risk-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.15;
+}
+.rw-risk-sub {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 1px;
+  line-height: 1.2;
+}
+.rw-risk-num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.rw-risk-card.crit .rw-risk-num { color: var(--critical); }
+.rw-risk-card.warn .rw-risk-num { color: var(--warning); }
+.rw-risk-card.ok   .rw-risk-num { color: var(--success); }
+.rw-risk-detail {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.35;
+}
+
+/* ---------- UNIFIED STOCK · PlatformCell ----------
+   Each platform column in the inventory table renders a stack:
+     - units (hero, mono)
+     - optional breakdown caption (warehouse only: "FG + Producible")
+     - runway pill + per-channel velocity (only when velocity > 0)
+   Layout is right-aligned to keep numbers on a clean trailing edge. */
+/* Unified Stock — uses auto layout (variable item names) but otherwise
+   inherits the full .mat-table style. */
+.us-table { table-layout: auto; }
+
+/* Status filter chip count — small mono badge inside the Status button
+   when filters are active. */
+.btn.is-active {
+  background: var(--brand-soft);
+  border-color: var(--brand-line);
+  color: var(--brand);
+}
+.us-filter-chip-count {
+  margin-left: 4px;
+  background: var(--brand);
+  color: var(--bg-card);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  min-width: 14px;
+  text-align: center;
+}
+
+/* Status dropdown menu — popover anchored under the Status button.
+   Multi-select checkboxes with status counts so the user can see how
+   many items fall into each bucket before deciding. */
+.us-status-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  min-width: 240px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: us-status-pop 0.14s ease;
+}
+@keyframes us-status-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.us-status-menu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-canvas);
+}
+.us-status-menu-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.us-status-menu-clear {
+  background: transparent;
+  border: 0;
+  color: var(--brand);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+.us-status-menu-clear:hover { color: var(--brand-deep); text-decoration: underline; }
+.us-status-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-soft);
+  transition: background 0.12s ease;
+}
+.us-status-menu-row:last-of-type { border-bottom: 0; }
+.us-status-menu-row:hover { background: var(--bg-canvas); }
+.us-status-menu-row.is-checked { background: var(--bg-canvas); }
+.us-status-menu-row input[type="checkbox"] {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+.us-status-menu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.us-status-menu-dot.crit { background: var(--critical); }
+.us-status-menu-dot.warn { background: var(--warning); }
+.us-status-menu-dot.ok   { background: var(--success); }
+.us-status-menu-text { flex: 1; min-width: 0; }
+.us-status-menu-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.us-status-menu-hint {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 1.2;
+}
+.us-status-menu-count {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--bg-sunken);
+}
+.us-status-menu-foot {
+  padding: 8px 12px;
+  font-size: 10.5px;
+  background: var(--bg-canvas);
+  border-top: 1px solid var(--border-soft);
+}
+
+.pf-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 78px;
+}
+.pf-cell-units {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+/* Units + inline breakdown sit on the same baseline so the warehouse cell
+   stays exactly as tall as every other platform cell (no third row pushing
+   the row height out of alignment). Right-aligned: units hugs the right
+   edge, breakdown floats to its left. */
+.pf-cell-units-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pf-cell-bd-inline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+/* Tiny "FG" / "Prod" sans-serif tags so the eye reads `label number + label
+   number` instead of an unlabelled `200 + 180`. Numbers stay mono + slightly
+   stronger so they remain the focus. */
+.pf-cell-bd-tag {
+  font-family: var(--font-sans, "DM Sans", sans-serif);
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pf-cell-bd-num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  color: var(--ink-2);
+}
+.pf-cell-bd-op { color: var(--ink-4); margin: 0 2px; }
+.pf-cell-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+}
+.pf-cell-runway {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  color: var(--ink-2);
+}
+.pf-cell-runway.warn {
+  background: rgba(176, 122, 31, 0.10);
+  border-color: rgba(176, 122, 31, 0.32);
+  color: var(--warning);
+}
+.pf-cell-runway.crit {
+  background: rgba(183, 56, 56, 0.10);
+  border-color: rgba(183, 56, 56, 0.32);
+  color: var(--critical);
+}
+.pf-cell-vel {
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-feature-settings: "tnum";
+}
+.pf-cell-growth { display: inline-flex; align-items: center; }
+.pf-cell-growth .delta { font-size: 10.5px; gap: 2px; }
 
 /* ---------- RUNWAY CALCULATOR TAB ---------- */
 .runway-head {
@@ -937,61 +1525,172 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .runway-chip.warn.active .runway-chip-count,
 .runway-chip.ok.active   .runway-chip-count { background: rgba(255, 255, 255, 0.15); color: var(--bg-canvas); border-color: transparent; }
 
-/* Runway table — 9 base columns + 1 conditional "Custom %" col in
-   custom mode. table-layout: fixed; widths sum to ~100% in both modes. */
-.runway-table { table-layout: fixed; }
-.runway-table .rw-col-sku     { width: 16%; }
-.runway-table .rw-col-num     { width: 7%; }
-.runway-table .rw-col-max     { width: 8%; }
-.runway-table .rw-col-growth  { width: 8%; }
-.runway-table .rw-col-reorder { width: 13%; }
-.runway-table .rw-h-custom    {
-  background: var(--brand-soft);
-  color: var(--brand);
-  border-bottom-color: var(--brand-line) !important;
-  border-left: 1px solid var(--brand-line);
-}
-.runway-table td.rw-cell-custom {
-  background: rgba(47, 94, 71, 0.04);
-  border-left: 1px solid var(--brand-line);
-}
-
-/* Uniform header — single-line, fixed height, consistent padding */
-.runway-table thead th {
-  height: 44px;
-  padding: 0 12px;
-  vertical-align: middle;
-  font-size: 10.5px;
-  letter-spacing: 0.08em;
-  white-space: nowrap;
-}
+/* Runway table — 8 columns: Item, Warehouse Max FG, Velocity/Growth,
+   WH Runway/Lead, Amazon FBA, Flipkart, Blinkit, Action. Each marketplace
+   column carries its own stacked stock+runway+velocity+growth cell so
+   the row tells you "where this SKU lives and how fast each channel burns
+   through it" in one horizontal sweep. */
+/* ---------- RUNWAY CALCULATOR TABLE ----------
+   Per-table specialisations: column widths + the Action right-align +
+   the "Central warehouse" headline column wash. Everything else
+   inherits from .mat-table for visual consistency with Unified Stock,
+   Materials, and Forecast. */
+/* Column widths chosen against actual content:
+   - Item    ≈ "Sea Buckthorn Dry Berry" + SKU sub
+   - WH     ≈ "Central warehouse" header + "FG 1,043 + PROD 880" sub
+   - Vel/MP ≈ "12.7/d +12.4%" longest line
+   - Action ≈ "Overdue by 100d" + "SCHEDULE PO" pill (worst case)
+   Add to exactly 100 — table-layout: fixed needs the sum to honor widths. */
+.runway-table .rw-col-sku    { width: 13%; }
+.runway-table .rw-col-wh     { width: 12%; }
+.runway-table .rw-col-vg     { width: 8%; }
+.runway-table .rw-col-wh-rl  { width: 10%; }
+.runway-table .rw-col-mp     { width: 14%; }   /* ×3 = 42% */
+.runway-table .rw-col-action { width: 15%; }
 .runway-table thead .rw-h-action { text-align: right; }
 
-/* Cells: middle-aligned, consistent padding, single-line vertical rhythm */
-.runway-table tbody td.mat-cell {
-  vertical-align: middle;
-  padding: 11px 12px;
-  height: 56px;
+/* Header rows can grow to 2 lines if needed (e.g. "CENTRAL WAREHOUSE")
+   instead of overflowing into the next column. Headers stay vertically
+   centred via vertical-align: middle inherited from mat-table. */
+.runway-table thead th {
+  white-space: normal;
+  line-height: 1.15;
+  padding: 8px 10px;
 }
-.runway-table .mat-cell-sku { padding-top: 11px; padding-bottom: 11px; }
 
-.runway-row-red    td:first-child { border-left: 3px solid var(--critical); padding-left: 9px !important; }
-.runway-row-amber  td:first-child { border-left: 3px solid var(--warning);  padding-left: 9px !important; }
-.runway-row-green  td:first-child { border-left: 3px solid transparent;     padding-left: 12px !important; }
+/* Subtle vertical dividers between the three marketplace columns so the
+   eye reads each platform as its own discrete unit instead of one wide
+   blur of numbers. Columns 5/6/7 = Amazon/Flipkart/Blinkit. */
+.runway-table thead th:nth-child(5),
+.runway-table thead th:nth-child(6),
+.runway-table thead th:nth-child(7),
+.runway-table tbody td:nth-child(5),
+.runway-table tbody td:nth-child(6),
+.runway-table tbody td:nth-child(7) {
+  border-left: 1px solid var(--border-soft);
+}
 
-/* "Max FG" column — slight green wash + left+right divider lines so the
-   column reads as a contained "result" zone. */
-.runway-table .rw-h-max,
+/* "Warehouse Max FG" column — soft green wash + side dividers so the
+   column reads as a contained "headline" zone for the warehouse. */
+.runway-table .rw-h-wh,
 .runway-table td.rw-cell-max {
-  background: rgba(63, 114, 80, 0.08);
-  border-left: 1px solid #BFD3C4;
-  border-right: 1px solid #BFD3C4;
+  background: rgba(63, 114, 80, 0.06);
+  border-left: 1px solid var(--brand-line);
+  border-right: 1px solid var(--brand-line);
 }
-.runway-table .rw-h-max { color: var(--success); }
-.runway-table .rw-cell-max .mat-cell-num.result.max {
+.runway-table .rw-h-wh { color: var(--success); }
+
+/* Warehouse cell stack — Max FG big, FG + Prod breakdown small underneath */
+.rw-wh-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.rw-wh-max {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 18px;
   font-weight: 700;
   color: var(--brand-deep);
+  letter-spacing: -0.01em;
+  line-height: 1;
 }
+.rw-wh-sub {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+.rw-wh-tag {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  font-weight: 600;
+  color: var(--ink-4);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.rw-wh-op { color: var(--ink-4); margin: 0 1px; }
+
+/* Velocity + Growth cell — velocity big, growth small underneath. In
+   Custom mode the growth becomes the CustomGrowthInput component. */
+.rw-vg-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.rw-vg-vel {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.rw-vg-growth {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.rw-vg-growth.up   { color: var(--success); }
+.rw-vg-growth.down { color: var(--critical); }
+.rw-vg-growth.flat { color: var(--ink-3); }
+
+/* Warehouse Runway + Lead time — compact stack replaces the old timeline
+   bar. Runway pill on top (severity-tinted), lead-time annotation below. */
+.rw-rl-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.rw-rl-lead {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 1;
+}
+
+/* Marketplace channel cell — two short lines:
+     1. Stock units (big, right-aligned)
+     2. Runway pill · Xd lead   ·   vel/d   +growth%      (all inline)
+   Putting runway+lead+vel+growth on a single meta line halves the row
+   height vs the old 3-line stack and lets the eye sweep the full SKU
+   across all 3 marketplaces without scanning multiple rows per channel. */
+.rw-ch-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+}
+.rw-ch-cell-stock {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.rw-ch-cell-rl,
+.rw-ch-cell-vg {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+.rw-ch-cell-lead {
+  font-family: var(--mono);
+  color: var(--ink-3);
+}
+.rw-ch-cell-vel { color: var(--ink-3); font-feature-settings: "tnum"; }
+.rw-ch-cell-vg .delta { font-size: 10.5px; gap: 2px; }
 
 /* "Action needed" column — amber-tinted action zone with reorder-by date
    and CTA stacked. Header right-aligned to match content. */
@@ -1011,9 +1710,9 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
 }
-.rw-action-stack .runway-reorder { font-size: 12px; }
+.rw-action-stack .runway-reorder { font-size: 11.5px; }
 
 /* Status flags — pill-shaped indicators, NOT buttons. Critical red for
    overdue reorders, amber for upcoming. No hover, no cursor change. */
@@ -1522,12 +2221,14 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .rw-timeline-amber .rw-timeline-runway-label .mono { color: var(--warning); }
 .rw-timeline-green .rw-timeline-runway-label .mono { color: var(--success); }
 
-/* Reorder-by cell */
+/* Reorder-by cell — locked to a single line so text like "Overdue by 14d"
+   never wraps to two lines if the column ever runs tight. */
 .runway-reorder {
   font-family: var(--mono);
   font-size: 12.5px;
   font-weight: 500;
   color: var(--ink);
+  white-space: nowrap;
 }
 .runway-reorder.is-overdue { color: var(--critical); font-weight: 600; }
 .runway-reorder-sub { font-size: 10.5px; margin-top: 1px; font-family: var(--mono); }
@@ -1680,45 +2381,80 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 }
 
 /* ---------- MATERIALS TABLE ---------- */
-/* Fixed column widths so the layout doesn't shift between rows and the
-   bottleneck-pill column stays tight. */
+/* ─── CANONICAL TABLE STYLE ──────────────────────────────────────
+   .mat-table is the single shared pattern for EVERY data table inside
+   Inventory (Unified stock, Materials breakdown, Runway calculator,
+   Demand forecast). Per-table specialisations only set:
+     - colgroup widths (e.g. fc-col-num, rw-col-mp)
+     - column tints (Max FG green wash, Action amber, bottleneck amber)
+   Everything else — header height, padding, cell padding, number font,
+   number alignment, row borders, hover, severity row markers — lives
+   here, so every table reads as the same family. */
 .mat-table { table-layout: fixed; width: 100%; }
 .mat-table .col-sku    { width: 18%; }
 .mat-table .col-num    { width: 10%; }
 .mat-table .col-bn     { width: 10%; }
 .mat-table .col-result { width: 11%; }
-/* Last col-result targets Max FG (8th column) — slightly wider to give the
-   headline number room with its formula chip in the header. */
 .mat-table .col-result:last-of-type { width: 13%; }
 
-/* Headers — colored material labels stay; the bottleneck and result columns
-   each get their own header treatment to signal what they mean. */
+/* Headers — uniform 40px height, 10.5px label, right-aligned for numerics */
 .mat-table thead th {
+  height: 40px;
+  padding: 0 12px;
+  vertical-align: middle;
   font-size: 10.5px;
   letter-spacing: 0.08em;
   font-weight: 600;
-  padding: 11px 14px;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
+.mat-table thead th.num { text-align: right; }
+
 .mat-table .mat-h-bn { color: var(--ink-3); text-align: center; }
 .mat-table .mat-h-result {
   background: var(--success-soft) !important;
   color: var(--success);
-  border-bottom-color: #BFD3C4 !important;
-  border-left: 1px solid #BFD3C4;
+  border-bottom-color: var(--brand-line) !important;
+  border-left: 1px solid var(--brand-line);
 }
 
-/* Cell baseline — vertical-align top so multi-line cells (bottleneck) don't
-   push the rest of the row off-center. */
+/* Cells — top-aligned (multi-line stacks land correctly), 12px padding */
 .mat-table tbody td.mat-cell {
   vertical-align: top;
-  padding: 12px 14px;
+  padding: 12px 12px;
 }
+.mat-table tbody td.num { text-align: right; }
 .mat-table .mat-cell-sku { padding-top: 13px; }
 .mat-table .mat-cell-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink);
   margin-bottom: 1px;
+}
+
+/* Row separators + hover — consistent across all four tables */
+.mat-table tbody tr td { border-bottom: 1px solid var(--border-soft); }
+.mat-table tbody tr:last-child td { border-bottom: 0; }
+.mat-table tbody tr:hover td { background: rgba(47, 94, 71, 0.04); }
+
+/* Severity row markers — opt-in via `.row-crit / .row-warn / .row-ok`
+   class on the <tr>. Existing `.runway-row-{status}` aliases mirror
+   these so the table just works without renaming. */
+.mat-table tbody .row-crit  td:first-child,
+.mat-table tbody .runway-row-red    td:first-child {
+  border-left: 3px solid var(--critical);
+  padding-left: 9px !important;
+}
+.mat-table tbody .row-warn  td:first-child,
+.mat-table tbody .runway-row-amber  td:first-child {
+  border-left: 3px solid var(--warning);
+  padding-left: 9px !important;
+}
+.mat-table tbody .row-ok    td:first-child,
+.mat-table tbody .runway-row-green  td:first-child {
+  border-left: 3px solid transparent;
+  padding-left: 12px !important;
 }
 
 /* Standard numeric cell — number on top, runway hint below, right-aligned.
@@ -1874,8 +2610,8 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: 0 14px 40px rgba(26,31,27,0.18), 0 2px 6px rgba(26,31,27,0.08);
-  width: min(560px, 92vw);
-  max-height: 90vh;
+  width: min(620px, 92vw);
+  max-height: 95vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1900,7 +2636,7 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 .modal-foot {
   padding: 12px 18px;
@@ -1912,7 +2648,42 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   gap: 12px;
 }
 
-/* Producible FG hero block */
+/* Compact Max FG summary — single-line headline + formula caption. Replaces
+   the tall wb-best hero (kept below for any other consumers) so the popover
+   can fit FG breakdown + 5-channel split + footer KV without scrolling on
+   normal laptop viewports. */
+.wb-best-compact {
+  background: var(--success-soft);
+  border: 1px solid #BFD3C4;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wb-best-compact-main {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.wb-best-compact-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--success);
+  font-weight: 600;
+}
+.wb-best-compact-num {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--success);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.wb-best-compact-formula { font-size: 11.5px; }
+.wb-best-compact-formula strong { color: var(--ink); }
+
+/* Producible FG hero block (legacy — kept for any other view that still uses it) */
 .wb-best {
   background: var(--success-soft);
   border: 1px solid #BFD3C4;
@@ -1981,7 +2752,7 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 14px;
-  padding: 11px 14px;
+  padding: 7px 14px;
   font-size: 12px;
   background: var(--bg-card);
   border-bottom: 1px solid var(--border-soft);
@@ -2044,7 +2815,125 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 }
 .wb-row-bottleneck .wb-row-value { color: var(--warning); }
 
+/* Slim section header bar — section name on the left, headline stat or
+   units-legend on the right. Replaces the tall hero card so the popover
+   can show Materials + 5 channels + KV stats without scrolling. */
+.wb-section-bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+.wb-section-bar-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-2);
+}
+.wb-section-bar-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+.wb-section-bar-tag {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--success);
+  background: var(--success-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.wb-section-bar-num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--success);
+  letter-spacing: -0.01em;
+}
+.wb-section-bar-formula { font-size: 11.5px; }
+.wb-section-bar-formula strong { color: var(--ink); }
+
+/* ---------- Channel breakdown (popover) ----------
+   Single-line rows: swatch + name on the left, units + meta on the right.
+   Hint text moved to row title-attr tooltip so each row collapses to ~28px
+   tall. */
+.wb-channels {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.wb-ch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wb-ch-row:last-child { border-bottom: 0; }
+.wb-ch-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.wb-ch-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.wb-ch-name {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.wb-ch-hint {
+  font-size: 10.5px;
+  line-height: 1.2;
+  margin-top: 1px;
+}
+.wb-ch-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.wb-ch-units {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.wb-ch-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.wb-ch-vel {
+  font-size: 11px;
+  color: var(--ink-3);
+  font-feature-settings: "tnum";
+}
+.wb-ch-meta .delta { font-size: 11px; gap: 2px; }
+
 .wb-meta { border-top: 1px solid var(--border-soft); padding-top: 14px; }
+/* Inside the popover, repack the KV stats into a 2-column grid so we don't
+   waste the right half of the modal on whitespace. Two label-value pairs
+   per row instead of one. */
+.wb-meta .kv {
+  grid-template-columns: max-content 1fr max-content 1fr;
+  column-gap: 24px;
+}
 
 /* "LIVE" pill next to Inventory in sidebar */
 .nav-item .live-pill {

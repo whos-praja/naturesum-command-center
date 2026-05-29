@@ -32,6 +32,8 @@ const Icon = ({ name, size = 16 }) => {
     truck:       <><path d="M1.5 5.5h7v5h-7zM8.5 7h3l2 2v1.5h-5z" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round"/><circle cx="4" cy="11.5" r="1.2" stroke="currentColor" strokeWidth="1.4" fill="none"/><circle cx="11" cy="11.5" r="1.2" stroke="currentColor" strokeWidth="1.4" fill="none"/></>,
     eye:         <><path d="M1.5 8s2.5-4 6.5-4 6.5 4 6.5 4-2.5 4-6.5 4S1.5 8 1.5 8z" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round"/><circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.4" fill="none"/></>,
     eyeOff:      <><path d="M1.5 8s2.5-4 6.5-4c1.4 0 2.6.5 3.7 1.2M14.5 8s-2.5 4-6.5 4c-1.4 0-2.6-.5-3.7-1.2" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round"/><path d="M2 2l12 12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></>,
+    sun:         <><circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5" fill="none"/><path d="M8 1.5v1.8M8 12.7v1.8M1.5 8h1.8M12.7 8h1.8M3.3 3.3l1.3 1.3M11.4 11.4l1.3 1.3M3.3 12.7l1.3-1.3M11.4 4.6l1.3-1.3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></>,
+    moon:        <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round"/>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 16 16">
