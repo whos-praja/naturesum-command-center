@@ -748,6 +748,10 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 }
 .link-btn:hover { color: var(--brand-deep); text-decoration-color: var(--brand); }
 
+/* Stat-num color helpers for risk cards */
+.rw-stat-crit { color: var(--critical); }
+.rw-stat-warn { color: var(--warning); }
+
 /* ---------- RUNWAY CALCULATOR TAB ---------- */
 .runway-head {
   display: flex;
@@ -1142,78 +1146,108 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .sim-inputs { display: flex; flex-direction: column; gap: 4px; }
 .sim-input-row {
   display: grid;
-  grid-template-columns: 130px 1fr 80px 64px;
+  grid-template-columns: 130px 1fr 210px;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 4px;
   border-bottom: 1px solid var(--border-soft);
 }
-.sim-input-base {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  font-size: 10.5px;
+/* Column header row above the input list */
+.sim-input-row.sim-input-head {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  padding-top: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
   color: var(--ink-3);
-  gap: 2px;
-  line-height: 1.1;
-}
-.sim-input-base-val {
-  font-size: 12px;
-  color: var(--ink-3);
-  font-weight: 500;
-}
-
-/* Delta chip (shown when value differs from baseline) */
-.sim-delta-pct {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  padding: 2px 7px;
-  border-radius: 3px;
-  white-space: nowrap;
-}
-.sim-delta-pct.up    { background: var(--brand-soft); color: var(--brand-deep); border: 1px solid var(--brand-line); }
-.sim-delta-pct.down  { background: var(--critical-soft); color: var(--critical); border: 1px solid #E5BFBC; }
-.sim-delta-from {
-  font-size: 9.5px;
-  color: var(--ink-4);
-  letter-spacing: 0.02em;
-}
-
-/* Slider wrap + baseline tick */
-.sim-range-wrap {
-  position: relative;
-  height: 16px;
-  display: flex;
-  align-items: center;
-}
-.sim-range-tick {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  width: 2px;
-  background: var(--ink-3);
-  opacity: 0.55;
-  border-radius: 1px;
-  pointer-events: none;
-  transform: translateX(-1px);
-}
-.sim-range-tick::after {
-  content: "baseline";
-  position: absolute;
-  bottom: -14px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 8.5px;
-  font-family: var(--mono);
-  color: var(--ink-3);
-  opacity: 0.7;
-  white-space: nowrap;
-  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+.sim-input-head-label { text-align: center; }
+.sim-input-head-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.sim-input-head-new {
+  width: 90px;
+  text-align: right;
+  flex-shrink: 0;
+  padding-right: 8px;
+  color: var(--brand);
+}
+.sim-input-head-current {
+  min-width: 90px;
+  text-align: center;
+  color: var(--ink-4);
+}
+
+/* Input cluster — number on the left, baseline pill on the right.
+   Pill shows just the baseline number when unchanged. When the value
+   diverges, it adds a colored delta + a reset arrow; click to revert. */
+.sim-input-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.sim-baseline-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-4);
+  cursor: default;
+  white-space: nowrap;
+  height: 28px;
+  min-width: 90px;
+  justify-content: center;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.sim-baseline-pill:disabled { cursor: default; }
+.sim-baseline-pill.is-changed {
+  cursor: pointer;
+  background: var(--bg-card);
+  border-color: var(--brand-line);
+}
+.sim-baseline-pill.is-changed:hover {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: var(--brand-deep);
+}
+.sim-baseline-num {
+  font-size: 11.5px;
+  color: var(--ink-2);
+  font-weight: 500;
+}
+.sim-baseline-pill.is-changed .sim-baseline-num {
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-4);
+  color: var(--ink-3);
+}
+.sim-baseline-reset {
+  font-size: 13px;
+  color: var(--brand);
+  font-weight: 700;
+  line-height: 1;
+}
+.sim-baseline-pill.is-changed:hover .sim-baseline-reset { color: var(--brand-deep); }
+.sim-baseline-delta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: -0.01em;
+}
+.sim-baseline-delta.up   { background: var(--brand-soft); color: var(--brand-deep); }
+.sim-baseline-delta.down { background: var(--critical-soft); color: var(--critical); }
 .sim-input-row:last-child { border-bottom: 0; }
 .sim-input-row.is-delta { background: var(--brand-soft); border-radius: 4px; }
 .sim-input-label {
@@ -1259,7 +1293,8 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   font-size: 12.5px;
   font-family: var(--mono);
   text-align: right;
-  width: 100%;
+  width: 90px;
+  flex-shrink: 0;
 }
 .sim-number:focus { outline: 2px solid var(--brand-line); outline-offset: -1px; border-color: var(--brand); }
 
@@ -1382,10 +1417,8 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .rw-timeline-marker::before { top: -3px; border-radius: 50%; }
 .rw-timeline-marker::after  { bottom: -3px; border-radius: 50%; }
 
-/* Labels under the bar — both positioned absolutely at their bar
-   positions so they never collide. Runway label right-aligns to its
-   point (so it sits at the END of the colored bar); Lead label centers
-   on the marker. clamp() prevents either from spilling outside the row. */
+/* Both labels sit BELOW the bar. Anchoring (set inline) flips based on
+   which side of each other they are, so they always point AWAY → gap. */
 .rw-timeline-labels {
   position: relative;
   margin-top: 6px;
@@ -1400,9 +1433,6 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   white-space: nowrap;
   color: var(--ink-3);
 }
-.rw-timeline-runway-label { transform: translateX(-100%); padding-right: 4px; }
-.rw-timeline-lead-label   { transform: translateX(-50%); padding-left: 4px; }
-
 .rw-timeline-runway-label .mono,
 .rw-timeline-lead-label .mono {
   color: var(--ink);

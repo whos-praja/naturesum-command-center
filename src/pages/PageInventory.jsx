@@ -677,8 +677,16 @@ const SimulatorTab = ({ inventory }) => {
 
       <div className="sim-grid">
         {/* INPUTS panel */}
-        <Card title="Inputs" sub="Edit any cell — outputs recompute instantly. Baseline (sheet value) shown on the right.">
+        <Card title="Inputs" sub="Edit any cell — outputs recompute instantly. Modified values get a clickable pill to reset.">
           <div className="sim-inputs">
+            <div className="sim-input-row sim-input-head">
+              <div></div>
+              <div className="sim-input-head-label">Tweak ↔</div>
+              <div className="sim-input-head-cluster">
+                <span className="sim-input-head-new">New value</span>
+                <span className="sim-input-head-current">Current</span>
+              </div>
+            </div>
             {[
               { k: "fg",          label: "Warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
               { k: "semiFg",      label: "Semi-FG",       unit: "units", min: 0, max: fgMax,  step: 1 },
@@ -694,48 +702,45 @@ const SimulatorTab = ({ inventory }) => {
               const absDelta = sim[k] - base;
               const pctDelta = base !== 0 ? (absDelta / Math.abs(base)) * 100 : 0;
               const sign = absDelta > 0 ? "+" : "";
-              // Slider tick at baseline position (visual marker on the track)
-              const tickPct = ((base - min) / (max - min)) * 100;
+              const resetOne = () => setSim(prev => ({ ...prev, [k]: base }));
               return (
                 <div key={k} className={"sim-input-row" + (delta ? " is-delta" : "")}>
                   <div className="sim-input-label">
                     <span>{label}</span>
                     <span className="muted">{unit}</span>
                   </div>
-                  <div className="sim-range-wrap">
-                    <input
-                      type="range"
-                      className="sim-range"
-                      min={min} max={max} step={step}
-                      value={sim[k]}
-                      onChange={set(k)}
-                    />
-                    <span
-                      className="sim-range-tick"
-                      style={{ left: `clamp(0%, ${tickPct}%, 100%)` }}
-                      title={`Baseline: ${base}`}
-                    />
-                  </div>
                   <input
-                    type="number"
-                    className="sim-number"
+                    type="range"
+                    className="sim-range"
                     min={min} max={max} step={step}
                     value={sim[k]}
                     onChange={set(k)}
                   />
-                  <div className="sim-input-base" title={`Baseline value: ${base}`}>
-                    {delta ? (
-                      <>
-                        <span className={"sim-delta-pct " + (absDelta > 0 ? "up" : "down")}>
+                  <div className="sim-input-cluster">
+                    <input
+                      type="number"
+                      className="sim-number"
+                      min={min} max={max} step={step}
+                      value={sim[k]}
+                      onChange={set(k)}
+                    />
+                    <button
+                      type="button"
+                      className={"sim-baseline-pill" + (delta ? " is-changed" : "")}
+                      onClick={delta ? resetOne : undefined}
+                      title={delta ? `Reset to baseline (${base})` : `Baseline value from the sheet`}
+                      disabled={!delta}
+                    >
+                      {delta && <span className="sim-baseline-reset">↺</span>}
+                      <span className="sim-baseline-num mono">{Number.isFinite(base) ? base : "—"}</span>
+                      {delta && (
+                        <span className={"sim-baseline-delta " + (absDelta > 0 ? "up" : "down")}>
                           {sign}{Math.abs(pctDelta) >= 100
-                            ? Math.round(pctDelta) + "%"
-                            : pctDelta.toFixed(0) + "%"}
+                            ? Math.round(pctDelta)
+                            : pctDelta.toFixed(0)}%
                         </span>
-                        <span className="sim-delta-from mono">vs {base}</span>
-                      </>
-                    ) : (
-                      <span className="sim-input-base-val mono">{Number.isFinite(base) ? base : "—"}</span>
-                    )}
+                      )}
+                    </button>
                   </div>
                 </div>
               );
@@ -805,6 +810,17 @@ const RunwayTimeline = ({ runway, leadTime, status }) => {
   const leadPct = (leadTime / scale) * 100;
   const buffer = runway - leadTime;
   const overdue = buffer < 0;
+  // Anchor labels AWAY from each other so they can't collide:
+  //   • runway < lead  → runway label right-anchored, lead label left-anchored (gap between them)
+  //   • runway > lead  → runway label left-anchored, lead label right-anchored
+  //   • runway = lead  → labels merge (acceptable — they're at the same point)
+  const runwayBeforeLead = runway < leadTime;
+  const runwayAnchor = runwayBeforeLead
+    ? { transform: "translateX(-100%)", paddingRight: "5px" }
+    : { transform: "translateX(0)",     paddingLeft: "5px" };
+  const leadAnchor = runwayBeforeLead
+    ? { transform: "translateX(0)",     paddingLeft: "5px" }
+    : { transform: "translateX(-100%)", paddingRight: "5px" };
   return (
     <div
       className={"rw-timeline rw-timeline-" + status}
@@ -812,18 +828,18 @@ const RunwayTimeline = ({ runway, leadTime, status }) => {
     >
       <div className="rw-timeline-track">
         <div className="rw-timeline-fill" style={{ width: runwayPct + "%" }}/>
-        <div className="rw-timeline-marker" style={{ left: leadPct + "%" }}/>
+        <div className="rw-timeline-marker" style={{ left: `clamp(0%, ${leadPct}%, 100%)` }}/>
       </div>
       <div className="rw-timeline-labels">
         <span
           className="rw-timeline-runway-label"
-          style={{ left: `clamp(0%, ${runwayPct}%, 100%)` }}
+          style={{ left: `clamp(0%, ${runwayPct}%, 100%)`, ...runwayAnchor }}
         >
           <span className="mono">{runway}d</span> runway
         </span>
         <span
           className="rw-timeline-lead-label"
-          style={{ left: `clamp(0%, ${leadPct}%, 100%)` }}
+          style={{ left: `clamp(0%, ${leadPct}%, 100%)`, ...leadAnchor }}
         >
           <span className="mono">{leadTime}d</span> lead
         </span>
@@ -937,6 +953,23 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   atRisk.sort((a, b) => a.rb.daysFromNow - b.rb.daysFromNow);
   const earliestReorder = atRisk[0] || null;
 
+  // Risk summary metrics for the top stat cards.
+  //   - First stockout: smallest adjRunway across all items
+  //   - Inventory at risk value: sum of stock value across red items
+  //   - Suppliers to contact: distinct supplier count for red items
+  //   - Reorder units needed: rough sum of (lead time × velocity) − stock for red items
+  const allSorted = [...inventory].sort((a, b) => a.adjRunway - b.adjRunway);
+  const firstToStockout = allSorted[0];
+  const stockValueAtRisk = reds.reduce((sum, s) => sum + (s.stockValue || 0), 0);
+  const suppliersToContact = new Set(
+    reds.flatMap(s => D.suppliers.filter(sup => sup.skus.includes(s.code)).map(sup => sup.id))
+  ).size;
+  const reorderUnitsNeeded = reds.reduce((sum, s) => {
+    const projDemand = s.adjVelocity * (s.leadTime + 30);
+    const shortfall = Math.max(0, projDemand - s.maxFg);
+    return sum + shortfall;
+  }, 0);
+
   // Filter for the main table
   const visible = inventory.filter(s => statusFilter === "all" || s.adjStatus === statusFilter);
 
@@ -951,31 +984,70 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
   return (
     <>
+      {/* Risk summary — 4 stat cards covering different facets of urgency */}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 12 }}>
+        <Card title="Earliest reorder" sub="most urgent action">
+          {earliestReorder ? (
+            <>
+              <div className={"stat-num lg " + (earliestReorder.adjStatus === "red" ? "rw-stat-crit" : "rw-stat-warn")}>
+                {fmtReorderDate(earliestReorder.rb)}
+              </div>
+              <div className="muted" style={{ fontSize: 11.5 }}>
+                {earliestReorder.name} · {earliestReorder.code}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="stat-num lg" style={{ color: "var(--success)" }}>All clear</div>
+              <div className="muted" style={{ fontSize: 11.5 }}>No items need reorder in 30d</div>
+            </>
+          )}
+        </Card>
+        <Card title="First stockout" sub="smallest runway right now">
+          <div className="stat-num lg" style={{ color: firstToStockout?.adjStatus === "red" ? "var(--critical)" : firstToStockout?.adjStatus === "amber" ? "var(--warning)" : "var(--success)" }}>
+            {firstToStockout?.adjRunway ?? 0}d
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            {firstToStockout ? `${firstToStockout.name} · runs out in ${firstToStockout.adjRunway}d` : "—"}
+          </div>
+        </Card>
+        <Card title="Stock value at risk" sub="overdue items only">
+          <div className="stat-num lg" style={{ color: stockValueAtRisk > 0 ? "var(--critical)" : "var(--success)" }}>
+            {D.fmtINR(stockValueAtRisk)}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            across {reds.length} overdue item{reds.length === 1 ? "" : "s"}
+          </div>
+        </Card>
+        <Card title="Reorder volume needed" sub="to cover lead + 30d buffer">
+          <div className="stat-num lg" style={{ color: reorderUnitsNeeded > 0 ? "var(--warning)" : "var(--ink-3)" }}>
+            {D.fmtN(Math.round(reorderUnitsNeeded))}
+          </div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            units · {suppliersToContact} supplier{suppliersToContact === 1 ? "" : "s"} to contact
+          </div>
+        </Card>
+      </div>
+
+      {/* Filter + trajectory controls */}
       <Card style={{ marginBottom: 12 }}>
         <div className="runway-head">
-          <div className="runway-summary">
-            {earliestReorder ? (
-              <>
-                <div className="runway-summary-label">Next action</div>
-                <div className="runway-summary-main">
-                  <span className={"runway-summary-tag " + (earliestReorder.adjStatus === "red" ? "crit" : "warn")}>
-                    {earliestReorder.adjStatus === "red" ? "Overdue" : "Soon"}
-                  </span>
-                  <span className="runway-summary-text">
-                    {earliestReorder.name} · reorder {" "}
-                    <strong>{fmtReorderDate(earliestReorder.rb).toLowerCase()}</strong>
-                  </span>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="runway-summary-label">Status</div>
-                <div className="runway-summary-main">
-                  <span className="runway-summary-tag ok">All clear</span>
-                  <span className="runway-summary-text">No Items need reorder action in the next 30 days.</span>
-                </div>
-              </>
-            )}
+          <div className="runway-filters" style={{ paddingTop: 0, borderTop: 0 }}>
+            {[
+              { id: "all",   label: "All",          count: inventory.length, cls: "" },
+              { id: "red",   label: "Below lead",   count: reds.length,      cls: "crit" },
+              { id: "amber", label: "Under 30d",    count: ambers.length,    cls: "warn" },
+              { id: "green", label: "Healthy",      count: greens.length,    cls: "ok" },
+            ].map(f => (
+              <button
+                key={f.id}
+                className={"runway-chip " + f.cls + (statusFilter === f.id ? " active" : "")}
+                onClick={() => setStatusFilter(f.id)}
+              >
+                <span className="runway-chip-label">{f.label}</span>
+                <span className="runway-chip-count">{f.count}</span>
+              </button>
+            ))}
           </div>
 
           <div className="runway-controls">
@@ -989,24 +1061,6 @@ const RunwayTab = ({ inventory: rawInventory }) => {
               </button>
             )}
           </div>
-        </div>
-
-        <div className="runway-filters">
-          {[
-            { id: "all",   label: "All",          count: inventory.length, cls: "" },
-            { id: "red",   label: "Below lead",   count: reds.length,      cls: "crit" },
-            { id: "amber", label: "Under 30d",    count: ambers.length,    cls: "warn" },
-            { id: "green", label: "Healthy",      count: greens.length,    cls: "ok" },
-          ].map(f => (
-            <button
-              key={f.id}
-              className={"runway-chip " + f.cls + (statusFilter === f.id ? " active" : "")}
-              onClick={() => setStatusFilter(f.id)}
-            >
-              <span className="runway-chip-label">{f.label}</span>
-              <span className="runway-chip-count">{f.count}</span>
-            </button>
-          ))}
         </div>
       </Card>
 
