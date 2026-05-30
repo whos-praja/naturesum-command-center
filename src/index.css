@@ -2535,6 +2535,47 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   font-weight: 400;
 }
 
+/* Stacked packaging list — one row per PKG component. Lets the founder
+   eyeball each component's qty (which one is the binding constraint
+   etc.) without opening the popover. The min-capacity row gets an amber
+   bullet so the bottleneck pops. */
+.mat-pkg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+.mat-pkg-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.mat-pkg-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  background: var(--bg-sunken);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.mat-pkg-qty {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.mat-pkg-row.is-min .mat-pkg-tag {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+.mat-pkg-row.is-min .mat-pkg-qty {
+  color: var(--warning);
+  font-weight: 600;
+}
+
 /* ---------- RESULT COLUMNS (Producible FG, Max FG) ---------- */
 /* Two stacked "result" columns sit at the right edge of the table. The
    first (Producible FG) is the "what we could add today" answer. The

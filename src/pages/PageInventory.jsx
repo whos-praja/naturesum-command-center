@@ -517,7 +517,9 @@ const MaterialsTab = ({ inventory }) => {
     if (inputObj && inputCap <= pkgMinCap) {
       bottleneck = wb.kind === "semi" ? "SFG" : "RM";
     } else if (pkgList.length) {
-      bottleneck = "PKG";
+      // Identify which specific PKG component is the binding constraint
+      const minIdx = pkgList.findIndex(p => p.capacity === pkgMinCap);
+      bottleneck = `PKG${minIdx + 1}`;
     }
     const maxInput = Math.max(wb.fg, wb.semiFg, wb.rawMaterial, wb.packaging, 1);
     const constraint = wb.producibleFG / maxInput;
@@ -614,7 +616,7 @@ const MaterialsTab = ({ inventory }) => {
               const usesRaw  = s.wb.kind === "raw";
               const bnSemi   = usesSemi && s.bottleneck === "SFG";
               const bnRaw    = usesRaw  && s.bottleneck === "RM";
-              const bnPack   = s.bottleneck === "PKG";
+              const bnPack   = s.bottleneck.startsWith("PKG");
               const rwFg     = runwayFor("fg", s);
               const rwSemi   = usesSemi ? runwayFor("semiFg", s) : null;
               const rwRaw    = usesRaw  ? runwayFor("rawMaterial", s) : null;
@@ -656,11 +658,23 @@ const MaterialsTab = ({ inventory }) => {
                   {usesSemi ? numCell(s.wb.semiFg, rwSemi, bnSemi) : naCell()}
                   {usesRaw  ? numCell(s.wb.rawMaterial, rwRaw, bnRaw) : naCell()}
                   <td className={"num mat-cell" + (bnPack ? " mat-cell-bn" : "")}>
-                    <div className="mat-cell-num">
-                      {D.fmtN(s.wb.packaging)}
-                      {pkgCount > 1 && <span className="mat-cell-pkg-count muted"> · {pkgCount} comps</span>}
-                    </div>
-                    {rwPkg && <RunwayChip rw={rwPkg}/>}
+                    {pkgCount === 0 ? (
+                      <div className="mat-cell-num muted">—</div>
+                    ) : (
+                      <div className="mat-pkg-list">
+                        {s.wb.inputs.pkg.map((p, idx) => {
+                          // Bottleneck pkg row = whichever pkg has the lowest capacity
+                          // AND is the binding constraint overall (PKG bottleneck on this SKU)
+                          const isMinPkg = bnPack && p.capacity === Math.min(...s.wb.inputs.pkg.map(x => x.capacity));
+                          return (
+                            <div key={p.refCode} className={"mat-pkg-row" + (isMinPkg ? " is-min" : "")} title={p.name}>
+                              <span className="mat-pkg-tag">PKG{idx + 1}</span>
+                              <span className="mat-pkg-qty mono">{D.fmtN(p.qty)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </td>
                   <td className="mat-cell mat-cell-bnlabel">
                     <span className="mat-bn-pill">{s.bottleneck}</span>
