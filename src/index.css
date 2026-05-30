@@ -2522,6 +2522,19 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   border: 1px solid #DBC487;
 }
 
+/* N/A cell — for the Semi-FG or Raw column the SKU doesn't use under the
+   "one input per SKU" model. Subtle so the eye doesn't read a 0 and panic. */
+.mat-cell-na .mat-cell-num.muted {
+  color: var(--ink-4);
+  font-weight: 400;
+  font-style: italic;
+}
+.mat-cell-pkg-count {
+  font-size: 10.5px;
+  margin-left: 4px;
+  font-weight: 400;
+}
+
 /* ---------- RESULT COLUMNS (Producible FG, Max FG) ---------- */
 /* Two stacked "result" columns sit at the right edge of the table. The
    first (Producible FG) is the "what we could add today" answer. The
@@ -2814,6 +2827,95 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   color: var(--ink);
 }
 .wb-row-bottleneck .wb-row-value { color: var(--warning); }
+
+/* ── Materials breakdown — new input rows ────────────────────────
+   The popover row now carries a small uppercase tag (SFG / RM / PKG1
+   / PKG2) so the founder can scan structure without reading every
+   long item name. PKG rows are clickable: clicking expands to show
+   refCode, qty + unit, per-pack ratio, supported pack count, and a
+   tiny "Also used by" chip strip cross-referencing other SKUs. */
+.wb-row { position: relative; }
+.wb-row-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.wb-row-clickable {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.wb-row-clickable:hover { background: var(--bg-sunken); }
+.wb-row-clickable.is-expanded { background: var(--bg-canvas); }
+.wb-row-clickable.is-expanded .wb-row-tag { background: var(--brand-soft); color: var(--brand); }
+.wb-row-na {
+  background: transparent;
+  opacity: 0.6;
+}
+.wb-row-na .wb-row-swatch { opacity: 0.5; }
+.wb-row-unit {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 3px;
+}
+/* Inline expand panel — sits under the row when clicked.
+   Spans full width of the wb-rows card. */
+.wb-row-expand {
+  grid-column: 1 / -1;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  cursor: default;
+}
+.wb-row-expand-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.wb-row-expand-label {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.wb-row-expand-val {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.wb-row-shared {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.wb-row-shared-chip {
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+}
 
 /* Slim section header bar — section name on the left, headline stat or
    units-legend on the right. Replaces the tall hero card so the popover

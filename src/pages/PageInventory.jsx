@@ -502,11 +502,23 @@ const MaterialsTab = ({ inventory }) => {
   const [popoverSku, setPopoverSku] = useState(null);
 
   // Augment each SKU with computed metrics for sorting / display.
+  // Bottleneck identification under the new "one input + multi-pkg" model:
+  //   - kind="semi" → bottleneck candidates: SFG vs each PKG (min capacity)
+  //   - kind="raw"  → bottleneck candidates: RM  vs each PKG (min capacity)
+  // The bottleneck label shown in the table is the role tag ("SFG" / "RM"
+  // / "PKG") of whichever capacity is the binding constraint.
   const rows = inventory.map(s => {
-    const wb = s.warehouseBreakdown || { fg: 0, semiFg: 0, rawMaterial: 0, packaging: 0, producibleFG: 0 };
-    const bottleneck = wb.semiFg <= wb.packaging ? "Semi-FG" : "Packaging";
-    // "Bottleneck severity" = how much best-case is constrained vs the max
-    // input we have. Lower ratio = tighter constraint.
+    const wb = s.warehouseBreakdown || { fg: 0, semiFg: 0, rawMaterial: 0, packaging: 0, producibleFG: 0, kind: null, inputs: { sfg: null, rm: null, pkg: [] } };
+    const inputObj = wb.inputs?.sfg || wb.inputs?.rm;
+    const inputCap = inputObj?.capacity ?? Infinity;
+    const pkgList  = wb.inputs?.pkg || [];
+    const pkgMinCap = pkgList.length ? Math.min(...pkgList.map(p => p.capacity)) : Infinity;
+    let bottleneck = "—";
+    if (inputObj && inputCap <= pkgMinCap) {
+      bottleneck = wb.kind === "semi" ? "SFG" : "RM";
+    } else if (pkgList.length) {
+      bottleneck = "PKG";
+    }
     const maxInput = Math.max(wb.fg, wb.semiFg, wb.rawMaterial, wb.packaging, 1);
     const constraint = wb.producibleFG / maxInput;
     return { ...s, wb, bottleneck, constraint };
@@ -598,13 +610,16 @@ const MaterialsTab = ({ inventory }) => {
           </thead>
           <tbody>
             {sorted.map(s => {
-              const bnSemi = s.bottleneck === "Semi-FG";
-              const bnPack = s.bottleneck === "Packaging";
-              const rwFg   = runwayFor("fg", s);
-              const rwSemi = runwayFor("semiFg", s);
-              const rwRaw  = runwayFor("rawMaterial", s);
-              const rwPkg  = runwayFor("packaging", s);
-              const rwBest = runwayFor("producibleFG", s);
+              const usesSemi = s.wb.kind === "semi";
+              const usesRaw  = s.wb.kind === "raw";
+              const bnSemi   = usesSemi && s.bottleneck === "SFG";
+              const bnRaw    = usesRaw  && s.bottleneck === "RM";
+              const bnPack   = s.bottleneck === "PKG";
+              const rwFg     = runwayFor("fg", s);
+              const rwSemi   = usesSemi ? runwayFor("semiFg", s) : null;
+              const rwRaw    = usesRaw  ? runwayFor("rawMaterial", s) : null;
+              const rwPkg    = runwayFor("packaging", s);
+              const rwBest   = runwayFor("producibleFG", s);
               // Max FG = current packed FG + what we could additionally pack today.
               const maxFG = s.wb.fg + s.wb.producibleFG;
               const rwMax = s.velocity ? (() => {
@@ -613,6 +628,7 @@ const MaterialsTab = ({ inventory }) => {
                 const label = days >= 60 ? `~${(days / 30).toFixed(1)}mo` : `~${Math.round(days)}d`;
                 return { days, status, label };
               })() : null;
+              const pkgCount = (s.wb.inputs?.pkg || []).length;
 
               // Every numeric cell shares the same structure: number on top,
               // optional runway chip below. Pass `bn` to flag a bottleneck cell
@@ -623,6 +639,12 @@ const MaterialsTab = ({ inventory }) => {
                   {rw && <RunwayChip rw={rw}/>}
                 </td>
               );
+              // N/A cell — for the SFG/RM column the SKU doesn't use.
+              const naCell = () => (
+                <td className="num mat-cell mat-cell-na">
+                  <div className="mat-cell-num muted">N/A</div>
+                </td>
+              );
 
               return (
                 <tr key={s.code} className="row-clickable" onClick={() => setPopoverSku(s)}>
@@ -631,9 +653,15 @@ const MaterialsTab = ({ inventory }) => {
                     <div className="sku">{s.code} · {s.variant}</div>
                   </td>
                   {numCell(s.wb.fg, rwFg)}
-                  {numCell(s.wb.semiFg, rwSemi, bnSemi)}
-                  {numCell(s.wb.rawMaterial, rwRaw)}
-                  {numCell(s.wb.packaging, rwPkg, bnPack)}
+                  {usesSemi ? numCell(s.wb.semiFg, rwSemi, bnSemi) : naCell()}
+                  {usesRaw  ? numCell(s.wb.rawMaterial, rwRaw, bnRaw) : naCell()}
+                  <td className={"num mat-cell" + (bnPack ? " mat-cell-bn" : "")}>
+                    <div className="mat-cell-num">
+                      {D.fmtN(s.wb.packaging)}
+                      {pkgCount > 1 && <span className="mat-cell-pkg-count muted"> · {pkgCount} comps</span>}
+                    </div>
+                    {rwPkg && <RunwayChip rw={rwPkg}/>}
+                  </td>
                   <td className="mat-cell mat-cell-bnlabel">
                     <span className="mat-bn-pill">{s.bottleneck}</span>
                   </td>
@@ -686,8 +714,24 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Which input is the bottleneck for producible FG?
-  const bottleneck = wb.semiFg <= wb.packaging ? "Semi-FG" : "Packaging";
+  // ── Materials breakdown rows — new model ──────────────────────────
+  // The popover shows: FG + (SFG OR RM, the one not used by this SKU
+  // shows as N/A) + every Packaging component (PKG1, PKG2, …). The
+  // binding constraint (the row that caps Producible FG) gets the
+  // bottleneck accent. Each non-FG row is clickable — it expands inline
+  // to show the canonical refCode, qty + unit, per-pack ratio, and a
+  // tiny cross-reference of other SKUs that share this same item.
+  const inputs = wb.inputs || { sfg: null, rm: null, pkg: [] };
+  const usedBy = D.itemUsedBy || {};
+
+  // Bottleneck = the constraint that defines producibleFG.
+  // It's whichever row has the lowest "capacity" (FG packs it can support).
+  const allRows = [];
+  if (inputs.sfg) allRows.push({ kind: "sfg", obj: inputs.sfg });
+  if (inputs.rm)  allRows.push({ kind: "rm",  obj: inputs.rm  });
+  inputs.pkg.forEach(p => allRows.push({ kind: "pkg", obj: p }));
+  const minCap = allRows.length ? Math.min(...allRows.map(r => r.obj.capacity)) : 0;
+  const bottleneckRefCode = allRows.find(r => r.obj.capacity === minCap)?.obj.refCode;
 
   // Per-channel velocity split — same logic as the Unified Stock table.
   // Channel velocity = total velocity × that channel's revenue share, with
@@ -704,25 +748,77 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   ];
   const runwayTier = (days) => days < 14 ? " crit" : days < 30 ? " warn" : "";
 
-  // Material rows — label + per-item code + number + hint stack.
-  // The bottleneck row gets a subtle highlight so the eye lands on the cap.
-  const codes = wb.codes || {};
-  const row = (key, label, value, hint) => {
-    const isBottleneck = (bottleneck === "Semi-FG" && key === "semiFg") ||
-                          (bottleneck === "Packaging" && key === "packaging");
-    // For FG row, the code is the SKU itself; for others, look it up in wb.codes
-    const itemCode = key === "fg" ? sku.code : codes[key];
+  // Track which input row is expanded (only one at a time)
+  const [expandedRow, setExpandedRow] = useState(null);
+
+  // Materials breakdown row renderer
+  // role = "fg" | "sfg" | "rm" | "pkg" — drives color swatch + label.
+  // When data is null/missing we render a muted "N/A" row instead of zero.
+  const InputRow = ({ role, label, data, isFG }) => {
+    const swatchColor = MATERIAL_COLORS[role === "sfg" ? "semiFg" : role === "rm" ? "rawMaterial" : role === "pkg" ? "packaging" : "fg"];
+    const isNA = !data && !isFG;
+    const isBottleneck = !isFG && data && data.refCode === bottleneckRefCode && minCap > 0;
+    const isExpanded = expandedRow === (data?.refCode || role);
+    const handleClick = () => {
+      if (isFG || isNA) return;
+      setExpandedRow(isExpanded ? null : data.refCode);
+    };
+    const sharedWith = data ? (usedBy[data.refCode] || []).filter(c => c !== sku.code) : [];
+    const value = isFG ? wb.fg : data?.qty ?? 0;
+    const code = isFG ? sku.code : data?.refCode;
+
     return (
-      <div className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "")} key={key} title={hint}>
+      <div
+        className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "") + (isNA ? " wb-row-na" : "") + (!isFG && !isNA ? " wb-row-clickable" : "") + (isExpanded ? " is-expanded" : "")}
+        key={label}
+        onClick={handleClick}
+      >
         <div className="wb-row-label">
-          <span className="wb-row-swatch" style={{ background: MATERIAL_COLORS[key] }}/>
+          <span className="wb-row-swatch" style={{ background: isNA ? "var(--ink-4)" : swatchColor }}/>
           <div className="wb-row-name">
-            {label}
-            {itemCode && <span className="wb-row-code sku">{itemCode}</span>}
-            {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
+            <span className="wb-row-tag">{label}</span>
+            {isNA
+              ? <span className="muted" style={{ fontSize: 12 }}>not applicable for this SKU</span>
+              : (
+                <>
+                  <span style={{ fontWeight: 500 }}>{isFG ? "FG (ready to ship)" : data.name}</span>
+                  {code && <span className="wb-row-code sku">{code}</span>}
+                  {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
+                </>
+              )}
           </div>
         </div>
-        <div className="wb-row-value mono">{D.fmtN(value)}</div>
+        <div className="wb-row-value mono">
+          {isNA ? <span className="muted">N/A</span> : <>{D.fmtN(value)} <span className="wb-row-unit muted">{isFG ? "Pcs" : data.unit}</span></>}
+        </div>
+        {isExpanded && data && (
+          <div className="wb-row-expand" onClick={(e) => e.stopPropagation()}>
+            <div className="wb-row-expand-grid">
+              <div>
+                <div className="wb-row-expand-label">On hand</div>
+                <div className="wb-row-expand-val mono">{D.fmtN(data.qty)} {data.unit}</div>
+              </div>
+              <div>
+                <div className="wb-row-expand-label">Per FG pack</div>
+                <div className="wb-row-expand-val mono">{role === "pkg" ? data.unitsPerPack : data.perPack} {data.unit}</div>
+              </div>
+              <div>
+                <div className="wb-row-expand-label">Supports</div>
+                <div className="wb-row-expand-val mono">{D.fmtN(data.capacity)} packs</div>
+              </div>
+              <div>
+                <div className="wb-row-expand-label">Ref code</div>
+                <div className="wb-row-expand-val sku">{data.refCode}</div>
+              </div>
+            </div>
+            {sharedWith.length > 0 && (
+              <div className="wb-row-shared">
+                <span className="muted">Also used by:</span>
+                {sharedWith.map(c => <span key={c} className="wb-row-shared-chip sku">{c}</span>)}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -749,15 +845,17 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
               <span className="wb-section-bar-tag">Max FG</span>
               <span className="wb-section-bar-num mono">{D.fmtN(wb.fg + wb.producibleFG)}</span>
               <span className="wb-section-bar-formula muted">
-                · FG {D.fmtN(wb.fg)} + Prod {D.fmtN(wb.producibleFG)} · bottleneck: <strong>{bottleneck}</strong>
+                · FG {D.fmtN(wb.fg)} + Producible {D.fmtN(wb.producibleFG)}
               </span>
             </span>
           </div>
           <div className="wb-rows">
-            {row("fg", "FG (ready to ship)", wb.fg, "shippable today — this is the central warehouse number")}
-            {row("semiFg", "Semi-FG", wb.semiFg, "bulk product, needs packing")}
-            {row("rawMaterial", "Raw Material", wb.rawMaterial, `${wb.perPacketRaw} unit(s) raw → 1 pack`)}
-            {row("packaging", "Packaging", wb.packaging, "containers + labels ready")}
+            <InputRow role="fg"  label="FG"  isFG={true}/>
+            <InputRow role="sfg" label="SFG" data={inputs.sfg}/>
+            <InputRow role="rm"  label="RM"  data={inputs.rm}/>
+            {inputs.pkg.map((p, i) => (
+              <InputRow key={p.refCode} role="pkg" label={`PKG${i + 1}`} data={p}/>
+            ))}
           </div>
 
           {/* Channel breakdown — where stock sits across warehouse + marketplaces,

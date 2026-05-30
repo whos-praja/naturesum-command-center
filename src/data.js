@@ -114,27 +114,182 @@ const NSData = (function () {
   // (Master tab "Live" column + Daily Movement of FG 30-day average) and the
   // Naturesum Daily Ad Report (May 2026 per-channel unit totals) + the
   // Shopify product-wise monthly export.
-  //   - fg/semiFg/raw/pkg quantities  → Master Live column
-  //   - velocity (warehouse sell-out) → Daily Movement of FG, last 30 days
-  //   - splits (per-channel mix)      → Ad Report May totals + Shopify CSV
-  //   - growth (MoM %)                → Shopify Net sales May vs April
-  //   - perPacketRaw                  → BOM tab
-  // SKUs not present in the May data keep zero velocity/growth.
-  const LIVE_SNAPSHOT = {
-    NSMP100:   { fg: 0,   semiFg: 0,    raw: 200,    pkg: 0,    perRaw: 0.10,  vel: 0,    leadTime: 25 },
-    NSMP250:   { fg: 0,   semiFg: 0,    raw: 200,    pkg: 0,    perRaw: 0.25,  vel: 0,    leadTime: 25 },
-    NSSB100:   { fg: 37,  semiFg: 0,    raw: 0,      pkg: 1481, perRaw: 0.10,  vel: 14.3, leadTime: 22 },
-    NSSB250:   { fg: 185, semiFg: 0,    raw: 0,      pkg: 2997, perRaw: 0.25,  vel: 17.9, leadTime: 22 },
-    NSSB500:   { fg: 99,  semiFg: 0,    raw: 0,      pkg: 2972, perRaw: 0.50,  vel: 7.8,  leadTime: 22 },
-    NSSBDB100: { fg: 620, semiFg: 0,    raw: 946.79, pkg: 67,   perRaw: 0.10,  vel: 21.2, leadTime: 28 },
-    NSSBDB250: { fg: 493, semiFg: 0,    raw: 946.79, pkg: 916,  perRaw: 0.25,  vel: 18.9, leadTime: 28 },
-    NSSBDB500: { fg: 725, semiFg: 0,    raw: 946.79, pkg: 3055, perRaw: 0.50,  vel: 16.7, leadTime: 28 },
-    NSSBJ300:  { fg: 0,   semiFg: 0,    raw: 0,      pkg: 1025, perRaw: 0.30,  vel: 0,    leadTime: 20 },
-    NSSBJ500:  { fg: 677, semiFg: 0,    raw: 0,      pkg: 483,  perRaw: 0.50,  vel: 0,    leadTime: 20 },
-    NSSBBO15:  { fg: 0,   semiFg: 0,    raw: 5,      pkg: 1014, perRaw: 0.015, vel: 0,    leadTime: 35 },
-    NSSBBO30:  { fg: 0,   semiFg: 0,    raw: 5,      pkg: 123,  perRaw: 0.030, vel: 0.5,  leadTime: 35 },
-    NSJO100:   { fg: 788, semiFg: 0,    raw: 0,      pkg: 533,  perRaw: 1.00,  vel: 8.3,  leadTime: 30 },
-    NSACDT30:  { fg: 39,  semiFg: 9073, raw: 0,      pkg: 2543, perRaw: 30,    vel: 3.3,  leadTime: 30 },
+  //
+  // Data model (per the founder's rule of thumb):
+  //   - Each SKU has ONE upstream input — either a Semi-FG (SFG) or a Raw
+  //     Material (RM), never both. The other row is rendered as N/A.
+  //   - Packaging is a list of components (PKG1, PKG2, …). Juice for example
+  //     needs bottle + tube + label + air pouch; AC Tea needs empty pouches
+  //     + outer carton.
+  //   - Producible FG = min(input capacity, min over pkg capacities).
+  //
+  // ITEM_QTY is the canonical "what's in the warehouse right now" lookup
+  // keyed by refCode (matches Master sheet items). SKU_RECIPE is the
+  // per-SKU BOM (which item it consumes, how much per pack).
+  const ITEM_QTY = {
+    // Semi-FG
+    NSJOF100:     0,        // Jatamansi Hair Oil filled Bottles
+    NSACDSF30:    9073,     // AC Tea Dip Sachets (Filled)
+    NSACTPF:      0,        // AC Tea Pouches (Green, Filled)
+    // Raw
+    NSMLPR:       200,      // Moringa Leaves Powder
+    NSSBPR:       0,        // SB Powder (Raw)
+    NSSBDBR:      946.79,   // SB Dry Berries (Raw)
+    NSSBJPLP:     0,        // SB Juice Pulp
+    NSSBOR:       5,        // SB Face Oil (Raw)
+    // Packaging — bottles / pouches / boxes / labels
+    NSPKGCB100:   950,      // 100 gram Carton Box
+    NSPKGCB250:   1675,     // 250 gm Carton Box
+    NSPKGMP100:   0,        // Moringa Powder Empty Pouch (100 gm)
+    NSPKGMP250:   0,        // Moringa Powder Empty Pouch (250 gm)
+    NSPKGSBP100:  1481,     // SB Powder Empty Pouches (100 gm)
+    NSPKGSBP250:  2997,     // SB Powder Empty Pouches (250 gm)
+    NSPKGSBP500:  2972,     // SB Powder Empty Pouches (500 gm)
+    NSPKGDBP100:  67,       // Dry Berries Empty Pouches (100 gm)
+    NSPKGDBP250:  916,      // Dry Berries Empty Pouches (250 gm)
+    NSPKGDBP500:  3055,     // Dry Berries Empty Pouches (500 gm)
+    NSPKGJB300:   1025,     // Small Air Pouch for Juice (300 ml)
+    NSPKGJB500:   483,      // Large Air Pouch for Juice (500 ml)
+    NSPKGJBOT300: 0,        // Juice Bottle 300 ml
+    NSPKGJBOT500: 0,        // Juice Bottle 500 ml
+    NSPKGJTUB300: 0,        // Juice Tube 300 ml
+    NSPKGJTUB500: 0,        // Juice Tube 500 ml
+    NSPKGJLBL300: 0,        // Juice Label 300 ml
+    NSPKGJLBL500: 0,        // Juice Label 500 ml
+    NSPKGBOB15:   1014,     // SB Faceoil Empty Box 15 ml
+    NSPKGBOB30:   123,      // SB Faceoil Empty Box 30 ml
+    NSPKGBOBT15:  497,      // SB Oil Empty Bottles 15 ml (uncapped)
+    NSPKGBOBT30:  26,       // SB Face Oil Empty Bottle 30 ml
+    NSPKGBOCAP:   1050,     // SB Face Oil Bottle Caps (shared 15/30)
+    NSPKGBODROP:  1050,     // SB Faceoil Droppers (shared 15/30)
+    NSPKGJOB100:  533,      // Jatamansi Empty Box with print
+    NSPKGACTC30:  44350,    // Acacia Catechu Tea Bag Empty Pouch (green)
+    NSPKGACTCBOX: 2543,     // Acacia Catechu Tea Bag Empty Outer Box
+  };
+
+  // Per-SKU recipe — kind (raw/semi), the input item, and packaging components.
+  // Display labels in the popover: SFG / RM / PKG1 / PKG2 / …
+  // perPack: how many units of the input are needed to make ONE FG pack.
+  // unitsPerPack on pkg: how many of that component per FG pack (e.g. 30
+  //   empty pouches per AC Tea pack).
+  const SKU_RECIPE = {
+    NSMP100: {
+      kind: "raw",
+      input: { refCode: "NSMLPR", name: "Moringa Leaves Powder", unit: "KG", perPack: 0.10 },
+      pkg: [
+        { refCode: "NSPKGMP100", name: "Moringa Powder Empty Pouch 100g", unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGCB100", name: "100g Carton Box",                  unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSMP250: {
+      kind: "raw",
+      input: { refCode: "NSMLPR", name: "Moringa Leaves Powder", unit: "KG", perPack: 0.25 },
+      pkg: [
+        { refCode: "NSPKGMP250", name: "Moringa Powder Empty Pouch 250g", unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGCB250", name: "250g Carton Box",                  unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSSB100: {
+      kind: "raw",
+      input: { refCode: "NSSBPR", name: "SB Powder (Raw)", unit: "KG", perPack: 0.10 },
+      pkg: [{ refCode: "NSPKGSBP100", name: "SB Powder Empty Pouch 100g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSB250: {
+      kind: "raw",
+      input: { refCode: "NSSBPR", name: "SB Powder (Raw)", unit: "KG", perPack: 0.25 },
+      pkg: [{ refCode: "NSPKGSBP250", name: "SB Powder Empty Pouch 250g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSB500: {
+      kind: "raw",
+      input: { refCode: "NSSBPR", name: "SB Powder (Raw)", unit: "KG", perPack: 0.50 },
+      pkg: [{ refCode: "NSPKGSBP500", name: "SB Powder Empty Pouch 500g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSBDB100: {
+      kind: "raw",
+      input: { refCode: "NSSBDBR", name: "SB Dry Berries (Raw)", unit: "KG", perPack: 0.10 },
+      pkg: [{ refCode: "NSPKGDBP100", name: "Dry Berries Empty Pouch 100g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSBDB250: {
+      kind: "raw",
+      input: { refCode: "NSSBDBR", name: "SB Dry Berries (Raw)", unit: "KG", perPack: 0.25 },
+      pkg: [{ refCode: "NSPKGDBP250", name: "Dry Berries Empty Pouch 250g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSBDB500: {
+      kind: "raw",
+      input: { refCode: "NSSBDBR", name: "SB Dry Berries (Raw)", unit: "KG", perPack: 0.50 },
+      pkg: [{ refCode: "NSPKGDBP500", name: "Dry Berries Empty Pouch 500g", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSSBJ300: {
+      kind: "raw",
+      input: { refCode: "NSSBJPLP", name: "SB Juice Pulp", unit: "Ltr", perPack: 0.30 },
+      pkg: [
+        { refCode: "NSPKGJBOT300", name: "Juice Bottle 300 ml",      unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJB300",   name: "Small Air Pouch 300 ml",   unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJTUB300", name: "Juice Tube 300 ml",        unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJLBL300", name: "Juice Label 300 ml",       unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSSBJ500: {
+      kind: "raw",
+      input: { refCode: "NSSBJPLP", name: "SB Juice Pulp", unit: "Ltr", perPack: 0.50 },
+      pkg: [
+        { refCode: "NSPKGJBOT500", name: "Juice Bottle 500 ml",      unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJB500",   name: "Large Air Pouch 500 ml",   unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJTUB500", name: "Juice Tube 500 ml",        unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGJLBL500", name: "Juice Label 500 ml",       unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSSBBO15: {
+      kind: "raw",
+      input: { refCode: "NSSBOR", name: "SB Face Oil (Raw)", unit: "Ltr", perPack: 0.015 },
+      pkg: [
+        { refCode: "NSPKGBOBT15", name: "SB Oil Bottle 15 ml",       unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBOB15",  name: "SB Faceoil Empty Box 15 ml",unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBOCAP",  name: "Bottle Cap",                unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBODROP", name: "Dropper",                   unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSSBBO30: {
+      kind: "raw",
+      input: { refCode: "NSSBOR", name: "SB Face Oil (Raw)", unit: "Ltr", perPack: 0.030 },
+      pkg: [
+        { refCode: "NSPKGBOBT30", name: "SB Oil Bottle 30 ml",       unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBOB30",  name: "SB Faceoil Empty Box 30 ml",unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBOCAP",  name: "Bottle Cap",                unit: "Pcs", unitsPerPack: 1 },
+        { refCode: "NSPKGBODROP", name: "Dropper",                   unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+    NSJO100: {
+      kind: "semi",
+      input: { refCode: "NSJOF100", name: "Jatamansi Hair Oil Filled Bottle", unit: "Pcs", perPack: 1 },
+      pkg:   [{ refCode: "NSPKGJOB100", name: "Jatamansi Empty Box (with print)", unit: "Pcs", unitsPerPack: 1 }],
+    },
+    NSACDT30: {
+      kind: "semi",
+      input: { refCode: "NSACDSF30", name: "AC Tea Dip Sachets (Filled)", unit: "Pcs", perPack: 30 },
+      pkg: [
+        { refCode: "NSPKGACTC30",  name: "Acacia Tea Bag Empty Pouch (green)", unit: "Pcs", unitsPerPack: 30 },
+        { refCode: "NSPKGACTCBOX", name: "Acacia Tea Empty Outer Box",          unit: "Pcs", unitsPerPack: 1 },
+      ],
+    },
+  };
+
+  // 30-day velocity + lead time per SKU.
+  const SKU_OPERATIONS = {
+    NSMP100:   { fg: 0,   vel: 0,    leadTime: 25 },
+    NSMP250:   { fg: 0,   vel: 0,    leadTime: 25 },
+    NSSB100:   { fg: 37,  vel: 14.3, leadTime: 22 },
+    NSSB250:   { fg: 185, vel: 17.9, leadTime: 22 },
+    NSSB500:   { fg: 99,  vel: 7.8,  leadTime: 22 },
+    NSSBDB100: { fg: 620, vel: 21.2, leadTime: 28 },
+    NSSBDB250: { fg: 493, vel: 18.9, leadTime: 28 },
+    NSSBDB500: { fg: 725, vel: 16.7, leadTime: 28 },
+    NSSBJ300:  { fg: 0,   vel: 0,    leadTime: 20 },
+    NSSBJ500:  { fg: 677, vel: 0,    leadTime: 20 },
+    NSSBBO15:  { fg: 0,   vel: 0,    leadTime: 35 },
+    NSSBBO30:  { fg: 0,   vel: 0.5,  leadTime: 35 },
+    NSJO100:   { fg: 788, vel: 8.3,  leadTime: 30 },
+    NSACDT30:  { fg: 39,  vel: 3.3,  leadTime: 30 },
   };
 
   // May 2026 per-channel unit totals — drives the per-channel velocity split
@@ -180,76 +335,101 @@ const NSData = (function () {
     NSACDT30: 975,
   };
 
-  // Map each FG to its real input items (codes that match what's in the
-  // central warehouse sheet). For SKUs that go raw → pack direct (powders,
-  // berries), semiFg is null — Producible FG falls back to min(raw, pkg).
-  const inputCodes = {
-    NSMP100:   { semiFg: null,         rawMaterial: "NSMLPR",   packaging: "NSPKGMP100"  },
-    NSMP250:   { semiFg: null,         rawMaterial: "NSMLPR",   packaging: "NSPKGMP250"  },
-    NSSB100:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP100" },
-    NSSB250:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP250" },
-    NSSB500:   { semiFg: null,         rawMaterial: "NSSBPR",   packaging: "NSPKGSBP500" },
-    NSSBDB100: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP100" },
-    NSSBDB250: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP250" },
-    NSSBDB500: { semiFg: null,         rawMaterial: "NSSBDBR",  packaging: "NSPKGDBP500" },
-    NSSBJ300:  { semiFg: null,         rawMaterial: "NSSBJPLP", packaging: "NSPKGJB300"  },
-    NSSBJ500:  { semiFg: null,         rawMaterial: "NSSBJPLP", packaging: "NSPKGJB500"  },
-    NSSBBO15:  { semiFg: null,         rawMaterial: "NSSBOR",   packaging: "NSPKGBOB15"  },
-    NSSBBO30:  { semiFg: null,         rawMaterial: "NSSBOR",   packaging: "NSPKGBOB30"  },
-    NSJO100:   { semiFg: "NSJOF100",   rawMaterial: null,       packaging: "NSPKGJOB100" },
-    NSACDT30:  { semiFg: "NSACDSF30",  rawMaterial: null,       packaging: "NSPKGACTC30" },
-  };
-
-  const inventory = skus.map((s, i) => {
-    const snap = LIVE_SNAPSHOT[s.code] || { fg: 0, semiFg: 0, raw: 0, pkg: 0, perRaw: 0.1, vel: 0, leadTime: 25 };
+  const inventory = skus.map((s) => {
+    const ops = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
+    const recipe = SKU_RECIPE[s.code];
     const ch = CHANNEL_MIX[s.code] || { amazon: 0, shopify: 0, flipkart: 0, blinkit: 0 };
     const totalChUnits = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) || 0;
     // Marketplace stock estimates — until real per-channel inventory feeds
     // land, hold approximately 7 days of cover at each channel's run rate.
-    // The current Inventory tab's footnote already calls these placeholders.
     const dailyByCh = totalChUnits ? totalChUnits / 30 : 0;
     const ESTCOVER = 7;
     const totalStock = {
-      warehouse: snap.fg,
+      warehouse: ops.fg,
       amazonFBA: Math.round(dailyByCh * (ch.amazon  / (totalChUnits || 1)) * ESTCOVER) || 0,
       flipkart:  Math.round(dailyByCh * (ch.flipkart / (totalChUnits || 1)) * ESTCOVER) || 0,
       blinkit:   Math.round(dailyByCh * (ch.blinkit  / (totalChUnits || 1)) * ESTCOVER) || 0,
       transit:   0,
     };
-    const warehouseBreakdown = {
-      fg:           snap.fg,
-      semiFg:       snap.semiFg,
-      rawMaterial:  snap.raw,
-      packaging:    snap.pkg,
-      perPacketRaw: snap.perRaw,
-      codes:        inputCodes[s.code] || { semiFg: null, rawMaterial: null, packaging: null },
-    };
-    // Producible FG = the most we could pack & ship right now given inputs.
-    // When semiFg is meaningful (e.g. Jatamansi has filled bottles, AC Tea
-    // has filled sachets), it's the cap. Otherwise the cap is min(raw, pkg)
-    // because we go straight raw → pack.
-    if (snap.semiFg > 0) {
-      warehouseBreakdown.producibleFG = Math.min(snap.semiFg, snap.pkg || Infinity);
-    } else if (snap.raw > 0 || snap.pkg > 0) {
-      // Convert raw to pack-equivalent units before comparing with packaging
-      const packEq = snap.perRaw > 0 ? Math.floor(snap.raw / snap.perRaw) : 0;
-      warehouseBreakdown.producibleFG = Math.min(packEq, snap.pkg);
-    } else {
-      warehouseBreakdown.producibleFG = 0;
+
+    // Build the per-SKU input rows from the recipe + Live ITEM_QTY snapshot.
+    // Exactly one of `sfg`/`rm` is populated; the other stays null and the UI
+    // will render an "N/A" row in its slot.
+    let sfg = null, rm = null;
+    if (recipe) {
+      const inputQty = ITEM_QTY[recipe.input.refCode] ?? 0;
+      const inputRow = {
+        label:   recipe.kind === "semi" ? "SFG" : "RM",
+        refCode: recipe.input.refCode,
+        name:    recipe.input.name,
+        unit:    recipe.input.unit,
+        qty:     inputQty,
+        perPack: recipe.input.perPack,
+        // Per-input capacity = how many FG packs this input alone can make.
+        capacity: recipe.input.perPack > 0 ? Math.floor(inputQty / recipe.input.perPack) : 0,
+      };
+      if (recipe.kind === "semi") sfg = inputRow;
+      else rm = inputRow;
     }
+    const pkgList = (recipe?.pkg || []).map((p, idx) => {
+      const qty = ITEM_QTY[p.refCode] ?? 0;
+      return {
+        label:        `PKG${idx + 1}`,
+        refCode:      p.refCode,
+        name:         p.name,
+        unit:         p.unit,
+        qty,
+        unitsPerPack: p.unitsPerPack,
+        capacity:     p.unitsPerPack > 0 ? Math.floor(qty / p.unitsPerPack) : 0,
+      };
+    });
+
+    // Producible FG = the binding constraint across input + every pkg component.
+    let producibleFG;
+    if (!recipe || (sfg == null && rm == null)) {
+      producibleFG = 0;
+    } else {
+      const inputCap = (sfg || rm).capacity;
+      const pkgCaps  = pkgList.map(p => p.capacity);
+      producibleFG = Math.min(inputCap, ...(pkgCaps.length ? pkgCaps : [Infinity]));
+      if (!isFinite(producibleFG)) producibleFG = 0;
+    }
+
+    const warehouseBreakdown = {
+      fg:    ops.fg,
+      kind:  recipe?.kind || null,
+      inputs: {
+        sfg,                 // null when SKU uses raw → pack direct
+        rm,                  // null when SKU uses semi → pack
+        pkg:    pkgList,     // 1..N components
+      },
+      // Legacy fields kept for backward compatibility with existing
+      // Materials breakdown table + forecast / runway code that still
+      // reads semiFg / rawMaterial / packaging directly. Eventually those
+      // call sites should switch to `inputs.{sfg,rm,pkg}`.
+      semiFg:       sfg?.qty ?? 0,
+      rawMaterial:  rm?.qty ?? 0,
+      packaging:    pkgList.length ? Math.min(...pkgList.map(p => p.qty)) : 0,
+      perPacketRaw: (rm || sfg)?.perPack || 0.1,
+      codes: {
+        semiFg:      sfg?.refCode || null,
+        rawMaterial: rm?.refCode  || null,
+        packaging:   pkgList[0]?.refCode || null,
+      },
+      producibleFG,
+    };
+
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
-    const vel = snap.vel;
+    const vel = ops.vel;
     const runway = vel > 0 ? Math.round(total / vel) : 0;
-    const runwayStatus = vel <= 0 ? "amber" : runway <= snap.leadTime ? "red" : runway < 30 ? "amber" : "green";
+    const runwayStatus = vel <= 0 ? "amber" : runway <= ops.leadTime ? "red" : runway < 30 ? "amber" : "green";
     const price = SKU_PRICE[s.code] || 500;
     return {
       ...s,
       velocity:    vel,
       growth:      MOM_GROWTH[s.code] ?? 0,
-      // Reuse the channel units as the "splits" object so PlatformCell's
-      // per-channel velocity derivation works the same way it did with synth.
       splits:      { amazon: ch.amazon, shopify: ch.shopify, flipkart: ch.flipkart, blinkit: ch.blinkit },
-      leadTime:    snap.leadTime,
+      leadTime:    ops.leadTime,
       stock:       totalStock,
       warehouseBreakdown,
       totalStock:  total,
@@ -258,6 +438,22 @@ const NSData = (function () {
       stockValue:  total * price,
     };
   });
+
+  // Reverse-lookup: for any refCode (e.g. "NSPKGCB100"), which SKUs use it?
+  // Powers the popover "click PKGn → see other SKUs sharing this component".
+  const itemUsedBy = (() => {
+    const map = {};
+    for (const sku of inventory) {
+      const wb = sku.warehouseBreakdown;
+      const refs = [wb.inputs.sfg?.refCode, wb.inputs.rm?.refCode, ...wb.inputs.pkg.map(p => p.refCode)]
+        .filter(Boolean);
+      for (const ref of refs) {
+        if (!map[ref]) map[ref] = [];
+        if (!map[ref].includes(sku.code)) map[ref].push(sku.code);
+      }
+    }
+    return map;
+  })();
 
   // ── Batches ───────────────────────────────────────────
   const batches = [
@@ -430,7 +626,7 @@ const NSData = (function () {
     fmtINR, fmtN, pct,
     skus, channels, revenueToday, revenueYesterday, revenueMTD, revenueMTDLast, revenueMTDTarget,
     revenue7dAvg, cashExpected,
-    trend30, alerts, skuSales, inventory, batches, suppliers, poLog,
+    trend30, alerts, skuSales, inventory, itemUsedBy, batches, suppliers, poLog,
     adAccounts, googleCampaigns, metaCampaigns, influencers,
     marketplaceAmazon, recentReviews,
     costCards, pnl, cashflow, launches,
