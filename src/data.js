@@ -335,6 +335,26 @@ const NSData = (function () {
     NSACDT30: 975,
   };
 
+  // What each SKU is listed as on each marketplace / channel. Pulled from
+  // the actual sheet exports (Amazon/FK/Blinkit category reports + the
+  // Shopify product-wise CSV). null = not listed on that channel yet.
+  const MARKETPLACE_NAMES = {
+    NSMP100:   { amazon: null, flipkart: null, blinkit: null, shopify: "Moringa Powder — 100gm" },
+    NSMP250:   { amazon: null, flipkart: null, blinkit: null, shopify: "Moringa Powder — 250gm" },
+    NSSB100:   { amazon: "Sea Buckthorn powder 100g", flipkart: null, blinkit: null, shopify: "NATURESUM HIMALAYAN SEA BUCKTHORN BERRIES POWDER — 100gm" },
+    NSSB250:   { amazon: "Sea Buckthorn powder 250g", flipkart: null, blinkit: null, shopify: "NATURESUM HIMALAYAN SEA BUCKTHORN BERRIES POWDER — 250gm" },
+    NSSB500:   { amazon: "Sea Buckthorn powder 500g", flipkart: null, blinkit: null, shopify: "NATURESUM HIMALAYAN SEA BUCKTHORN BERRIES POWDER — 500gm" },
+    NSSBDB100: { amazon: "Sea Buckthorn Berries 100g", flipkart: "Sea Buckthorn Berries 100g", blinkit: "Sea Buckthorn Berries 100g", shopify: "PURE SEA BUCKTHORN DRY BERRIES — 100GM" },
+    NSSBDB250: { amazon: "Sea Buckthorn Berries 250g", flipkart: "Sea Buckthorn Berries 250g", blinkit: "Sea Buckthorn Berries 250g", shopify: "PURE SEA BUCKTHORN DRY BERRIES — 250GM" },
+    NSSBDB500: { amazon: "Sea Buckthorn Berries 500g", flipkart: "Sea Buckthorn Berries 500g", blinkit: "Sea Buckthorn Berries 500g", shopify: "PURE SEA BUCKTHORN DRY BERRIES — 500GM" },
+    NSSBJ300:  { amazon: "Sea Buckthorn juice 300ml", flipkart: null, blinkit: "Sea Buckthorn Juice 300ml", shopify: "NATURESUM SEA BUCKTHORN JUICE — 300 ml" },
+    NSSBJ500:  { amazon: "Sea Buckthorn juice 500ml", flipkart: null, blinkit: null, shopify: "NATURESUM SEA BUCKTHORN JUICE — 500 ml" },
+    NSSBBO15:  { amazon: "Sea Buckthorn Oil 15ML", flipkart: "Sea Buckthorn Oil 15ML", blinkit: "Sea Buckthorn Oil 15ML", shopify: "SEA BUCKTHORN BERRY OIL — 15ML" },
+    NSSBBO30:  { amazon: "Sea Buckthorn Oil 30ML", flipkart: null, blinkit: "Sea Buckthorn Oil 30ML", shopify: "SEA BUCKTHORN BERRY OIL — 30ML" },
+    NSJO100:   { amazon: "Jatamansi Oil", flipkart: "Jatamansi Oil", blinkit: "Jatamansi Oil", shopify: "ROSEMARY & JATAMANSI HAIR OIL — 100ML" },
+    NSACDT30:  { amazon: "Acacia Catechu", flipkart: "Acacia Catechu", blinkit: null, shopify: "DIABETES CARE COLD BREW TEA WITH ACACIA CATECHU — Pack Of 30" },
+  };
+
   const inventory = skus.map((s) => {
     const ops = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
     const recipe = SKU_RECIPE[s.code];
@@ -429,6 +449,7 @@ const NSData = (function () {
       velocity:    vel,
       growth:      MOM_GROWTH[s.code] ?? 0,
       splits:      { amazon: ch.amazon, shopify: ch.shopify, flipkart: ch.flipkart, blinkit: ch.blinkit },
+      marketplaceNames: MARKETPLACE_NAMES[s.code] || { amazon: null, flipkart: null, blinkit: null, shopify: null },
       leadTime:    ops.leadTime,
       stock:       totalStock,
       warehouseBreakdown,

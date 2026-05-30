@@ -9,7 +9,7 @@ import { applyLiveData } from "../lib/liveInventory.js";
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
 
-const VALID_TABS = ["unified", "materials", "runway", "simulator", "forecast", "batches", "returns"];
+const VALID_TABS = ["unified", "materials", "runway", "simulator", "forecast", "catalog", "batches", "returns"];
 
 // Color palette used by every warehouse-breakdown surface (mini-bar in the
 // Unified Stock table, the dedicated Materials tab, and the per-SKU popover).
@@ -81,6 +81,7 @@ const PageInventory = ({ subsection }) => {
         <button className={tab === "runway" ? "active" : ""} onClick={() => setTab("runway")}>Runway calculator</button>
         <button className={tab === "simulator" ? "active" : ""} onClick={() => setTab("simulator")}>Simulator</button>
         <button className={tab === "forecast" ? "active" : ""} onClick={() => setTab("forecast")}>Demand forecast</button>
+        <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>SKU catalog</button>
         <button className={tab === "batches" ? "active" : ""} onClick={() => setTab("batches")}>Batches & expiry</button>
         <button className={tab === "returns" ? "active" : ""} onClick={() => setTab("returns")}>Returns restocking</button>
       </div>
@@ -92,6 +93,7 @@ const PageInventory = ({ subsection }) => {
       {tab === "forecast" && (
         <ForecastTab inventory={liveInventory} days={forecastDays} setDays={setForecastDays}/>
       )}
+      {tab === "catalog" && <CatalogTab inventory={liveInventory}/>}
       {tab === "batches"  && <SubtabPreviewGate label="Batches & expiry"><BatchesTab batches={D.batches}/></SubtabPreviewGate>}
       {tab === "returns"  && <SubtabPreviewGate label="Returns restocking"><ReturnsTab/></SubtabPreviewGate>}
     </div>
@@ -444,14 +446,13 @@ const UnifiedStockTab = ({ inventory }) => {
                       units={maxFg}
                       breakdown={
                         <>
-                          <span className="pf-cell-bd-tag">FG</span>
                           <span className="pf-cell-bd-num">{D.fmtN(fg)}</span>
                           <span className="pf-cell-bd-op">+</span>
-                          <span className="pf-cell-bd-tag">Prod</span>
                           <span className="pf-cell-bd-num">{D.fmtN(producible)}</span>
+                          <span className="pf-cell-bd-tag">producible</span>
                         </>
                       }
-                      breakdownLabel="Current FG + Producible FG"
+                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}`}
                       velocity={vel.warehouse}
                       growth={s.growth}
                     />
@@ -579,7 +580,7 @@ const MaterialsTab = ({ inventory }) => {
             <select className="sel" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ height: 26, fontSize: 11.5 }}>
               <option value="bottleneck">Tightest bottleneck</option>
               <option value="best">Producible FG (high → low)</option>
-              <option value="fg">FG count (high → low)</option>
+              <option value="fg">Produced FG (high → low)</option>
               <option value="name">Item name</option>
             </select>
           </div>
@@ -599,14 +600,14 @@ const MaterialsTab = ({ inventory }) => {
           <thead>
             <tr>
               <th>Item</th>
-              <th className="num mat-h" style={{ color: MATERIAL_COLORS.fg }}>FG</th>
+              <th className="num mat-h" style={{ color: MATERIAL_COLORS.fg }}>Produced FG</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.semiFg }}>Semi-FG</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.rawMaterial }}>Raw</th>
               <th className="num mat-h" style={{ color: MATERIAL_COLORS.packaging }}>Packaging</th>
               <th className="mat-h-bn">Bottleneck</th>
               <th className="num mat-h-result">Producible FG</th>
-              <th className="num mat-h-result mat-h-max" title="FG + Producible FG — the maximum FG inventory we could have today">
-                Max FG <span className="mat-h-formula mono">FG + Prod.</span>
+              <th className="num mat-h-result mat-h-max" title="Total (WH) = Produced FG + Producible FG — the total finished goods we could have in the central warehouse today">
+                Total (WH) <span className="mat-h-formula mono">Produced + Producible</span>
               </th>
             </tr>
           </thead>
@@ -754,7 +755,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
   const maxFg = wb.fg + wb.producibleFG;
   const channels = [
-    { key: "warehouse", name: "Central warehouse", hint: "Max FG · D2C + B2B direct",  color: "#2F5E47", units: maxFg,                vel: sku.velocity * ((sp.shopify  || 0) / revTotal) },
+    { key: "warehouse", name: "Central warehouse", hint: "Total (WH) · D2C + B2B direct",  color: "#2F5E47", units: maxFg,                vel: sku.velocity * ((sp.shopify  || 0) / revTotal) },
     { key: "amazon",    name: "Amazon FBA", hint: "fulfilled by Amazon",        color: "#FF9900", units: sku.stock.amazonFBA,  vel: sku.velocity * ((sp.amazon   || 0) / revTotal) },
     { key: "flipkart",  name: "Flipkart",   hint: "FK warehouse",               color: "#2874F0", units: sku.stock.flipkart,   vel: sku.velocity * ((sp.flipkart || 0) / revTotal) },
     { key: "blinkit",   name: "Blinkit",    hint: "10-min delivery",            color: "#F8CB46", units: sku.stock.blinkit,    vel: sku.velocity * ((sp.blinkit  || 0) / revTotal) },
@@ -795,7 +796,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
               ? <span className="muted" style={{ fontSize: 12 }}>not applicable for this SKU</span>
               : (
                 <>
-                  <span style={{ fontWeight: 500 }}>{isFG ? "FG (ready to ship)" : data.name}</span>
+                  <span style={{ fontWeight: 500 }}>{isFG ? "Produced FG (ready to ship)" : data.name}</span>
                   {code && <span className="wb-row-code sku">{code}</span>}
                   {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
                 </>
@@ -856,10 +857,10 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           <div className="wb-section-bar">
             <span className="wb-section-bar-label">Materials breakdown</span>
             <span className="wb-section-bar-stat">
-              <span className="wb-section-bar-tag">Max FG</span>
+              <span className="wb-section-bar-tag">Total (WH)</span>
               <span className="wb-section-bar-num mono">{D.fmtN(wb.fg + wb.producibleFG)}</span>
               <span className="wb-section-bar-formula muted">
-                · FG {D.fmtN(wb.fg)} + Producible {D.fmtN(wb.producibleFG)}
+                · Produced {D.fmtN(wb.fg)} + Producible {D.fmtN(wb.producibleFG)}
               </span>
             </span>
           </div>
@@ -1111,7 +1112,7 @@ const SimulatorTab = ({ inventory }) => {
               </div>
             </div>
             {[
-              { k: "fg",          label: "Central warehouse FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
+              { k: "fg",          label: "Produced FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
               { k: "semiFg",      label: "Semi-FG",       unit: "units", min: 0, max: fgMax,  step: 1 },
               { k: "rawMaterial", label: "Raw Material",  unit: "units", min: 0, max: fgMax * 2, step: 1 },
               { k: "packaging",   label: "Packaging",     unit: "units", min: 0, max: fgMax * 1.5, step: 1 },
@@ -1187,12 +1188,12 @@ const SimulatorTab = ({ inventory }) => {
               <div className="sim-out-stat">
                 <div className="sim-out-stat-label">Producible FG</div>
                 <div className="sim-out-stat-num mono">{D.fmtN(producibleFg)}</div>
-                <div className="sim-out-stat-sub">min(Semi-FG, Packaging)</div>
+                <div className="sim-out-stat-sub">min(input, packaging)</div>
               </div>
               <div className="sim-out-stat">
-                <div className="sim-out-stat-label">Max FG today</div>
+                <div className="sim-out-stat-label">Total (WH)</div>
                 <div className="sim-out-stat-num mono" style={{ color: "var(--brand-deep)" }}>{D.fmtN(maxFg)}</div>
-                <div className="sim-out-stat-sub">FG + Producible</div>
+                <div className="sim-out-stat-sub">Produced + Producible</div>
               </div>
               <div className="sim-out-stat">
                 <div className="sim-out-stat-label">Reorder by</div>
@@ -1599,8 +1600,8 @@ const RunwayTab = ({ inventory: rawInventory }) => {
         title="Runway by Item"
         sub={
           mode === "current"
-            ? "Max FG ÷ (velocity × (1 + MoM growth %)). Growth column drives the projection."
-            : "Max FG ÷ (velocity × (1 + Custom %)). Override any item's growth to stress-test runway."
+            ? "Total (WH) ÷ (velocity × (1 + MoM growth %)). Growth column drives the projection."
+            : "Total (WH) ÷ (velocity × (1 + Custom %)). Override any item's growth to stress-test runway."
         }
         padded={false}
       >
@@ -1649,16 +1650,16 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                     <div className="sku">{s.code} · {s.variant}</div>
                   </td>
 
-                  {/* 2. Warehouse Max FG (with FG + Prod breakdown under) */}
-                  <td className="num mat-cell rw-cell-max">
+                  {/* 2. Total (WH) = Produced FG + Producible FG, breakdown under */}
+                  <td className="num mat-cell rw-cell-max"
+                      title={`Total (WH) ${D.fmtN(s.maxFg)} = Produced FG ${D.fmtN(s.whFg)} + Producible FG ${D.fmtN(s.producibleFg)}`}>
                     <div className="rw-wh-stack">
                       <div className="rw-wh-max mono">{D.fmtN(s.maxFg)}</div>
                       <div className="rw-wh-sub">
-                        <span className="rw-wh-tag">FG</span>
                         <span className="mono">{D.fmtN(s.whFg)}</span>
                         <span className="rw-wh-op">+</span>
-                        <span className="rw-wh-tag">Prod</span>
                         <span className="mono">{D.fmtN(s.producibleFg)}</span>
+                        <span className="rw-wh-tag">producible</span>
                       </div>
                     </div>
                   </td>
@@ -1730,6 +1731,10 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
 const ForecastTab = ({ inventory, days, setDays }) => {
   const D = NSData;
+  // Clicking a row opens the same per-SKU breakdown popover used across
+  // Unified Stock / Materials / Runway, so the Forecast tab behaves
+  // consistently with the rest of Inventory.
+  const [popoverSku, setPopoverSku] = useState(null);
 
   // Per-item forecast math.
   //   - forecast: units we expect to ship over `days` (trend-adjusted)
@@ -1788,7 +1793,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
             <span className="rw-risk-icon"><Icon name="alerts" size={14}/></span>
             <div>
               <div className="rw-risk-title">At-risk SKUs</div>
-              <div className="rw-risk-sub">Max FG (today) &lt; forecast demand</div>
+              <div className="rw-risk-sub">Total (WH) today &lt; forecast demand</div>
             </div>
           </div>
           <div className="rw-risk-num">{atRisk}</div>
@@ -1826,7 +1831,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
 
       <Card
         title="Demand forecast"
-        sub={`Per item · projected ${days}-day demand. Red Max-FG cell = available supply won't meet forecast.`}
+        sub={`Per item · projected ${days}-day demand. Red Total-(WH) cell = available supply won't meet forecast.`}
         action={
           <div className="seg">
             {[30, 60, 90].map(d => (
@@ -1852,7 +1857,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
               <th className="num">Velocity</th>
               <th className="num">Trend</th>
               <th className="num">Forecast ({days}d)</th>
-              <th className="num">Max FG today</th>
+              <th className="num">Total (WH) today</th>
               <th className="num">Required</th>
               <th className="num fc-h-result">Reorder</th>
             </tr>
@@ -1861,7 +1866,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
             {rows.map(s => {
               const atRisk = s.maxFg < s.forecast;
               return (
-                <tr key={s.code} className="fc-row">
+                <tr key={s.code} className="fc-row row-clickable" onClick={() => setPopoverSku(s)}>
                   <td className="mat-cell">
                     <div className="mat-cell-name">{s.name}</div>
                     <div className="sku">{s.code}</div>
@@ -1899,6 +1904,145 @@ const ForecastTab = ({ inventory, days, setDays }) => {
           </tbody>
         </table>
       </Card>
+
+      {popoverSku && (
+        <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
+      )}
+    </>
+  );
+};
+
+// ── SKU Catalog tab — the naming reference ────────────────────────────
+// Two views the team kept asking "what's our code for X / what's it called
+// on Amazon":
+//   1. Internal codes — FG SKU code + its component sub-codes (SFG/RM/PKGn)
+//   2. Marketplace catalog — what each SKU is listed as on every channel
+const CatalogTab = ({ inventory }) => {
+  const D = NSData;
+  const [popoverSku, setPopoverSku] = useState(null);
+
+  const CHANNEL_META = [
+    { key: "amazon",   label: "Amazon",      color: "#FF9900" },
+    { key: "flipkart", label: "Flipkart",    color: "#2874F0" },
+    { key: "blinkit",  label: "Blinkit",     color: "#F8CB46" },
+    { key: "shopify",  label: "Shopify · D2C", color: "#5E8E3E" },
+  ];
+
+  return (
+    <>
+      {/* ── View 1: internal codes ── */}
+      <Card
+        title="Internal SKU codes"
+        sub="Our canonical code per finished good, and the sub-codes for the input + packaging components it's built from. Click a row for the full material breakdown."
+        padded={false}
+      >
+        <table className="table mat-table cat-table">
+          <colgroup>
+            <col className="cat-col-item"/>
+            <col className="cat-col-code"/>
+            <col className="cat-col-input"/>
+            <col className="cat-col-pkg"/>
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>NS code</th>
+              <th>Input · SFG / RM</th>
+              <th>Packaging components</th>
+            </tr>
+          </thead>
+          <tbody>
+            {inventory.map(s => {
+              const wb = s.warehouseBreakdown || {};
+              const inp = wb.inputs?.sfg || wb.inputs?.rm || null;
+              const inpTag = wb.inputs?.sfg ? "SFG" : wb.inputs?.rm ? "RM" : null;
+              const pkg = wb.inputs?.pkg || [];
+              return (
+                <tr key={s.code} className="row-clickable" onClick={() => setPopoverSku(s)}>
+                  <td className="mat-cell">
+                    <div className="mat-cell-name">{s.name}</div>
+                    <div className="sku">{s.variant}</div>
+                  </td>
+                  <td className="mat-cell">
+                    <span className="cat-code-chip cat-code-fg sku">{s.code}</span>
+                  </td>
+                  <td className="mat-cell">
+                    {inp ? (
+                      <div className="cat-comp">
+                        <span className="cat-comp-tag">{inpTag}</span>
+                        <span className="cat-code-chip sku">{inp.refCode}</span>
+                        <span className="cat-comp-name muted">{inp.name}</span>
+                      </div>
+                    ) : <span className="muted">—</span>}
+                  </td>
+                  <td className="mat-cell">
+                    <div className="cat-pkg-list">
+                      {pkg.length === 0 && <span className="muted">—</span>}
+                      {pkg.map((p, i) => (
+                        <div className="cat-comp" key={p.refCode}>
+                          <span className="cat-comp-tag">PKG{i + 1}</span>
+                          <span className="cat-code-chip sku">{p.refCode}</span>
+                          <span className="cat-comp-name muted">{p.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* ── View 2: marketplace catalog names ── */}
+      <Card
+        title="Marketplace catalog names"
+        sub="What each SKU is listed as on every channel. Empty = not listed there yet. Sourced from the channel category reports + Shopify export."
+        padded={false}
+        style={{ marginTop: 14 }}
+      >
+        <table className="table mat-table cat-table cat-table-mp">
+          <colgroup>
+            <col className="cat-col-mp-code"/>
+            {CHANNEL_META.map(c => <col key={c.key} className="cat-col-mp-name"/>)}
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Item · NS code</th>
+              {CHANNEL_META.map(c => (
+                <th key={c.key}>
+                  <span className="cat-mp-dot" style={{ background: c.color }}/>
+                  {c.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {inventory.map(s => {
+              const mp = s.marketplaceNames || {};
+              return (
+                <tr key={s.code} className="row-clickable" onClick={() => setPopoverSku(s)}>
+                  <td className="mat-cell">
+                    <div className="mat-cell-name">{s.name}</div>
+                    <div className="sku">{s.code} · {s.variant}</div>
+                  </td>
+                  {CHANNEL_META.map(c => (
+                    <td className="mat-cell cat-mp-cell" key={c.key}>
+                      {mp[c.key]
+                        ? <span className="cat-mp-name">{mp[c.key]}</span>
+                        : <span className="cat-mp-none muted">not listed</span>}
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {popoverSku && (
+        <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
+      )}
     </>
   );
 };
