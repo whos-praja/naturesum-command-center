@@ -12,6 +12,7 @@
  */
 import { useState, useEffect } from "react";
 import { Icon } from "./Shared.jsx";
+import { DatePicker } from "./DatePicker.jsx";
 import { FILE_TYPES, parseByType } from "../lib/uploadParsers.js";
 import {
   loadMultiFile,
@@ -327,13 +328,10 @@ function UploadZone({ zone, entry, onUpdate }) {
           <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
             Cutoff
           </label>
-          <input
-            type="date"
-            className="sim-number"
+          <DatePicker
             value={dateCutoff}
-            onChange={(e) => setDateCutoff(e.target.value)}
-            style={{ width: 130, fontSize: 11.5 }}
-            disabled={stage === "parsing"}
+            onChange={(iso) => setDateCutoff(iso || todayISO())}
+            width={150}
           />
 
           {isUploaded ? (
