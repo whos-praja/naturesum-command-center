@@ -26,7 +26,14 @@ const XLSX = require("xlsx");
 const path = require("path");
 const fs = require("fs");
 
-const SRC = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker.xlsx";
+// Source: prefer the freshly-updated tracker if it exists, else fall back
+// to the original. This lets the script run idempotently on each sprint.
+const SRC_CANDIDATES = [
+  "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-31.xlsx",
+  "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-30.xlsx",
+  "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker.xlsx",
+];
+const SRC = SRC_CANDIDATES.find(p => fs.existsSync(p)) || SRC_CANDIDATES[SRC_CANDIDATES.length - 1];
 const OUT = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-31.xlsx";
 
 if (!fs.existsSync(SRC)) {
@@ -108,19 +115,27 @@ const TRACKING_UPDATES = [
   // Sprint 3 lead-time data wiring (1a0d379)
   { key: "SIM-014", status: "DONE", blocker: "None", sprint: "Done", notes: "Real lead times wired: Amazon 14d / Flipkart 3d / Blinkit 8d — 31-May-2026 (1a0d379)" },
   { key: "SIM-016", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-component lead times: SB raw 50d / Moringa 25d / SFG 20d / packaging 14d — 31-May-2026 (1a0d379)" },
-  // Sprint 4 — Blinkit cascade UI (BLK-001 → BLK-005)
-  { key: "BLK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit cell shows feeder-WH OOS counts (stub data, marked STUB) — 01-Jun-2026" },
-  { key: "BLK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "a/b split — denominator = lifetime launched WHs — 01-Jun-2026" },
+  // Sprint 4 — Blinkit cascade UI (BLK-001 → BLK-005). Sprint 5 swapped real
+  // Blinkit data in — STUB badges dropped, real WH names + per-WH velocity.
+  { key: "BLK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit cell shows feeder-WH OOS counts — real DATA-001 export wired 01-Jun-2026" },
+  { key: "BLK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "a/b split — denominator = lifetime launched WHs (real) — 01-Jun-2026" },
   { key: "BLK-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Same Blinkit treatment applied in Runway tab — 01-Jun-2026" },
-  { key: "BLK-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal — per-feeder-WH stock list with status pills + days-of-cover — 01-Jun-2026" },
+  { key: "BLK-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal — per-feeder-WH stock + real 30-day sales → days-of-cover — 01-Jun-2026" },
   { key: "BLK-005", status: "DONE", blocker: "None", sprint: "Done", notes: "Editable amber threshold (default 25, persisted per-SKU in localStorage) — 01-Jun-2026" },
+  // DATA-001 satisfied — Blinkit Seller Panel export landed and wired
+  { key: "DATA-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit feeder-WH 'Stock On Hand' export ingested via scripts/import-marketplace-data.cjs — 01-Jun-2026" },
   // AMZ-004 sits unblocked from decisions but still awaiting drill modal
   { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern shipped in Unified Stock + Runway. Drill modal awaits DATA-002." },
 ];
 
 const DATA_RECEIVED = [
-  { key: "SIM-014-DATA", date: "31-May-2026" },
-  { key: "SIM-016-DATA", date: "31-May-2026" },
+  { key: "SIM-014-DATA", date: "31-May-2026", status: "yes" },
+  { key: "SIM-016-DATA", date: "31-May-2026", status: "yes" },
+  // 01-Jun-2026 — real marketplace exports landed
+  { key: "DATA-001",     date: "01-Jun-2026", status: "yes" },     // Blinkit feeder-WH xlsx — full
+  { key: "DATA-002",     date: "01-Jun-2026", status: "partial" }, // Amazon FBA ledger received; MCF Orders report still pending
+  { key: "DATA-003",     date: "01-Jun-2026", status: "yes" },     // Flipkart inventory CSV (single Gurgaon WH)
+  { key: "DATA-004",     date: "01-Jun-2026", status: "partial" }, // Flipkart prices received; Amazon ASP + Blinkit MRP still pending
 ];
 
 console.log("\n── TRACKING sheet ──");
@@ -161,8 +176,16 @@ const NEW_ITEMS = [
   },
 ];
 const headerOrder = ["Bucket","Priority","Item Key","Title","Description","Acceptance Criteria","Inputs Needed","Decisions Needed","Data Needed","Effort","Status","Blocker","Workaround","Dependencies","Owner","Sprint","Notes"];
-NEW_ITEMS.forEach((item, i) => {
-  const r = lastRowExisting + 1 + i;  // 1-based
+let appendCursor = lastRowExisting + 1;  // 1-based row to write next new item
+NEW_ITEMS.forEach((item) => {
+  // Idempotent: if an item with this Key already exists, skip the append so
+  // re-running the script doesn't duplicate cross-cutting rows every time.
+  const existingRow = findRow(tracking, tracking["!ref"], COL.key, item["Item Key"]);
+  if (existingRow > 0) {
+    console.log(`  · ${item["Item Key"]} already at row ${existingRow} — skipping append`);
+    return;
+  }
+  const r = appendCursor++;
   headerOrder.forEach((h, ci) => {
     setCell(tracking, addr(ci, r), item[h] ?? "");
   });
@@ -203,9 +226,9 @@ if (dreq) {
     setCell(dreq, addr(D_COL.dateReq, r + 1), "30-May-2026");
     const received = DATA_RECEIVED.find(d => d.key === key);
     if (received) {
-      setCell(dreq, addr(D_COL.received, r + 1), "yes");
+      setCell(dreq, addr(D_COL.received, r + 1), received.status || "yes");
       setCell(dreq, addr(D_COL.dateRecv, r + 1), received.date);
-      console.log(`  ✓ ${key.padEnd(14)} row ${r + 1} → RECEIVED on ${received.date}`);
+      console.log(`  ✓ ${key.padEnd(14)} row ${r + 1} → ${(received.status || "yes").toUpperCase()} on ${received.date}`);
     } else {
       console.log(`  ✓ ${key.padEnd(14)} row ${r + 1} → date requested set (not yet received)`);
     }

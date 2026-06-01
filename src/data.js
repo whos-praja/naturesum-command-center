@@ -1,4 +1,10 @@
 // Mock data for Naturesum Command Center
+// Real marketplace exports (Amazon FBA ledger, Blinkit feeder-WH stock,
+// Flipkart inventory + sales, Shopify website sales) are imported as a
+// per-SKU map and used to override stub values where available. See
+// scripts/import-marketplace-data.cjs for the regeneration pipeline.
+import { REAL_MARKETPLACE_DATA, REAL_DATA_SNAPSHOT_DATE } from "./realMarketplaceData.js";
+
 const NSData = (function () {
   const fmtINR = (n) => {
     if (n == null) return "—";
@@ -407,63 +413,59 @@ const NSData = (function () {
     NSACDT30:  { amazon: "Acacia Catechu", flipkart: "Acacia Catechu", blinkit: null, shopify: "DIABETES CARE COLD BREW TEA WITH ACACIA CATECHU — Pack Of 30" },
   };
 
-  // ── Blinkit feeder warehouses — STUB DATA ──
-  // 8 representative feeder WHs across India. Replace with the real list
-  // from Blinkit Seller Panel when DATA-001 arrives.
-  // `isStub: true` makes the UI render a visible "STUB" badge so these
-  // numbers can't be mistaken for real ones.
-  const BLINKIT_FEEDER_WHS = [
-    { code: "BLK-DEL-N1", name: "Delhi NCR North",         city: "Delhi"     },
-    { code: "BLK-DEL-S1", name: "Delhi NCR South",         city: "Delhi"     },
-    { code: "BLK-MUM-1",  name: "Mumbai Andheri",          city: "Mumbai"    },
-    { code: "BLK-MUM-2",  name: "Mumbai Thane",            city: "Mumbai"    },
-    { code: "BLK-BLR-1",  name: "Bangalore Whitefield",    city: "Bangalore" },
-    { code: "BLK-BLR-2",  name: "Bangalore Koramangala",   city: "Bangalore" },
-    { code: "BLK-HYD-1",  name: "Hyderabad Gachibowli",    city: "Hyderabad" },
-    { code: "BLK-CCU-1",  name: "Kolkata Salt Lake",       city: "Kolkata"   },
-  ];
+  // ── Blinkit feeder warehouses ─────────────────────────
+  // Real list derived from the Blinkit Seller Panel "Stock On Hand" export
+  // (DATA-001, arrived 30-May-2026). The export uses long names like
+  // "Noida N1 - Feeder" — we keep those as the canonical `code` so the
+  // per-SKU `current[code]` map keys directly match the import.
+  //
+  // Cities are derived from the WH name prefix (Noida → Delhi NCR,
+  // Faridabad → Delhi NCR, Kundli → Delhi NCR — they're all in the same
+  // metro). For display, `name` is the short form ("Noida N1") and
+  // `city` is the metro grouping.
+  const BLINKIT_FEEDER_WH_MAP = {
+    "Noida N1 - Feeder":              { name: "Noida N1",      city: "Delhi NCR" },
+    "Faridabad - Feeder":             { name: "Faridabad",     city: "Delhi NCR" },
+    "Kundli Feeder":                  { name: "Kundli",        city: "Delhi NCR" },
+    "Mumbai M10 - Feeder":            { name: "Mumbai M10",    city: "Mumbai"    },
+    "Bengaluru B3":                   { name: "Bengaluru B3",  city: "Bangalore" },
+    "Bengaluru B5 - Feeder":          { name: "Bengaluru B5",  city: "Bangalore" },
+    "Hyderabad H3 - Feeder":          { name: "Hyderabad H3",  city: "Hyderabad" },
+    "Kolkata K6 - Feeder Warehouse":  { name: "Kolkata K6",    city: "Kolkata"   },
+    "Pune P3 - Feeder Warehouse":     { name: "Pune P3",       city: "Pune"      },
+    "Chennai C5 - Feeder":            { name: "Chennai C5",    city: "Chennai"   },
+    "Ahmedabad A2 - Feeder":          { name: "Ahmedabad A2",  city: "Ahmedabad" },
+    "Jaipur J3 - Feeder":             { name: "Jaipur J3",     city: "Jaipur"    },
+    "Lucknow L4":                     { name: "Lucknow L4",    city: "Lucknow"   },
+  };
+  const BLINKIT_FEEDER_WHS = Object.entries(BLINKIT_FEEDER_WH_MAP).map(
+    ([code, meta]) => ({ code, ...meta })
+  );
 
-  // Build per-SKU stub stock per feeder WH.
-  //   - SKUs with no Blinkit channel mix (NSMP100/250, NSSBBO15/30, NSJO100,
-  //     NSACDT30) get an empty `feeders` map — never launched on Blinkit.
-  //   - SKUs with channel mix get launched on 5-8 WHs depending on volume.
-  //   - Stock distribution is deterministic per SKU (uses code hash) so
-  //     numbers don't shift between renders.
-  function hashCode(str) {
-    let h = 0;
-    for (let i = 0; i < str.length; i++) {
-      h = (h * 31 + str.charCodeAt(i)) | 0;
+  // Build per-SKU per-WH stock. When the real Blinkit export covers a SKU,
+  // use it directly. Otherwise the SKU is treated as "not launched on
+  // Blinkit" (empty `ever` list) — none of the SKUs missing from the real
+  // file are actually Blinkit-eligible (Moringa, Sea Buckthorn Oil,
+  // Jatamansi Hair Oil — Blinkit-side launch pending).
+  function buildBlinkitFeeders(skuCode) {
+    const real = REAL_MARKETPLACE_DATA[skuCode]?.blinkit;
+    if (!real || real.everLaunched.length === 0) {
+      return { ever: [], current: {}, isStub: false };
     }
-    return Math.abs(h);
-  }
-  function buildBlinkitFeeders(skuCode, totalStock, channelMixShare) {
-    if (channelMixShare <= 0) return { ever: [], current: {}, isStub: true };
-    const h = hashCode(skuCode);
-    // Higher-volume SKUs launched on more WHs (5-8); lower-volume on 5-6.
-    const launchCount = totalStock > 30 ? 6 + (h % 3) : 5 + (h % 2);
-    const ever = [...BLINKIT_FEEDER_WHS]
-      .map((w, i) => ({ w, sortKey: (h >> i) % 100 }))
-      .sort((a, b) => a.sortKey - b.sortKey)
-      .slice(0, launchCount)
-      .map(x => x.w.code);
-
-    // Distribute total stock across the launched WHs. Some WHs get 0 (OOS),
-    // some get a low value (OOS-soon), the rest get the bulk.
     const current = {};
-    const avgPerWh = totalStock / Math.max(1, launchCount);
-    ever.forEach((code, i) => {
-      const seed = ((h >> (i + 3)) & 0xff);
-      let stock;
-      if (seed < 40) {
-        stock = 0;                                            // ~16% OOS
-      } else if (seed < 90) {
-        stock = Math.max(1, Math.round(avgPerWh * 0.2));      // ~20% low
-      } else {
-        stock = Math.max(0, Math.round(avgPerWh * (0.7 + (seed % 60) / 100)));
-      }
-      current[code] = stock;
-    });
-    return { ever, current, isStub: true };
+    for (const wh of real.everLaunched) {
+      current[wh] = real.byWh[wh]?.sellable ?? 0;
+    }
+    return {
+      ever: [...real.everLaunched],
+      current,
+      isStub: false,
+      // Real per-WH 30-day sales — used by the UI to compute days-of-cover
+      // per WH instead of dividing total Blinkit velocity by WH count.
+      perWhSales30d: Object.fromEntries(
+        real.everLaunched.map(wh => [wh, real.byWh[wh]?.sales30d ?? 0])
+      ),
+    };
   }
 
   const inventory = skus.map((s) => {
@@ -471,16 +473,30 @@ const NSData = (function () {
     const recipe = SKU_RECIPE[s.code];
     const ch = CHANNEL_MIX[s.code] || { amazon: 0, shopify: 0, flipkart: 0, blinkit: 0 };
     const totalChUnits = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) || 0;
-    // Marketplace stock estimates — until real per-channel inventory feeds
-    // land, hold approximately 7 days of cover at each channel's run rate.
+    // Marketplace stock — use real exports when present, otherwise hold
+    // approximately 7 days of cover at each channel's run rate as a stand-in.
+    //   - amazonFBA: Amazon FBA ledger ending-balance sum (snapshot date in REAL_DATA_SNAPSHOT_DATE)
+    //   - flipkart:  Flipkart inventory live count (single Gurgaon WH)
+    //   - blinkit:   Blinkit feeder-WH sellable sum across all feeders
     const dailyByCh = totalChUnits ? totalChUnits / 30 : 0;
     const ESTCOVER = 7;
+    const real = REAL_MARKETPLACE_DATA[s.code] || {};
+    const stubAmazon   = Math.round(dailyByCh * (ch.amazon   / (totalChUnits || 1)) * ESTCOVER) || 0;
+    const stubFlipkart = Math.round(dailyByCh * (ch.flipkart / (totalChUnits || 1)) * ESTCOVER) || 0;
+    const stubBlinkit  = Math.round(dailyByCh * (ch.blinkit  / (totalChUnits || 1)) * ESTCOVER) || 0;
     const totalStock = {
       warehouse: ops.fg,
-      amazonFBA: Math.round(dailyByCh * (ch.amazon  / (totalChUnits || 1)) * ESTCOVER) || 0,
-      flipkart:  Math.round(dailyByCh * (ch.flipkart / (totalChUnits || 1)) * ESTCOVER) || 0,
-      blinkit:   Math.round(dailyByCh * (ch.blinkit  / (totalChUnits || 1)) * ESTCOVER) || 0,
+      amazonFBA: real.amazon?.totalSellable   ?? stubAmazon,
+      flipkart:  real.flipkart?.live          ?? stubFlipkart,
+      blinkit:   real.blinkit?.totalSellable  ?? stubBlinkit,
       transit:   0,
+    };
+    // Track which channels are sourced from real data — used to drop the
+    // STUB badges in the UI and to expose precise numbers in drill modals.
+    const stockSource = {
+      amazon:   real.amazon   ? "real" : "stub",
+      flipkart: real.flipkart ? "real" : "stub",
+      blinkit:  real.blinkit  ? "real" : "stub",
     };
 
     // Build the per-SKU input rows from the recipe + Live ITEM_QTY snapshot.
@@ -603,8 +619,13 @@ const NSData = (function () {
         channels:      cascadeChannels,
       },
       marketplaceNames: MARKETPLACE_NAMES[s.code] || { amazon: null, flipkart: null, blinkit: null, shopify: null },
-      // Per-SKU Blinkit feeder-warehouse map (STUB data — swap when DATA-001 arrives)
-      blinkitFeeders: buildBlinkitFeeders(s.code, totalStock.blinkit, ch.blinkit),
+      // Per-SKU Blinkit feeder-warehouse map (real data from DATA-001 export
+      // when available; empty `ever` list for SKUs not yet launched on Blinkit).
+      blinkitFeeders: buildBlinkitFeeders(s.code),
+      // Mirror of the real-export numbers so cell drill modals can show
+      // damaged / disposed / per-WH velocity etc. directly.
+      realData:    REAL_MARKETPLACE_DATA[s.code] || null,
+      stockSource,
       leadTime:    ops.leadTime,
       stock:       totalStock,
       warehouseBreakdown,
@@ -804,6 +825,7 @@ const NSData = (function () {
     revenue7dAvg, cashExpected,
     trend30, alerts, skuSales, inventory, itemUsedBy, batches, suppliers, poLog,
     blinkitFeederWhs: BLINKIT_FEEDER_WHS,
+    realDataSnapshotDate: REAL_DATA_SNAPSHOT_DATE,
     adAccounts, googleCampaigns, metaCampaigns, influencers,
     marketplaceAmazon, recentReviews,
     costCards, pnl, cashflow, launches,

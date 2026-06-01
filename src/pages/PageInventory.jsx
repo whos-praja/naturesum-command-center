@@ -116,21 +116,31 @@ function writeBlkThreshold(skuCode, val) {
   window.localStorage.setItem(BLK_THRESHOLD_KEY(skuCode), String(val));
 }
 
+// Per-WH velocity for Blinkit. When real per-WH sales are present (from the
+// Blinkit Seller Panel export), use those directly. Otherwise fall back to
+// the rough split-total-velocity-across-WHs heuristic.
+function blkPerWhVelocity(feeders, sku, whCode) {
+  if (feeders?.perWhSales30d && feeders.perWhSales30d[whCode] != null) {
+    return feeders.perWhSales30d[whCode] / 30;
+  }
+  const ever = feeders?.ever?.length || 0;
+  const blkVel = sku?.channelVelocity?.blinkit ?? 0;
+  return ever > 0 ? blkVel / ever : 0;
+}
+
 // Given a SKU's blinkitFeeders + the per-SKU amber threshold, return
 // counts: out-of-stock, will-go-OOS-soon (≤ threshold), healthy, and
 // the lifetime "ever launched on" denominator.
 function blkFeederStats(feeders, sku, threshold) {
   const ever = feeders?.ever?.length || 0;
   const current = feeders?.current || {};
-  const blkVel = sku?.channelVelocity?.blinkit ?? 0;
-  // Per-WH velocity (rough): split total Blinkit velocity across launched WHs.
-  const perWhVel = ever > 0 ? blkVel / ever : 0;
   let red = 0, orange = 0;
   for (const code of feeders?.ever || []) {
     const stock = current[code] ?? 0;
+    const perWhVel = blkPerWhVelocity(feeders, sku, code);
     if (stock <= 0) red++;
     else if (perWhVel > 0) {
-      // OOS within 14 days at current per-WH velocity OR stock ≤ amber threshold
+      // OOS within 14 days at this WH's velocity OR stock ≤ amber threshold
       const daysCover = stock / perWhVel;
       if (daysCover <= 14 || stock <= threshold) orange++;
     } else if (stock <= threshold) {
@@ -180,16 +190,16 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
   }, [onClose]);
 
   const feeders = sku.blinkitFeeders || { ever: [], current: {}, isStub: true };
-  const blkVel = sku?.channelVelocity?.blinkit ?? 0;
-  const perWhVel = feeders.ever.length > 0 ? blkVel / feeders.ever.length : 0;
 
   const rows = feeders.ever.map(code => {
     const wh = D.blinkitFeederWhs.find(w => w.code === code) || { code, name: code, city: "—" };
     const stock = feeders.current[code] ?? 0;
+    const perWhVel = blkPerWhVelocity(feeders, sku, code);
     const days = perWhVel > 0 ? Math.round(stock / perWhVel) : null;
     let severity = "ok";
     if (stock <= 0) severity = "crit";
     else if (stock <= threshold) severity = "warn";
+    else if (days != null && days <= 14) severity = "warn";
     return { wh, stock, days, severity };
   }).sort((a, b) => a.stock - b.stock);
 
@@ -209,7 +219,12 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
               <span style={{ background: "var(--warning-soft)", color: "var(--warning)", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, marginRight: 8, letterSpacing: "0.06em" }}>BLINKIT</span>
               {sku.name}
             </div>
-            <div className="modal-sub sku">{sku.code} · {sku.variant} · {feeders.isStub ? "STUB DATA" : "live"}</div>
+            <div className="modal-sub sku">
+              {sku.code} · {sku.variant} ·{" "}
+              {feeders.isStub
+                ? "STUB DATA"
+                : `live · snapshot ${NSData.realDataSnapshotDate}`}
+            </div>
           </div>
           <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
         </div>
@@ -289,7 +304,7 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
           <span className="muted" style={{ fontSize: 11.5 }}>
             {feeders.isStub
               ? "Stub data — replaces with real Blinkit Seller Panel export when DATA-001 arrives."
-              : `Source: Blinkit Seller Panel export`}
+              : `Source: Blinkit Seller Panel "Stock On Hand" export · per-WH days-of-cover uses real 30-day sales`}
           </span>
           <button className="btn" onClick={onClose}>Close</button>
         </div>
