@@ -86,12 +86,28 @@ function onOpen() {
     .createMenu('Naturesum Sync')
     .addItem('Sync from GitHub now', 'syncFromGitHub')
     .addSeparator()
+    .addItem('Enable auto-sync (every 5 min)', 'enableFastTrigger')
     .addItem('Enable auto-sync (hourly)', 'enableHourlyTrigger')
     .addItem('Disable auto-sync', 'disableHourlyTrigger')
     .addSeparator()
     .addItem('Reset sync history (re-sync all commits)', 'resetSyncHistory')
     .addItem('Show sync status', 'showSyncStatus')
     .addToUi();
+}
+
+/** Webhook entrypoint. When the Apps Script is deployed as a Web App,
+ *  GitHub can POST to its URL on every push and we sync instantly. */
+function doPost(e) {
+  try {
+    syncFromGitHub();
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
 // ─── Public actions ───────────────────────────────────────────────────
@@ -122,6 +138,12 @@ function syncFromGitHub() {
               `${stats.tracking} tracking, ${stats.decisions} decisions, ${stats.dataReqs} data updates.`;
   toast_(msg);
   Logger.log(msg);
+}
+
+function enableFastTrigger() {
+  disableHourlyTrigger();   // clear any existing
+  ScriptApp.newTrigger('syncFromGitHub').timeBased().everyMinutes(5).create();
+  toast_('Fast auto-sync enabled. Will run every 5 minutes.');
 }
 
 function enableHourlyTrigger() {
@@ -169,11 +191,14 @@ function showSyncStatus() {
 
 // ─── GitHub fetch ─────────────────────────────────────────────────────
 function fetchCommits(stopAtSha) {
-  // Public repo, no auth needed. Pulls up to 100 most recent commits on
-  // the configured branch. If `stopAtSha` is given, returns only commits
-  // newer than that.
+  // Pulls up to 100 most recent commits on the configured branch.
+  // If `stopAtSha` is given, returns only commits newer than that.
+  // For PRIVATE repos: set a `GITHUB_TOKEN` script property with a PAT
+  // that has `repo` scope. Public repos work without it.
   const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/commits?sha=${GH_BRANCH}&per_page=100`;
-  const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
+  const headers = token ? { Authorization: 'Bearer ' + token } : {};
+  const resp = UrlFetchApp.fetch(url, { headers: headers, muteHttpExceptions: true });
   if (resp.getResponseCode() !== 200) {
     throw new Error(`GitHub fetch failed (${resp.getResponseCode()}): ${resp.getContentText().slice(0, 200)}`);
   }
