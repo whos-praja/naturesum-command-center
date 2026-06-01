@@ -6,6 +6,7 @@ import { UploadModal, DataAsOfPill } from "../components/UploadModal.jsx";
 import { useLiveData } from "../contexts/LiveDataContext.jsx";
 import { applyLiveData } from "../lib/liveInventory.js";
 import { computeCascade } from "../lib/runwayCascade.js";
+import { readTargetDays, writeTargetDays, DEFAULT_TARGET_DAYS } from "../lib/skuTargets.js";
 
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
@@ -1075,7 +1076,15 @@ const UnifiedStockTab = ({ inventory }) => {
                 amazonFBA: r1(amazonOwnVel + shopifyOwnVel),
                 flipkart:  r1(flipkartVel),
                 blinkit:   r1(blinkitVel),
-                warehouse: r1(Math.max(0, s.velocity - amazonOwnVel - shopifyOwnVel - flipkartVel - blinkitVel)),
+                // WH velocity for the Unified-Stock display = total SKU velocity.
+                // i.e. "if marketplaces emptied and WH had to supply all demand
+                // alone, here's the drain rate". Gives every SKU a meaningful
+                // WH runway pill instead of the near-zero "WH-direct only"
+                // number (which was 0 for any SKU with full marketplace
+                // coverage). The cascade math in data.js / runwayCascade.js
+                // still uses the strict WH-direct velocity — this override is
+                // display-only.
+                warehouse: r1(s.velocity),
               };
 
               return (
@@ -1421,6 +1430,65 @@ const MaterialsTab = ({ inventory }) => {
   );
 };
 
+// ── TargetCoverEditor — per-SKU "desired stock level" input ──────────
+// Lets the user set how many days of cover this SKU should always carry.
+// The Forecast tab's `required` formula (and the reorder-qty it derives)
+// adds this many days on top of the forecast horizon. Default 30d, range
+// 7–180d. Persisted in localStorage via skuTargets.js (same pattern as
+// the Blinkit per-SKU amber threshold).
+const TargetCoverEditor = ({ sku }) => {
+  const [saved, setSaved] = useState(() => readTargetDays(sku.code));
+  const [draft, setDraft] = useState(saved);
+  const cover = sku.velocity > 0 ? Math.round((sku.velocity * draft)) : 0;
+  const onSave = () => {
+    const v = Math.max(1, Math.min(365, parseInt(draft, 10) || DEFAULT_TARGET_DAYS));
+    writeTargetDays(sku.code, v);
+    setSaved(v);
+    setDraft(v);
+  };
+  const onReset = () => {
+    writeTargetDays(sku.code, DEFAULT_TARGET_DAYS);
+    setSaved(DEFAULT_TARGET_DAYS);
+    setDraft(DEFAULT_TARGET_DAYS);
+  };
+  return (
+    <div className="blk-modal-threshold" style={{ marginTop: 12 }}>
+      <div className="blk-modal-threshold-label">
+        <strong>Desired stock cover</strong>
+        <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+          How many days of demand this SKU should always have in stock. The Forecast tab adds this on top of the forecast horizon when sizing the reorder quantity. Default is {DEFAULT_TARGET_DAYS} days.
+          {saved !== DEFAULT_TARGET_DAYS && (
+            <span style={{ marginLeft: 6 }}>
+              · ≈ {NSData.fmtN(cover)} units at current velocity
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="blk-modal-threshold-controls">
+        <input
+          type="number"
+          className="sim-number"
+          min={7} max={180} step={1}
+          value={draft}
+          onChange={(e) => setDraft(parseInt(e.target.value, 10) || 0)}
+          style={{ width: 70 }}
+        />
+        <span className="muted" style={{ fontSize: 11 }}>days</span>
+        <button
+          className="btn primary sm"
+          onClick={onSave}
+          disabled={Number(draft) === saved || !draft}
+        >
+          Save
+        </button>
+        {saved !== DEFAULT_TARGET_DAYS && (
+          <button className="btn ghost sm" onClick={onReset} title="Reset to default 30 days">Reset</button>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Per-SKU warehouse breakdown popover ─────────────────────────────────
 const SkuBreakdownModal = ({ sku, onClose }) => {
   const D = NSData;
@@ -1630,6 +1698,11 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
               <dd>{sku.leadTime} days</dd>
             </dl>
           </div>
+
+          {/* Per-SKU desired stock level (days of cover) — drives the
+              Forecast tab's reorder-qty recommendation. Defaults to 30
+              days; persisted per-SKU in localStorage. */}
+          <TargetCoverEditor sku={sku}/>
         </div>
 
         <div className="modal-foot">
@@ -2882,9 +2955,13 @@ const ForecastTab = ({ inventory, days, setDays }) => {
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = fg + producibleFg;
     const forecast = Math.round(s.velocity * days * trend);
-    const required = Math.round(s.velocity * (days + 30) * trend);
+    // Required-cover formula now uses the per-SKU target days set in the
+    // SkuBreakdownModal (defaults to 30 — matches the previous hardcoded
+    // buffer, so SKUs whose target the user hasn't touched see no change).
+    const targetDays = readTargetDays(s.code);
+    const required = Math.round(s.velocity * (days + targetDays) * trend);
     const reorder = Math.max(0, required - maxFg);
-    return { ...s, trend, forecast, required, reorder, maxFg, trendPct: (trend - 1) * 100 };
+    return { ...s, trend, forecast, required, reorder, maxFg, targetDays, trendPct: (trend - 1) * 100 };
   });
 
   // Summary metrics shown as cards at the top of the tab.
@@ -2951,7 +3028,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
             <span className="rw-risk-icon"><Icon name="box" size={14}/></span>
             <div>
               <div className="rw-risk-title">Recommended reorder</div>
-              <div className="rw-risk-sub">to cover {days}d + 30d buffer</div>
+              <div className="rw-risk-sub">to cover {days}d + per-SKU target buffer</div>
             </div>
           </div>
           <div className="rw-risk-num">{D.fmtN(totalReorder)}</div>
