@@ -28,7 +28,24 @@ const SRC = {
   blinkit: path.join(HOME, "Downloads/NS - inventory - BlinkitInventoryDataFeederWarehouseWise.xlsx"),
   flipkart:path.join(HOME, "Downloads/NS - inventory - FlipkartCurrentInventory.csv"),
   shopify: path.join(HOME, "Downloads/NS - inventory - Website Sales of all SKUs.csv"),
+  // Amazon "Manage Orders" report — last 30 days, tab-separated. Includes
+  // fulfillment-channel column (Amazon vs Merchant) so we can split FBA
+  // orders from MCF/Easy-Ship orders. Filename is the report ID from
+  // Amazon — pick the most recent .txt in Downloads matching this pattern.
+  amazonOrders: pickLatestOrdersFile(HOME),
 };
+function pickLatestOrdersFile(home) {
+  // Amazon order-report filenames look like "144321144743020605.txt" —
+  // long all-digit IDs. Find the most recent such file in ~/Downloads.
+  try {
+    const dir = path.join(home, "Downloads");
+    const candidates = fs.readdirSync(dir)
+      .filter(n => /^\d{10,}\.txt$/.test(n))
+      .map(n => ({ name: n, path: path.join(dir, n), mtime: fs.statSync(path.join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    return candidates[0]?.path || null;
+  } catch { return null; }
+}
 const OUT  = path.join(__dirname, "..", "src", "realMarketplaceData.js");
 
 // ─── Canonical SKU map ────────────────────────────────────────
@@ -136,6 +153,75 @@ function parseAmazon(lookups) {
     console.log(`    ${code.padEnd(10)} → ${Object.keys(d.byFc).length.toString().padStart(2)} FCs, sellable=${d.totalSellable.toString().padStart(4)}, damaged=${d.totalDamaged.toString().padStart(3)}`);
   }
   return byCode;
+}
+
+// ─── 1b. Amazon Manage Orders → FBA vs MCF split ─────────────
+// Tab-separated 30-day orders feed from Amazon Seller Central. Each row is
+// one order line. Key columns:
+//   - fulfillment-channel: "Amazon" = FBA, "Merchant" = MCF / Easy Ship
+//   - sku: "_MP" suffix marks the Merchant-fulfilled variant of the same FG
+//   - order-channel: "WebsiteOrderChannel" = Shopify-origin (off-Amazon)
+//   - quantity, item-price (revenue), purchase-date
+// Cancelled orders (order-status = Cancelled) are excluded from sales totals.
+function parseAmazonOrders(lookups) {
+  console.log("\n── AMAZON ORDERS (FBA + MCF) ──");
+  if (!SRC.amazonOrders || !fs.existsSync(SRC.amazonOrders)) {
+    console.log("  (no amazon orders file found — skipping)");
+    return { byCode: {}, days: 0 };
+  }
+  const txt = fs.readFileSync(SRC.amazonOrders, "utf8");
+  const lines = txt.split(/\r?\n/).filter(l => l.length);
+  const headers = lines[0].split("\t");
+  const col = (name) => headers.indexOf(name);
+  const FUL = col("fulfillment-channel");
+  const SKU = col("sku");
+  const QTY = col("quantity");
+  const PRC = col("item-price");
+  const STA = col("order-status");
+  const DTE = col("purchase-date");
+  const SCH = col("order-channel");
+  const byCode = {};
+  const dates = new Set();
+  const unmapped = new Set();
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split("\t");
+    const status = cells[STA] || "";
+    if (/cancel/i.test(status)) continue;
+    const rawSku = (cells[SKU] || "").trim();
+    if (!rawSku) continue;
+    const normalisedSku = rawSku.replace(/_MP$/i, "");
+    const code = lookups.byAmzMsku[normalisedSku];
+    if (!code) { unmapped.add(rawSku); continue; }
+    const isMcf = /_MP$/i.test(rawSku) || /merchant/i.test(cells[FUL] || "");
+    const isWebsite = /websiteorderchannel/i.test(cells[SCH] || "");
+    const qty = num(cells[QTY]);
+    const rev = num(cells[PRC]);
+    if (!byCode[code]) byCode[code] = { fbaOrders: 0, fbaUnits: 0, fbaRevenue: 0, mcfOrders: 0, mcfUnits: 0, mcfRevenue: 0, mcfWebsiteUnits: 0 };
+    if (isMcf) {
+      byCode[code].mcfOrders++;
+      byCode[code].mcfUnits += qty;
+      byCode[code].mcfRevenue += rev;
+      if (isWebsite) byCode[code].mcfWebsiteUnits += qty;
+    } else {
+      byCode[code].fbaOrders++;
+      byCode[code].fbaUnits += qty;
+      byCode[code].fbaRevenue += rev;
+    }
+    if (cells[DTE]) dates.add(cells[DTE].slice(0, 10));
+  }
+  const days = dates.size || 30;
+  for (const code of Object.keys(byCode)) {
+    const d = byCode[code];
+    d.dailyFba = d.fbaUnits / days;
+    d.dailyMcf = d.mcfUnits / days;
+    d.days = days;
+  }
+  console.log(`  ${lines.length - 1} order rows over ${days} days, ${Object.keys(byCode).length} mapped SKUs.`);
+  if (unmapped.size) console.log(`  unmapped order SKUs: ${[...unmapped].join(", ")}`);
+  for (const [code, d] of Object.entries(byCode)) {
+    console.log(`    ${code.padEnd(10)} → FBA ${d.dailyFba.toFixed(1)}/d (${d.fbaUnits}u, ₹${d.fbaRevenue.toFixed(0)}) + MCF ${d.dailyMcf.toFixed(1)}/d (${d.mcfUnits}u, of which ${d.mcfWebsiteUnits} via Shopify)`);
+  }
+  return { byCode, days };
 }
 
 // ─── 2. Blinkit feeder-WH ─────────────────────────────────────
@@ -282,7 +368,13 @@ export const REAL_MARKETPLACE_DATA = ${JSON.stringify(out, null, 2)};
 
 // ─── Main ─────────────────────────────────────────────────────
 const lookups = buildLookups();
-const amazon  = parseAmazon(lookups);
+const amazon       = parseAmazon(lookups);
+const amazonOrders = parseAmazonOrders(lookups);
+// Merge orders breakdown into each SKU's amazon record.
+for (const [code, d] of Object.entries(amazonOrders.byCode)) {
+  if (!amazon[code]) amazon[code] = {};
+  amazon[code].orders = d;
+}
 const blinkit = parseBlinkit(lookups);
 const flipkart= parseFlipkart(lookups);
 const shopify = parseShopify(lookups);

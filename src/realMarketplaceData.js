@@ -33,7 +33,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 231,
       "totalDamaged": 0,
-      "totalShippedToday": 2
+      "totalShippedToday": 2,
+      "orders": {
+        "fbaOrders": 39,
+        "fbaUnits": 117,
+        "fbaRevenue": 40500,
+        "mcfOrders": 0,
+        "mcfUnits": 0,
+        "mcfRevenue": 0,
+        "mcfWebsiteUnits": 0,
+        "dailyFba": 3.65625,
+        "dailyMcf": 0,
+        "days": 32
+      }
     },
     "blinkit": null,
     "flipkart": {
@@ -85,7 +97,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 7,
       "totalDamaged": 0,
-      "totalShippedToday": 1
+      "totalShippedToday": 1,
+      "orders": {
+        "fbaOrders": 104,
+        "fbaUnits": 604,
+        "fbaRevenue": 39750,
+        "mcfOrders": 0,
+        "mcfUnits": 0,
+        "mcfRevenue": 0,
+        "mcfWebsiteUnits": 0,
+        "dailyFba": 18.875,
+        "dailyMcf": 0,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -187,7 +211,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 171,
       "totalDamaged": 1,
-      "totalShippedToday": 0
+      "totalShippedToday": 0,
+      "orders": {
+        "fbaOrders": 139,
+        "fbaUnits": 685,
+        "fbaRevenue": 28900,
+        "mcfOrders": 35,
+        "mcfUnits": 40,
+        "mcfRevenue": 17000,
+        "mcfWebsiteUnits": 40,
+        "dailyFba": 21.40625,
+        "dailyMcf": 1.25,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -246,7 +282,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 42,
       "totalDamaged": 0,
-      "totalShippedToday": 2
+      "totalShippedToday": 2,
+      "orders": {
+        "fbaOrders": 30,
+        "fbaUnits": 33,
+        "fbaRevenue": 28711,
+        "mcfOrders": 3,
+        "mcfUnits": 3,
+        "mcfRevenue": 2925,
+        "mcfWebsiteUnits": 3,
+        "dailyFba": 1.03125,
+        "dailyMcf": 0.09375,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -325,7 +373,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 17,
       "totalDamaged": 0,
-      "totalShippedToday": 0
+      "totalShippedToday": 0,
+      "orders": {
+        "fbaOrders": 281,
+        "fbaUnits": 308,
+        "fbaRevenue": 279080,
+        "mcfOrders": 0,
+        "mcfUnits": 0,
+        "mcfRevenue": 0,
+        "mcfWebsiteUnits": 0,
+        "dailyFba": 9.625,
+        "dailyMcf": 0,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -446,7 +506,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 859,
       "totalDamaged": 0,
-      "totalShippedToday": 11
+      "totalShippedToday": 11,
+      "orders": {
+        "fbaOrders": 188,
+        "fbaUnits": 637,
+        "fbaRevenue": 121062,
+        "mcfOrders": 29,
+        "mcfUnits": 31,
+        "mcfRevenue": 23250,
+        "mcfWebsiteUnits": 31,
+        "dailyFba": 19.90625,
+        "dailyMcf": 0.96875,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -631,7 +703,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 509,
       "totalDamaged": 0,
-      "totalShippedToday": 6
+      "totalShippedToday": 6,
+      "orders": {
+        "fbaOrders": 81,
+        "fbaUnits": 85,
+        "fbaRevenue": 12600,
+        "mcfOrders": 82,
+        "mcfUnits": 82,
+        "mcfRevenue": 36900,
+        "mcfWebsiteUnits": 82,
+        "dailyFba": 2.65625,
+        "dailyMcf": 2.5625,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -829,7 +913,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 545,
       "totalDamaged": 0,
-      "totalShippedToday": 10
+      "totalShippedToday": 10,
+      "orders": {
+        "fbaOrders": 139,
+        "fbaUnits": 156,
+        "fbaRevenue": 145800,
+        "mcfOrders": 16,
+        "mcfUnits": 18,
+        "mcfRevenue": 24300,
+        "mcfWebsiteUnits": 18,
+        "dailyFba": 4.875,
+        "dailyMcf": 0.5625,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -898,7 +994,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 3,
       "totalDamaged": 3,
-      "totalShippedToday": 1
+      "totalShippedToday": 1,
+      "orders": {
+        "fbaOrders": 259,
+        "fbaUnits": 278,
+        "fbaRevenue": 89825,
+        "mcfOrders": 176,
+        "mcfUnits": 193,
+        "mcfRevenue": 188175,
+        "mcfWebsiteUnits": 193,
+        "dailyFba": 8.6875,
+        "dailyMcf": 6.03125,
+        "days": 32
+      }
     },
     "blinkit": null,
     "flipkart": {
@@ -950,7 +1058,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 110,
       "totalDamaged": 0,
-      "totalShippedToday": 29
+      "totalShippedToday": 29,
+      "orders": {
+        "fbaOrders": 268,
+        "fbaUnits": 289,
+        "fbaRevenue": 113160,
+        "mcfOrders": 41,
+        "mcfUnits": 43,
+        "mcfRevenue": 29670,
+        "mcfWebsiteUnits": 43,
+        "dailyFba": 9.03125,
+        "dailyMcf": 1.34375,
+        "days": 32
+      }
     },
     "blinkit": {
       "byWh": {
@@ -1049,7 +1169,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 81,
       "totalDamaged": 0,
-      "totalShippedToday": 3
+      "totalShippedToday": 3,
+      "orders": {
+        "fbaOrders": 16,
+        "fbaUnits": 16,
+        "fbaRevenue": 1060,
+        "mcfOrders": 0,
+        "mcfUnits": 0,
+        "mcfRevenue": 0,
+        "mcfWebsiteUnits": 0,
+        "dailyFba": 0.5,
+        "dailyMcf": 0,
+        "days": 32
+      }
     },
     "blinkit": null,
     "flipkart": {
@@ -1086,7 +1218,19 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 97,
       "totalDamaged": 0,
-      "totalShippedToday": 1
+      "totalShippedToday": 1,
+      "orders": {
+        "fbaOrders": 4,
+        "fbaUnits": 4,
+        "fbaRevenue": 1485,
+        "mcfOrders": 0,
+        "mcfUnits": 0,
+        "mcfRevenue": 0,
+        "mcfWebsiteUnits": 0,
+        "dailyFba": 0.125,
+        "dailyMcf": 0,
+        "days": 32
+      }
     },
     "blinkit": null,
     "flipkart": {

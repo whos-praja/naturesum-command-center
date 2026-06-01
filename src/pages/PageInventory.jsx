@@ -461,23 +461,51 @@ const AmazonFcModal = ({ sku, onClose }) => {
             </div>
           )}
 
-          {/* Velocity decomposition — AMZ-001 split (Amazon + Shopify combined) */}
+          {/* Velocity decomposition — prefer FBA/MCF split from orders feed
+              when present (real 32-day breakdown), else fall back to the
+              AMZ-001 amz + d2c split derived from channel mix. */}
           <div className="blk-modal-threshold" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
             <div className="blk-modal-threshold-label" style={{ width: "100%" }}>
               <strong>Velocity decomposition</strong>
               <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                Amazon FBA serves both Amazon orders + Shopify D2C (AMZ-001 split).
+                {real?.orders
+                  ? `FBA = Amazon-fulfilled orders. MCF = Merchant/Easy-Ship (ships from central WH, often Shopify-origin). 32-day average, ${real.orders.days} days of orders data.`
+                  : "Amazon FBA serves both Amazon orders + Shopify D2C (AMZ-001 split)."}
               </div>
             </div>
             <div className="mono" style={{ fontSize: 12 }}>
-              <span style={{ color: "var(--ink-2)" }}>{amzVel.toFixed(1)}</span>
-              <span className="muted" style={{ marginLeft: 4 }}>/d Amazon orders</span>
-              <span className="muted" style={{ margin: "0 6px" }}>+</span>
-              <span style={{ color: "var(--ink-2)" }}>{shpVel.toFixed(1)}</span>
-              <span className="muted" style={{ marginLeft: 4 }}>/d Shopify D2C</span>
-              <span className="muted" style={{ margin: "0 6px" }}>=</span>
-              <span style={{ color: "var(--ink)", fontWeight: 600 }}>{totalAmzCh.toFixed(1)}</span>
-              <span className="muted" style={{ marginLeft: 4 }}>/d total</span>
+              {real?.orders ? (
+                <>
+                  <span style={{ color: "var(--ink-2)" }}>{real.orders.dailyFba.toFixed(1)}</span>
+                  <span className="muted" style={{ marginLeft: 4 }}>/d FBA</span>
+                  <span className="muted" style={{ margin: "0 6px" }}>+</span>
+                  <span style={{ color: "var(--ink-2)" }}>{real.orders.dailyMcf.toFixed(1)}</span>
+                  <span className="muted" style={{ marginLeft: 4 }}>
+                    /d MCF
+                    {real.orders.mcfWebsiteUnits > 0 && (
+                      <span style={{ marginLeft: 4 }}>
+                        ({real.orders.mcfWebsiteUnits} via Shopify)
+                      </span>
+                    )}
+                  </span>
+                  <span className="muted" style={{ margin: "0 6px" }}>=</span>
+                  <span style={{ color: "var(--ink)", fontWeight: 600 }}>
+                    {(real.orders.dailyFba + real.orders.dailyMcf).toFixed(1)}
+                  </span>
+                  <span className="muted" style={{ marginLeft: 4 }}>/d total Amazon</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ color: "var(--ink-2)" }}>{amzVel.toFixed(1)}</span>
+                  <span className="muted" style={{ marginLeft: 4 }}>/d Amazon orders</span>
+                  <span className="muted" style={{ margin: "0 6px" }}>+</span>
+                  <span style={{ color: "var(--ink-2)" }}>{shpVel.toFixed(1)}</span>
+                  <span className="muted" style={{ marginLeft: 4 }}>/d Shopify D2C</span>
+                  <span className="muted" style={{ margin: "0 6px" }}>=</span>
+                  <span style={{ color: "var(--ink)", fontWeight: 600 }}>{totalAmzCh.toFixed(1)}</span>
+                  <span className="muted" style={{ marginLeft: 4 }}>/d total</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -514,7 +542,7 @@ const AmazonFcModal = ({ sku, onClose }) => {
         <div className="modal-foot">
           <span className="muted" style={{ fontSize: 11.5 }}>
             {real
-              ? `Source: Amazon FBA "Warehouse-Wise Ledger" export (snapshot ${D.realDataSnapshotDate}). *Shipped = customer shipments on that single day; multi-day velocity awaits historical exports. MCF orders still pending (DATA-002).`
+              ? `Source: Amazon FBA "Warehouse-Wise Ledger" (per-FC inventory) + "Manage Orders" 32-day feed (FBA / MCF split). *Shipped column shows one day's customer shipments per FC — multi-day per-FC ledger awaits historical exports.`
               : "No Amazon FBA data — stub fallback in use."}
           </span>
           <button className="btn" onClick={onClose}>Close</button>

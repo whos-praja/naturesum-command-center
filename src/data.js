@@ -415,8 +415,8 @@ const NSData = (function () {
     NSSBDB500: { sp: 1150, mrp: 1550 },
     NSSBJ300:  { sp: 690,  mrp: 920  },
     NSSBJ500:  { sp: 1100, mrp: 1300 },
-    NSSBBO15:  { sp: null, mrp: 1250 },   // SP TBD — using MRP as upper bound
-    NSSBBO30:  { sp: null, mrp: 1920 },   // SP TBD — using MRP as upper bound
+    NSSBBO15:  { sp: 1075, mrp: 1250 },
+    NSSBBO30:  { sp: 1580, mrp: 1920 },
     NSJO100:   { sp: 1350, mrp: 1500 },
     NSACDT30:  { sp: 975,  mrp: 1150 },
   };
@@ -637,8 +637,16 @@ const NSData = (function () {
     const nitinOfflineDaily  = nitinCh?.offline?.dailyOut;
     const nitinMarketingDaily= nitinCh?.marketing?.dailyOut;
 
-    // Preference order: Nitin 72-day avg > marketplace 30-day > 1-day proxy.
-    const realAmazonDaily   = nitinAmazonDaily   ?? real.amazon?.totalShippedToday   ?? null;
+    // Preference order for Amazon:
+    //   1. Amazon "Manage Orders" 32-day FBA + MCF split (most accurate)
+    //   2. Nitin's 72-day daily-movement avg
+    //   3. 1-day FBA ledger proxy
+    // amazon.orders.dailyFba is units/day FBA, dailyMcf is units/day MCF.
+    // Combined = total Amazon-channel daily (covers both FBA and Easy Ship).
+    const orderDailyAmz = real.amazon?.orders
+      ? (real.amazon.orders.dailyFba || 0) + (real.amazon.orders.dailyMcf || 0)
+      : null;
+    const realAmazonDaily   = orderDailyAmz ?? nitinAmazonDaily ?? real.amazon?.totalShippedToday   ?? null;
     const realShopifyDaily  = nitinWebsiteDaily  ?? (real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null);
     const realFlipkartDaily = nitinFlipkartDaily ?? (real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null);
     const realBlinkitDaily  = nitinBlinkitDaily  ?? (real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null);

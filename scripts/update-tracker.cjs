@@ -126,9 +126,9 @@ const TRACKING_UPDATES = [
   { key: "DATA-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit feeder-WH 'Stock On Hand' export ingested via scripts/import-marketplace-data.cjs — 01-Jun-2026" },
   // Sprint 6 — Amazon cascade UI (AMZ-003 + AMZ-004) — real FBA per-FC data wired
   { key: "AMZ-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-FC OOS counts in Amazon cell + drill modal — per-FC stock, customer shipments, damaged disposition — 01-Jun-2026" },
-  { key: "AMZ-004", status: "DONE", blocker: "MCF orders still pending (DATA-002 partial)", sprint: "Done", notes: "Velocity decomposition (amz + d2c) in drill modal. MCF orders share will refine when DATA-002 MCF export arrives — 01-Jun-2026" },
-  // DATA-002 unblocked AMZ-003 fully; AMZ-004 partial (MCF orders still pending)
-  { key: "DATA-002", status: "READY", blocker: "MCF orders report still pending from Amazon", sprint: "Done", notes: "FBA inventory side: ingested 01-Jun-2026. MCF orders report still pending — partial." },
+  { key: "AMZ-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal now shows real FBA + MCF split (32-day orders feed) — Sprint 11, 01-Jun-2026" },
+  // DATA-002 closed — Amazon orders report ingested, FBA + MCF daily split now live
+  { key: "DATA-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Amazon 'Manage Orders' 32-day feed ingested (2052 orders). FBA + MCF daily split now drives AMZ-004 drill modal velocity decomposition. Sprint 11, 01-Jun-2026." },
   // Sprint 7 — Flipkart drill (FK-001 + FK-002 superseded for single-WH case)
   { key: "FK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal: 7d/14d/30d/60d/90d avg daily trend, reserved + scheduled, F-Assured badge, real price — 01-Jun-2026" },
   { key: "FK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Single-WH (Gurgaon Sandila) → OOS-count indicator is degenerate. Replaced with cell-level health pill: live count + days-of-cover + F-Assured chip — 01-Jun-2026" },
@@ -139,21 +139,22 @@ const TRACKING_UPDATES = [
   // DATA-003 + DATA-004 (Flipkart side) closed
   { key: "DATA-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Flipkart 'Current Inventory' export with 7D/14D/30D/60D/90D sales + reserved + F-Assured ingested — 01-Jun-2026" },
   // Sprint 9 — full price list (SP + MRP) wired
-  { key: "DATA-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Full SP + MRP list received from founder for all 14 SKUs and wired into SKU_PRICING. Sprint 9, 01-Jun-2026. NSSBBO15/30 SP marked TBD — using MRP as upper bound." },
+  { key: "DATA-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Full SP + MRP list received and wired for all 14 SKUs (including NSSBBO15: 1075/1250 and NSSBBO30: 1580/1920 — Sprint 11). Sprint 9/11, 01-Jun-2026." },
   // Sprint 10 — Nitin's live inventory sheet parsed (DATA-005)
   { key: "DATA-005", status: "DONE", blocker: "None", sprint: "Done", notes: "Nitin's standard .xlsx ingested via scripts/import-nitin-sheet.cjs. Drives: real central WH FG stock (5-May), real 72-day Amazon/FK/Blinkit/Website/Offline/Marketing daily velocities (multi-day avg replaces 1-day Amazon proxy). Sprint 10, 01-Jun-2026." },
-  // AMZ-004 sits unblocked from decisions but still awaiting drill modal
-  { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern shipped in Unified Stock + Runway. Drill modal awaits DATA-002." },
+  // (AMZ-004 originally tracked READY here — superseded by the Sprint 11
+  // entry above that flips it to DONE once the orders feed landed.)
 ];
 
 const DATA_RECEIVED = [
   { key: "SIM-014-DATA", date: "31-May-2026", status: "yes" },
   { key: "SIM-016-DATA", date: "31-May-2026", status: "yes" },
   // 01-Jun-2026 — real marketplace exports landed
-  { key: "DATA-001",     date: "01-Jun-2026", status: "yes" },     // Blinkit feeder-WH xlsx — full
-  { key: "DATA-002",     date: "01-Jun-2026", status: "partial" }, // Amazon FBA ledger received; MCF Orders report still pending
+  { key: "DATA-001",     date: "01-Jun-2026", status: "yes" },     // Blinkit feeder-WH xlsx
+  { key: "DATA-002",     date: "01-Jun-2026", status: "yes" },     // Amazon FBA ledger + Manage Orders 32-day feed (Sprint 11)
   { key: "DATA-003",     date: "01-Jun-2026", status: "yes" },     // Flipkart inventory CSV (single Gurgaon WH)
-  { key: "DATA-004",     date: "01-Jun-2026", status: "partial" }, // Flipkart prices received; Amazon ASP + Blinkit MRP still pending
+  { key: "DATA-004",     date: "01-Jun-2026", status: "yes" },     // Full SP + MRP list incl. NSSBBO15/30 (Sprint 11)
+  { key: "DATA-005",     date: "01-Jun-2026", status: "yes" },     // Nitin's standard sheet template ingested
 ];
 
 console.log("\n── TRACKING sheet ──");
