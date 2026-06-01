@@ -441,6 +441,38 @@ const NSData = (function () {
 
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
     const vel = ops.vel;
+
+    // ── Per-channel velocity derived from the May-2026 unit mix ──────
+    // Each channel's share of total velocity = its share of total units.
+    // The Amazon channel here is COMBINED Amazon orders + Shopify (D2C)
+    // orders per AMZ-001 — Shopify ships out of Amazon FBA. Stock-wise,
+    // amazonFBA holds the inventory for both demand streams.
+    const denomUnits = totalChUnits || 1;
+    const channelVelocity = {
+      amazon:   vel * ((ch.amazon + ch.shopify) / denomUnits),
+      flipkart: vel * (ch.flipkart / denomUnits),
+      blinkit:  vel * (ch.blinkit  / denomUnits),
+    };
+    // Warehouse's own velocity = whatever isn't shipped by a marketplace.
+    // With Shopify folded into Amazon, central WH ships only direct B2B
+    // and "other" (the 7% slack in the synth channel mix). If channels
+    // sum to 100%, this is 0 — meaning the warehouse runway is "supply
+    // for marketplace fall-back only".
+    const channelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
+    const whBaseVelocity = vel * Math.max(0, 1 - channelShare);
+
+    const cascadeChannels = [
+      { key: "amazon",   label: "Amazon FBA", stock: totalStock.amazonFBA, velocity: channelVelocity.amazon },
+      { key: "flipkart", label: "Flipkart",   stock: totalStock.flipkart,  velocity: channelVelocity.flipkart },
+      { key: "blinkit",  label: "Blinkit",    stock: totalStock.blinkit,   velocity: channelVelocity.blinkit  },
+    ];
+
+    // Total runway = cascade-aware: each channel drains at its own
+    // velocity, central WH absorbs each channel's load as it dies, total
+    // runway = day central WH itself hits zero. See lib/runwayCascade.js
+    // for the model. We lazy-compute when the inventory is consumed (to
+    // avoid pulling that module into data.js's load path), but expose
+    // the inputs here.
     const runway = vel > 0 ? Math.round(total / vel) : 0;
     const runwayStatus = vel <= 0 ? "amber" : runway <= ops.leadTime ? "red" : runway < 30 ? "amber" : "green";
     const price = SKU_PRICE[s.code] || 500;
@@ -449,6 +481,14 @@ const NSData = (function () {
       velocity:    vel,
       growth:      MOM_GROWTH[s.code] ?? 0,
       splits:      { amazon: ch.amazon, shopify: ch.shopify, flipkart: ch.flipkart, blinkit: ch.blinkit },
+      // Per-channel velocities and a pre-built cascade input set.
+      // channelVelocity.amazon already includes Shopify (folded per AMZ-001).
+      channelVelocity,
+      cascade: {
+        whStock:       ops.fg,
+        whBaseVelocity,
+        channels:      cascadeChannels,
+      },
       marketplaceNames: MARKETPLACE_NAMES[s.code] || { amazon: null, flipkart: null, blinkit: null, shopify: null },
       leadTime:    ops.leadTime,
       stock:       totalStock,

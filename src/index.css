@@ -1778,6 +1778,14 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   color: var(--ink-3);
 }
 .rw-ch-cell-vel { color: var(--ink-3); font-feature-settings: "tnum"; }
+.rw-ch-cell-splittag {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  margin: 0 1px 0 1px;
+  color: var(--ink-4);
+}
 .rw-ch-cell-vg .delta { font-size: 10.5px; gap: 2px; }
 
 /* "Action needed" column — amber-tinted action zone with reorder-by date

@@ -5,6 +5,7 @@ import NSData from "../data.js";
 import { UploadModal, DataAsOfPill } from "../components/UploadModal.jsx";
 import { useLiveData } from "../contexts/LiveDataContext.jsx";
 import { applyLiveData } from "../lib/liveInventory.js";
+import { computeCascade } from "../lib/runwayCascade.js";
 
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
@@ -428,11 +429,18 @@ const UnifiedStockTab = ({ inventory }) => {
               // sales data is wired in.
               const sp = s.splits || {};
               const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+              // Per AMZ-001: Amazon channel velocity = amazon orders +
+              // shopify orders (Shopify ships from Amazon FBA). Warehouse
+              // velocity = whatever isn't claimed by a marketplace.
+              const amazonOwnVel  = s.velocity * ((sp.amazon  || 0) / revTotal);
+              const shopifyOwnVel = s.velocity * ((sp.shopify || 0) / revTotal);
               const vel = {
-                warehouse: s.velocity * ((sp.shopify  || 0) / revTotal),
-                amazonFBA: s.velocity * ((sp.amazon   || 0) / revTotal),
+                amazonFBA: amazonOwnVel + shopifyOwnVel,
                 flipkart:  s.velocity * ((sp.flipkart || 0) / revTotal),
                 blinkit:   s.velocity * ((sp.blinkit  || 0) / revTotal),
+                warehouse: Math.max(0, s.velocity - amazonOwnVel - shopifyOwnVel
+                            - s.velocity * ((sp.flipkart || 0) / revTotal)
+                            - s.velocity * ((sp.blinkit  || 0) / revTotal)),
               };
 
               return (
@@ -458,7 +466,21 @@ const UnifiedStockTab = ({ inventory }) => {
                     />
                   </td>
                   <td className="num mat-cell">
-                    <PlatformCell units={s.stock.amazonFBA} velocity={vel.amazonFBA} growth={s.growth}/>
+                    <PlatformCell
+                      units={s.stock.amazonFBA}
+                      velocity={vel.amazonFBA}
+                      growth={s.growth}
+                      breakdown={
+                        <>
+                          <span className="pf-cell-bd-num mono">{amazonOwnVel.toFixed(1)}</span>
+                          <span className="pf-cell-bd-tag">amz</span>
+                          <span className="pf-cell-bd-op">+</span>
+                          <span className="pf-cell-bd-num mono">{shopifyOwnVel.toFixed(1)}</span>
+                          <span className="pf-cell-bd-tag">d2c</span>
+                        </>
+                      }
+                      breakdownLabel={`Amazon FBA serves both Amazon orders (${amazonOwnVel.toFixed(1)}/d) + Shopify D2C (${shopifyOwnVel.toFixed(1)}/d)`}
+                    />
                   </td>
                   <td className="num mat-cell">
                     <PlatformCell units={s.stock.flipkart} velocity={vel.flipkart} growth={s.growth}/>
@@ -1328,7 +1350,7 @@ const CustomGrowthInput = ({ code, initial, isOverride, onCommit }) => {
 // Runway calculator table. Three short lines: stock units, runway pill
 // inline with lead time, then velocity + growth. Reused across Amazon
 // FBA / Flipkart / Blinkit columns.
-const RunwayChannelCell = ({ units, vel, leadTime, growth }) => {
+const RunwayChannelCell = ({ units, vel, leadTime, growth, splitA, splitB, splitALabel = "amz", splitBLabel = "d2c" }) => {
   const D = NSData;
   const hasVel = vel != null && vel > 0;
   const runway = hasVel ? Math.round(units / vel) : null;
@@ -1340,6 +1362,7 @@ const RunwayChannelCell = ({ units, vel, leadTime, growth }) => {
       : runway < leadTime + 14
         ? " warn"
         : "";
+  const hasSplit = splitA != null && splitB != null;
   return (
     <div className="rw-ch-cell">
       <div className="rw-ch-cell-stock mono">{units != null ? D.fmtN(units) : "—"}</div>
@@ -1350,7 +1373,11 @@ const RunwayChannelCell = ({ units, vel, leadTime, growth }) => {
             <span className="rw-ch-cell-lead muted">· {leadTime}d lead</span>
           </div>
           <div className="rw-ch-cell-vg">
-            <span className="mono rw-ch-cell-vel">{vel.toFixed(1)}/d</span>
+            <span className="mono rw-ch-cell-vel">
+              {hasSplit
+                ? <>{splitA.toFixed(1)}<span className="rw-ch-cell-splittag muted">{splitALabel}</span>+{splitB.toFixed(1)}<span className="rw-ch-cell-splittag muted">{splitBLabel}</span>/d</>
+                : <>{vel.toFixed(1)}/d</>}
+            </span>
             {growth != null && <Delta value={growth} hideArrow/>}
           </div>
         </>
@@ -1393,20 +1420,43 @@ const RunwayTab = ({ inventory: rawInventory }) => {
     const whFg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = whFg + producibleFg;
-    const runway = vel > 0 ? Math.round(maxFg / vel) : 0;
-    const status = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
 
-    // Per-channel velocity split — channel velocity = total velocity ×
-    // that channel's revenue share. Shopify maps to warehouse (D2C ships
-    // from the main warehouse). Synthesised from `splits` until real
-    // per-channel sales feeds are wired in.
+    // Per-channel velocity split (with MoM growth applied) — Amazon
+    // channel velocity now COMBINES Amazon orders + Shopify (D2C)
+    // orders per AMZ-001, because Shopify ships from Amazon FBA.
     const sp = s.splits || {};
     const revTotal = (sp.amazon||0) + (sp.shopify||0) + (sp.flipkart||0) + (sp.blinkit||0) || 1;
+    const amazonOwnVel  = vel * ((sp.amazon  || 0) / revTotal);
+    const shopifyOwnVel = vel * ((sp.shopify || 0) / revTotal);
     const chVel = {
-      amazonFBA: vel * ((sp.amazon   || 0) / revTotal),
+      amazonFBA: amazonOwnVel + shopifyOwnVel,
       flipkart:  vel * ((sp.flipkart || 0) / revTotal),
       blinkit:   vel * ((sp.blinkit  || 0) / revTotal),
+      _amazonOnly: amazonOwnVel,    // sub-component for split display
+      _shopifyOnly: shopifyOwnVel,  // sub-component for split display
     };
+
+    // ── Parallel cascade runway (RUN-001) ──────────────────────────
+    // Each marketplace drains at its own velocity. As channels die,
+    // their demand falls back to the central warehouse. Total runway
+    // = the day the central warehouse itself hits zero.
+    // whBaseVelocity = total velocity minus what's claimed by channels.
+    const channelClaimed = chVel.amazonFBA + chVel.flipkart + chVel.blinkit;
+    const whBaseVelocity = Math.max(0, vel - channelClaimed);
+    const cascade = computeCascade({
+      whStock:       maxFg,
+      whBaseVelocity,
+      channels: [
+        { key: "amazon",   label: "Amazon FBA", stock: s.stock.amazonFBA, velocity: chVel.amazonFBA },
+        { key: "flipkart", label: "Flipkart",   stock: s.stock.flipkart,  velocity: chVel.flipkart },
+        { key: "blinkit",  label: "Blinkit",    stock: s.stock.blinkit,   velocity: chVel.blinkit  },
+      ],
+    });
+
+    // Cascade total runway = the headline number. Status uses lead time
+    // as before.
+    const runway = Number.isFinite(cascade.totalRunway) ? Math.round(cascade.totalRunway) : 0;
+    const status = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
 
     return {
       ...s,
@@ -1420,6 +1470,7 @@ const RunwayTab = ({ inventory: rawInventory }) => {
       effectiveGrowth,
       chVel,
       chLead: CHANNEL_LEAD,
+      cascade,
     };
   });
 
@@ -1710,7 +1761,16 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
                   {/* 5-7. Marketplace channels */}
                   <td className="num mat-cell">
-                    <RunwayChannelCell units={s.stock.amazonFBA} vel={s.chVel.amazonFBA} leadTime={s.chLead.amazonFBA} growth={s.actualGrowth}/>
+                    <RunwayChannelCell
+                      units={s.stock.amazonFBA}
+                      vel={s.chVel.amazonFBA}
+                      leadTime={s.chLead.amazonFBA}
+                      growth={s.actualGrowth}
+                      splitA={s.chVel._amazonOnly}
+                      splitB={s.chVel._shopifyOnly}
+                      splitALabel="amz"
+                      splitBLabel="d2c"
+                    />
                   </td>
                   <td className="num mat-cell">
                     <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
