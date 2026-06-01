@@ -3,13 +3,40 @@
 // Flipkart inventory + sales, Shopify website sales) are imported as a
 // per-SKU map and used to override stub values where available. See
 // scripts/import-marketplace-data.cjs for the regeneration pipeline.
-import { REAL_MARKETPLACE_DATA, REAL_DATA_SNAPSHOT_DATE } from "./realMarketplaceData.js";
+import { REAL_MARKETPLACE_DATA as BUNDLED_MP, REAL_DATA_SNAPSHOT_DATE } from "./realMarketplaceData.js";
 
 // Nitin's live inventory sheet (DATA-005 sample) — 72-day per-channel
 // movement log + central warehouse stock (as of 5-May-2026). Higher
 // precedence than the marketplace ledgers for: central WH stock (real
 // physical count) and Amazon daily velocity (72-day avg beats 1-day proxy).
-import { NITIN_DATA } from "./realNitinData.js";
+import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
+
+// User-uploaded multi-file payload (Sprint 12 — upload UI). When a SKU
+// has uploaded data for a given source, it wins over the bundled file;
+// SKUs/channels not present in the upload fall back to the bundled real
+// data, which themselves fall back to stub. Reads localStorage at
+// init time so refreshes pick up the latest upload without code change.
+import { loadMultiFile, buildRealMarketplaceOverride, buildNitinOverride } from "./lib/multiFileStore.js";
+const __liveStore = (typeof window !== "undefined") ? loadMultiFile() : null;
+const __liveMp    = buildRealMarketplaceOverride(__liveStore) || {};
+const __liveNitin = buildNitinOverride(__liveStore);
+function _mergeBundledAndLive(code) {
+  const b = BUNDLED_MP[code] || {};
+  const l = __liveMp[code] || {};
+  return {
+    amazon:   l.amazon   ?? b.amazon   ?? null,
+    blinkit:  l.blinkit  ?? b.blinkit  ?? null,
+    flipkart: l.flipkart ?? b.flipkart ?? null,
+    shopify:  l.shopify  ?? b.shopify  ?? null,
+  };
+}
+const REAL_MARKETPLACE_DATA = new Proxy({}, {
+  get: (_t, code) => _mergeBundledAndLive(code),
+  has: (_t, code) => Boolean(BUNDLED_MP[code] || __liveMp[code]),
+  ownKeys: () => [...new Set([...Object.keys(BUNDLED_MP), ...Object.keys(__liveMp)])],
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+});
+const NITIN_DATA = __liveNitin || BUNDLED_NITIN;
 
 const NSData = (function () {
   const fmtINR = (n) => {

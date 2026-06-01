@@ -1,59 +1,132 @@
 /**
- * UploadModal — drag-and-drop / click-to-pick MIS sheet upload flow.
- * Stages:
- *   1. idle      → empty drop zone, prompt to pick a file
- *   2. parsing   → spinner while the parser does its work
- *   3. preview   → parse succeeded; show what was extracted + Confirm/Cancel
- *   4. error     → parse failed; show the error + Retry
+ * UploadModal — multi-file upload flow.
  *
- * On confirm, the payload is committed via useLiveData().setLive() which
- * writes to localStorage and re-renders any consumer that's reading from
- * the live data context.
+ * Six independent zones, one per file type (Amazon ledger / Amazon orders /
+ * Blinkit / Flipkart / Shopify / Nitin). Each zone has its own file picker,
+ * date-cutoff picker, parse status, and remove button. On "Apply", the
+ * uploaded files are persisted via multiFileStore; the page reloads so
+ * data.js picks up the new payload at module-init time.
+ *
+ * The DataAsOfPill in the topbar shows when the latest upload happened
+ * and how many file slots are populated.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Icon } from "./Shared.jsx";
-import { parseInventoryFile } from "../lib/parseInventoryFile.js";
-import { summariseLive } from "../lib/liveInventory.js";
-import { useLiveData } from "../contexts/LiveDataContext.jsx";
+import { FILE_TYPES, parseByType } from "../lib/uploadParsers.js";
+import {
+  loadMultiFile,
+  upsertFile,
+  removeFile,
+  clearAll,
+  summariseStore,
+} from "../lib/multiFileStore.js";
 
-const formatDateTime = (iso) => {
+const ZONES = [
+  { key: "nitin",          ...FILE_TYPES["nitin"] },
+  { key: "amazon-ledger",  ...FILE_TYPES["amazon-ledger"] },
+  { key: "amazon-orders",  ...FILE_TYPES["amazon-orders"] },
+  { key: "blinkit",        ...FILE_TYPES["blinkit"] },
+  { key: "flipkart",       ...FILE_TYPES["flipkart"] },
+  { key: "shopify",        ...FILE_TYPES["shopify"] },
+];
+
+const fmtDate = (iso) => {
   if (!iso) return "—";
   try {
-    const d = new Date(iso);
-    return d.toLocaleString("en-IN", {
-      day: "2-digit", month: "short", year: "numeric",
-      hour: "2-digit", minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+    return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  } catch { return iso; }
 };
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export function UploadModal({ onClose }) {
-  const { live, setLive, clearLive } = useLiveData();
-  const [stage, setStage] = useState("idle"); // idle | parsing | preview | error
-  const [parsed, setParsed] = useState(null);
-  const [error, setError] = useState(null);
-  const [pickedFile, setPickedFile] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef(null);
+  const [store, setStore] = useState(() => loadMultiFile() || { uploadedAt: null, files: {} });
 
-  // Esc to close
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const handleApplyAndClose = () => {
+    // Reload so data.js re-reads localStorage at init.
+    window.location.reload();
+  };
+  const handleClearAll = () => {
+    if (window.confirm("Remove all uploaded files and revert to bundled real-data?")) {
+      clearAll();
+      window.location.reload();
+    }
+  };
+
+  const filesCount = Object.keys(store?.files || {}).length;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(820px, 96vw)", maxHeight: "92vh" }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Upload data</div>
+            <div className="modal-sub">
+              Drop daily exports per source. Each file has its own date-cutoff (any rows past it are ignored). Apply &amp; reload to refresh the dashboard.
+            </div>
+          </div>
+          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+        </div>
+
+        <div className="modal-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {ZONES.map((zone) => (
+              <UploadZone
+                key={zone.key}
+                zone={zone}
+                entry={store.files?.[zone.key]}
+                onUpdate={(updated) => setStore(updated)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {filesCount > 0
+              ? `${filesCount} of 6 sources uploaded · last updated ${store.uploadedAt ? new Date(store.uploadedAt).toLocaleString("en-IN") : "—"}`
+              : "Nothing uploaded yet — dashboard is showing bundled real-data."}
+          </span>
+          <div style={{ display: "flex", gap: 8 }}>
+            {filesCount > 0 && (
+              <button className="btn ghost" onClick={handleClearAll}>Clear all</button>
+            )}
+            <button className="btn primary" onClick={handleApplyAndClose} disabled={filesCount === 0}>
+              Apply &amp; reload
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UploadZone({ zone, entry, onUpdate }) {
+  const [stage, setStage] = useState("idle"); // idle | parsing | error | uploaded
+  const [error, setError] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [dateCutoff, setDateCutoff] = useState(entry?.dataAsOf || todayISO());
+
+  const isUploaded = !!entry;
+
   const handleFile = async (file) => {
     if (!file) return;
-    setPickedFile(file);
     setStage("parsing");
     setError(null);
     try {
-      const result = await parseInventoryFile(file);
-      setParsed(result);
-      setStage("preview");
+      const parsed = await parseByType(zone.key, file, { dateCutoff });
+      const updated = upsertFile(zone.key, {
+        dataAsOf: dateCutoff,
+        fileName: file.name,
+        parsed,
+      });
+      onUpdate(updated);
+      setStage("uploaded");
     } catch (e) {
       setError(e?.message || String(e));
       setStage("error");
@@ -62,191 +135,141 @@ export function UploadModal({ onClose }) {
 
   const handleDrop = (e) => {
     e.preventDefault();
-    setIsDragging(false);
+    setDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) handleFile(file);
   };
 
-  const handleConfirm = () => {
-    if (parsed) setLive(parsed);
-    onClose();
+  const handlePick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
   };
 
-  const handleRevert = () => {
-    if (window.confirm("Revert to sample data? The currently uploaded sheet will be discarded.")) {
-      clearLive();
-      onClose();
+  const handleRemove = () => {
+    const updated = removeFile(zone.key);
+    onUpdate(updated || { uploadedAt: new Date().toISOString(), files: {} });
+    setStage("idle");
+  };
+
+  // Brief summary of what was parsed (count of SKUs / rows)
+  const summary = (() => {
+    if (!entry?.parsed) return null;
+    const p = entry.parsed;
+    if (zone.key === "shopify" && p.byCode) return `${Object.keys(p.byCode).length} SKUs · ${p.dateRange?.days || 0} days`;
+    if (zone.key === "nitin") {
+      const fgN = Object.keys(p.fg || {}).length;
+      const days = p.dailyMovement?.days ?? 0;
+      return `${fgN} FG SKUs · ${days} days movement`;
     }
-  };
+    return `${Object.keys(p || {}).length} SKUs`;
+  })();
 
-  const summary = parsed ? summariseLive(parsed) : null;
-  const currentSummary = live ? summariseLive(live) : null;
+  const tint = stage === "error" ? "rgba(183,56,56,0.10)"
+             : isUploaded        ? "rgba(63,114,80,0.06)"
+             : dragging          ? "rgba(40,116,240,0.08)"
+             : "var(--bg-canvas)";
+  const border = stage === "error" ? "rgba(183,56,56,0.32)"
+               : isUploaded        ? "rgba(63,114,80,0.32)"
+               : dragging          ? "rgba(40,116,240,0.4)"
+               : "var(--border-soft)";
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal-card upload-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <div className="modal-title">Upload MIS sheet</div>
-            <div className="modal-sub muted">
-              {currentSummary
-                ? <>Currently loaded: <strong>{currentSummary.fileName}</strong> · data as of <strong>{currentSummary.dataAsOf || "Unknown"}</strong></>
-                : "No sheet uploaded yet — dashboard is showing sample data."}
-            </div>
+    <div style={{
+      border: `1px solid ${border}`,
+      background: tint,
+      borderRadius: 8,
+      padding: 12,
+      transition: "background 0.12s ease, border 0.12s ease",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+            {zone.label}
+            {isUploaded && (
+              <span style={{ marginLeft: 8, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(63,114,80,0.12)", color: "var(--success)", fontWeight: 700, letterSpacing: "0.04em" }}>
+                LOADED
+              </span>
+            )}
           </div>
-          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+          {isUploaded ? (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+              {entry.fileName} · {summary} · cutoff {fmtDate(entry.dataAsOf)}
+            </div>
+          ) : (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+              Accepts {zone.accept}
+            </div>
+          )}
+          {stage === "error" && (
+            <div style={{ fontSize: 11.5, color: "var(--critical)", marginTop: 4 }}>
+              ⚠ {error}
+            </div>
+          )}
         </div>
 
-        <div className="modal-body">
-          {stage === "idle" && (
-            <div
-              className={"upload-dropzone" + (isDragging ? " is-dragging" : "")}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={() => setIsDragging(false)}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Cutoff
+          </label>
+          <input
+            type="date"
+            className="sim-number"
+            value={dateCutoff}
+            onChange={(e) => setDateCutoff(e.target.value)}
+            style={{ width: 130, fontSize: 11.5 }}
+            disabled={stage === "parsing"}
+          />
+
+          {isUploaded ? (
+            <button className="btn ghost sm" onClick={handleRemove} title="Remove this file">Remove</button>
+          ) : stage === "parsing" ? (
+            <span className="muted" style={{ fontSize: 11.5, padding: "0 8px" }}>Parsing…</span>
+          ) : (
+            <label
+              className="btn primary sm"
+              onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(e)  => { e.preventDefault(); }}
+              onDragLeave={()  => setDragging(false)}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              style={{ cursor: "pointer" }}
             >
+              {dragging ? "Drop file" : "Pick file"}
               <input
-                ref={fileInputRef}
                 type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={(e) => handleFile(e.target.files?.[0])}
+                accept={zone.accept}
+                onChange={handlePick}
                 style={{ display: "none" }}
               />
-              <div className="upload-dropzone-icon"><Icon name="download" size={28}/></div>
-              <div className="upload-dropzone-title">Drop the MIS sheet here</div>
-              <div className="upload-dropzone-sub">
-                or <strong>click to choose</strong> a file (.xlsx, .xls, .csv)
-              </div>
-              <div className="upload-dropzone-hint muted">
-                Expected tabs: <code>Master</code>, <code>warehouse inventory</code>, <code>Daily Movement of FG</code>.
-                Other tabs are ignored.
-              </div>
-            </div>
+            </label>
           )}
-
-          {stage === "parsing" && (
-            <div className="upload-state">
-              <div className="upload-state-spinner"/>
-              <div className="upload-state-title">Parsing <strong>{pickedFile?.name}</strong>…</div>
-              <div className="upload-state-sub muted">Mapping items to SKU codes and rolling up 30-day velocity</div>
-            </div>
-          )}
-
-          {stage === "error" && (
-            <div className="upload-state">
-              <div className="upload-state-icon crit"><Icon name="alerts" size={22}/></div>
-              <div className="upload-state-title">Couldn't parse this file</div>
-              <div className="upload-state-sub" style={{ color: "var(--critical)" }}>{error}</div>
-              <button className="btn" onClick={() => setStage("idle")} style={{ marginTop: 12 }}>Try another file</button>
-            </div>
-          )}
-
-          {stage === "preview" && summary && (
-            <div className="upload-preview">
-              <div className="upload-preview-head">
-                <div>
-                  <div className="upload-preview-title">{summary.fileName}</div>
-                  <div className="upload-preview-sub muted">
-                    {summary.sheetNames.length} sheet{summary.sheetNames.length === 1 ? "" : "s"}: {summary.sheetNames.join(" · ")}
-                  </div>
-                </div>
-                <div className="upload-preview-asof">
-                  <div className="upload-preview-asof-label">Data as of</div>
-                  <div className="upload-preview-asof-value mono">{summary.dataAsOf || "Unknown"}</div>
-                </div>
-              </div>
-
-              <div className="upload-preview-grid">
-                <div className="upload-preview-stat">
-                  <div className="upload-preview-stat-num mono">{summary.fgCount}</div>
-                  <div className="upload-preview-stat-label">FG SKUs</div>
-                </div>
-                <div className="upload-preview-stat">
-                  <div className="upload-preview-stat-num mono">{summary.semiFgCount}</div>
-                  <div className="upload-preview-stat-label">Semi-FG</div>
-                </div>
-                <div className="upload-preview-stat">
-                  <div className="upload-preview-stat-num mono">{summary.rawCount}</div>
-                  <div className="upload-preview-stat-label">Raw materials</div>
-                </div>
-                <div className="upload-preview-stat">
-                  <div className="upload-preview-stat-num mono">{summary.pkgCount}</div>
-                  <div className="upload-preview-stat-label">Packaging</div>
-                </div>
-                <div className="upload-preview-stat">
-                  <div className="upload-preview-stat-num mono">{summary.velocityCount}</div>
-                  <div className="upload-preview-stat-label">SKUs with velocity</div>
-                </div>
-                <div className="upload-preview-stat">
-                  <div className={"upload-preview-stat-num mono" + (summary.unmappedCount > 0 ? " warn" : "")}>
-                    {summary.unmappedCount}
-                  </div>
-                  <div className="upload-preview-stat-label">Unmapped rows</div>
-                </div>
-              </div>
-
-              {parsed.unmapped?.length > 0 && (
-                <details className="upload-unmapped">
-                  <summary>
-                    {parsed.unmapped.length} unmapped item{parsed.unmapped.length === 1 ? "" : "s"} (first 50 shown)
-                  </summary>
-                  <ul>
-                    {parsed.unmapped.map((n, i) => <li key={i}>{n}</li>)}
-                  </ul>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-                    These rows didn't match any known SKU. Add aliases to the parser if they should be tracked.
-                  </div>
-                </details>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="modal-foot">
-          <div className="muted" style={{ fontSize: 11.5 }}>
-            {currentSummary && (
-              <button className="link-btn" onClick={handleRevert} style={{ color: "var(--critical)" }}>
-                Revert to sample data
-              </button>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            {stage === "preview" && (
-              <button className="btn primary" onClick={handleConfirm}>
-                Apply to dashboard
-              </button>
-            )}
-          </div>
         </div>
       </div>
     </div>
   );
 }
 
-/**
- * Compact "data as of" pill — shows the most recent upload's data-as-of
- * date with a click target to open the upload modal. Drop into the
- * topbar or any header where users need to see data freshness at a
- * glance.
- */
+// ── DataAsOfPill — topbar chip ────────────────────────────────────────
+// Compact status: "Live data · 3 / 6" or "Sample data" when nothing
+// uploaded. Click to open the upload modal.
 export function DataAsOfPill({ onClick }) {
-  const { live } = useLiveData();
-  if (!live) {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const onStorage = () => setTick((n) => n + 1);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  const store = loadMultiFile();
+  const summary = summariseStore(store);
+  if (!summary.count) {
     return (
-      <button className="data-asof-pill is-sample" onClick={onClick} title="No sheet uploaded yet — click to upload">
-        <span className="data-asof-pill-dot is-sample"/>
-        <span className="data-asof-pill-label">Sample data</span>
+      <button className="data-asof-pill" onClick={onClick} title="No files uploaded — click to upload">
+        <span className="dot dot-muted"/> Sample data
       </button>
     );
   }
   return (
-    <button className="data-asof-pill is-live" onClick={onClick} title={`Uploaded ${formatDateTime(live.uploadedAt)}`}>
-      <span className="data-asof-pill-dot is-live"/>
-      <span className="data-asof-pill-label">
-        Data as of <strong className="mono">{live.dataAsOf || formatDateTime(live.uploadedAt)}</strong>
-      </span>
+    <button className="data-asof-pill is-live" onClick={onClick} title={`Last upload: ${summary.uploadedAt ? new Date(summary.uploadedAt).toLocaleString("en-IN") : "—"}`}>
+      <span className="dot dot-live"/> Live · {summary.count}/6
     </button>
   );
 }
