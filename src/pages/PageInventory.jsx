@@ -1066,54 +1066,192 @@ const ItemPicker = ({ items, value, onChange }) => {
   );
 };
 
-// ── Simulator tab — full sandbox. Pick an item, tweak any value, see
-// every downstream number (Producible FG, Max FG, Runway, Reorder by,
-// Status) recompute instantly. Use "Reset" to snap back to baseline.
+// ── Simulator tab — full sandbox.
+// Sprint 3 model (per founder spec):
+//   - Central WH stock + per-marketplace stock (Amazon FBA / Flipkart / Blinkit)
+//   - Velocity: overall OR split per channel (nested — see velocityMode)
+//   - MoM % growth: same nested pattern as velocity
+//   - Input (SFG or RM) + multiple PKG components with per-component qty
+//   - Supplier lead time per component AND marketplace inbound lead time
+//   - Total runway uses parallel cascade (lib/runwayCascade.js)
+//   - Amazon channel = Amazon orders + Shopify orders combined (AMZ-001)
+//
+// Marketplace inbound lead time placeholders (SIM-014, swap when data arrives)
+const MP_INBOUND_LEAD_DEFAULT = { amazonFBA: 3, flipkart: 2, blinkit: 1 };
+
 const SimulatorTab = ({ inventory }) => {
   const D = NSData;
   const [selectedCode, setSelectedCode] = useState(inventory[0]?.code);
   const baseline = inventory.find(i => i.code === selectedCode) || inventory[0];
 
-  // Local sandbox state — what the user is "playing with". Initialised
-  // from the selected item's baseline; resets when the item changes.
-  const [sim, setSim] = useState(() => baselineState(baseline));
-  useEffect(() => { setSim(baselineState(baseline)); }, [selectedCode]);
-
+  // ── Build the sandbox state from the selected SKU's snapshot ──
   function baselineState(s) {
-    const wb = s?.warehouseBreakdown || {};
+    if (!s) return null;
+    const wb = s.warehouseBreakdown || {};
+    const cv = s.channelVelocity || { amazon: 0, flipkart: 0, blinkit: 0 };
+    const sp = s.splits || {};
+    const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+    const amazonOnly  = s.velocity * ((sp.amazon  || 0) / revTotal);
+    const shopifyOnly = s.velocity * ((sp.shopify || 0) / revTotal);
+    const flipkartVel = s.velocity * ((sp.flipkart || 0) / revTotal);
+    const blinkitVel  = s.velocity * ((sp.blinkit  || 0) / revTotal);
+    const whVel = Math.max(0, s.velocity - (amazonOnly + shopifyOnly + flipkartVel + blinkitVel));
     return {
-      fg:         s?.warehouseBreakdown?.fg ?? s?.stock?.warehouse ?? 0,
-      semiFg:     wb.semiFg ?? 0,
-      rawMaterial: wb.rawMaterial ?? 0,
-      packaging:  wb.packaging ?? 0,
-      perPacketRaw: wb.perPacketRaw ?? 1,
-      velocity:   s?.velocity ?? 0,
-      leadTime:   s?.leadTime ?? 21,
-      growth:     s?.growth ?? 0,
+      // Stock per channel
+      fg:        wb.fg ?? s.stock?.warehouse ?? 0,
+      stockAmz:  s.stock?.amazonFBA ?? 0,
+      stockFk:   s.stock?.flipkart  ?? 0,
+      stockBl:   s.stock?.blinkit   ?? 0,
+      // Velocity (overall + per-channel; amazonOnly + shopifyOnly stored
+      // separately so AMZ-001 split display stays accurate even if user
+      // edits the combined Amazon channel velocity)
+      velMode:      "overall",   // "overall" | "perChannel"
+      velOverall:   s.velocity || 0,
+      velAmzOwn:    amazonOnly,
+      velShpOwn:    shopifyOnly,
+      velFk:        flipkartVel,
+      velBl:        blinkitVel,
+      velWh:        whVel,
+      // Growth (overall + per-channel) — currently flat per-SKU growth
+      // applied to all channels; once per-channel growth data lands, swap
+      // these initial values.
+      growthMode:   "overall",
+      growthOverall: s.growth ?? 0,
+      growthAmz:    s.growth ?? 0,
+      growthFk:     s.growth ?? 0,
+      growthBl:     s.growth ?? 0,
+      growthWh:     s.growth ?? 0,
+      // Input (SFG or RM — exactly one per SKU)
+      inputKind:    wb.kind || "raw",
+      inputQty:     (wb.inputs?.sfg || wb.inputs?.rm)?.qty ?? 0,
+      inputName:    (wb.inputs?.sfg || wb.inputs?.rm)?.name || "—",
+      inputUnit:    (wb.inputs?.sfg || wb.inputs?.rm)?.unit || "units",
+      inputPerPack: (wb.inputs?.sfg || wb.inputs?.rm)?.perPack || 1,
+      inputLead:    s.leadTime ?? 21,
+      // Packaging components (variable per SKU)
+      pkg: (wb.inputs?.pkg || []).map(p => ({
+        refCode:      p.refCode,
+        name:         p.name,
+        unit:         p.unit,
+        qty:          p.qty,
+        unitsPerPack: p.unitsPerPack,
+        leadTime:     s.leadTime ?? 21,  // placeholder until SIM-016-DATA lands
+      })),
+      // Lead times
+      leadAmzInbound: MP_INBOUND_LEAD_DEFAULT.amazonFBA,
+      leadFkInbound:  MP_INBOUND_LEAD_DEFAULT.flipkart,
+      leadBlInbound:  MP_INBOUND_LEAD_DEFAULT.blinkit,
+      supplierLead:   s.leadTime ?? 21,
     };
   }
 
-  const set = (k) => (e) => {
-    const v = parseFloat(e.target.value);
-    setSim(prev => ({ ...prev, [k]: Number.isFinite(v) ? v : 0 }));
-  };
+  const [sim, setSim] = useState(() => baselineState(baseline));
+  useEffect(() => { setSim(baselineState(baseline)); }, [selectedCode]);
+
   const reset = () => setSim(baselineState(baseline));
+  const setOne = (k, v) => setSim(prev => ({ ...prev, [k]: v }));
+  const setPkg = (idx, k, v) => setSim(prev => {
+    const next = [...prev.pkg];
+    next[idx] = { ...next[idx], [k]: v };
+    return { ...prev, pkg: next };
+  });
 
-  // Live computations
-  const producibleFg = Math.min(sim.semiFg, sim.packaging);
-  const maxFg = sim.fg + producibleFg;
-  const effectiveVel = sim.velocity * (1 + sim.growth / 100);
-  const runway = effectiveVel > 0 ? Math.round(maxFg / effectiveVel) : 0;
-  const status = runway <= sim.leadTime ? "red" : runway < 30 ? "amber" : "green";
-  const buffer = runway - sim.leadTime;
-  const overdue = buffer < 0;
-  const reorderByDays = buffer;
+  // ── Derived velocity values respecting nested mode ──
+  // In "overall" mode the marketplace values come from the proportional split
+  // of velOverall. In "perChannel" mode the marketplace values are user-edited
+  // directly and velOverall is recomputed as their sum.
+  const baseRecord = baselineState(baseline);
+  const baseSplit = baseRecord ? {
+    amz: baseRecord.velAmzOwn + baseRecord.velShpOwn,
+    fk:  baseRecord.velFk,
+    bl:  baseRecord.velBl,
+    wh:  baseRecord.velWh,
+  } : { amz: 0, fk: 0, bl: 0, wh: 0 };
+  const baseSplitTotal = baseSplit.amz + baseSplit.fk + baseSplit.bl + baseSplit.wh || 1;
 
-  // What changed from baseline (highlight modified inputs)
-  const isDelta = (k) => sim[k] !== baselineState(baseline)[k];
+  let effVel;
+  if (sim.velMode === "perChannel") {
+    const amzCombined = sim.velAmzOwn + sim.velShpOwn;
+    effVel = {
+      amz: amzCombined,
+      fk:  sim.velFk,
+      bl:  sim.velBl,
+      wh:  sim.velWh,
+      overall: amzCombined + sim.velFk + sim.velBl + sim.velWh,
+    };
+  } else {
+    // proportional split of velOverall by the baseline channel mix
+    const scale = sim.velOverall / baseSplitTotal;
+    effVel = {
+      amz: baseSplit.amz * scale,
+      fk:  baseSplit.fk  * scale,
+      bl:  baseSplit.bl  * scale,
+      wh:  baseSplit.wh  * scale,
+      overall: sim.velOverall,
+    };
+  }
 
-  // For input min/max so sliders feel sane
-  const fgMax = Math.max(2000, Math.round((baseline?.warehouseBreakdown?.fg || 100) * 5));
+  // Effective growth (per channel) using same nested model
+  const effGrowth = sim.growthMode === "perChannel"
+    ? { amz: sim.growthAmz, fk: sim.growthFk, bl: sim.growthBl, wh: sim.growthWh, overall: (sim.growthAmz + sim.growthFk + sim.growthBl + sim.growthWh) / 4 }
+    : { amz: sim.growthOverall, fk: sim.growthOverall, bl: sim.growthOverall, wh: sim.growthOverall, overall: sim.growthOverall };
+
+  // Velocity after growth applied per channel (vel × (1 + g/100))
+  const projVel = {
+    amz: effVel.amz * (1 + effGrowth.amz / 100),
+    fk:  effVel.fk  * (1 + effGrowth.fk  / 100),
+    bl:  effVel.bl  * (1 + effGrowth.bl  / 100),
+    wh:  effVel.wh  * (1 + effGrowth.wh  / 100),
+  };
+
+  // ── Producible FG = min(input pack-equivalents, every PKG pack-equiv) ──
+  const inputPackEq = sim.inputPerPack > 0 ? Math.floor(sim.inputQty / sim.inputPerPack) : 0;
+  const pkgCaps = sim.pkg.map(p => p.unitsPerPack > 0 ? Math.floor(p.qty / p.unitsPerPack) : 0);
+  const producibleFg = pkgCaps.length
+    ? Math.min(inputPackEq, ...pkgCaps)
+    : inputPackEq;
+  const maxFg = sim.fg + producibleFg;  // Total (WH)
+
+  // ── Cascade runway across channels + central WH ──
+  const cascade = computeCascade({
+    whStock: maxFg,
+    whBaseVelocity: projVel.wh,
+    channels: [
+      { key: "amazon",   label: "Amazon FBA", stock: sim.stockAmz, velocity: projVel.amz },
+      { key: "flipkart", label: "Flipkart",   stock: sim.stockFk,  velocity: projVel.fk  },
+      { key: "blinkit",  label: "Blinkit",    stock: sim.stockBl,  velocity: projVel.bl  },
+    ],
+  });
+  const runway = Number.isFinite(cascade.totalRunway) ? Math.round(cascade.totalRunway) : 0;
+  const status = runway <= sim.supplierLead ? "red" : runway < 30 ? "amber" : "green";
+  const reorderByDays = runway - sim.supplierLead;
+  const overdue = reorderByDays < 0;
+
+  // Bottleneck for producible FG — which input row caps us?
+  const bottleneckIdx = pkgCaps.length ? (() => {
+    if (inputPackEq <= Math.min(...pkgCaps)) return -1;  // input is the bottleneck
+    let idx = 0; let lo = Infinity;
+    pkgCaps.forEach((c, i) => { if (c < lo) { lo = c; idx = i; } });
+    return idx;
+  })() : (inputPackEq > 0 ? -1 : null);
+  const bottleneckLabel = bottleneckIdx === null ? "—"
+    : bottleneckIdx === -1 ? (sim.inputKind === "semi" ? "SFG" : "RM")
+    : `PKG${bottleneckIdx + 1}`;
+
+  // ── isDelta — modified-from-baseline check, used for the reset pills ──
+  const isDelta = (path) => {
+    const base = baseRecord;
+    if (!base) return false;
+    if (Array.isArray(path)) {
+      // path like ['pkg', idx, 'qty']
+      const [, idx, k] = path;
+      return sim.pkg[idx]?.[k] !== base.pkg[idx]?.[k];
+    }
+    return sim[path] !== base[path];
+  };
+
+  // ── Slider scale helpers ──
+  const fgMax = Math.max(2000, Math.round((baseRecord?.fg || 100) * 5));
 
   return (
     <div className="sim-shell">
@@ -1140,81 +1278,190 @@ const SimulatorTab = ({ inventory }) => {
         {/* INPUTS panel */}
         <Card title="Inputs" sub="Edit any cell — outputs recompute instantly. Modified values get a clickable pill to reset.">
           <div className="sim-inputs">
-            <div className="sim-input-row sim-input-head">
-              <div></div>
-              <div className="sim-input-head-label">Tweak ↔</div>
-              <div className="sim-input-head-cluster">
-                <span className="sim-input-head-new">New value</span>
-                <span className="sim-input-head-current">Current</span>
-              </div>
-            </div>
-            {/* Input rows. Unit on Raw Material is sourced from the active
-                SKU's recipe (KG/Ltr) instead of generic "units" per SIM-001.
-                "Raw per pack" removed per SIM-002 (it's a config constant,
-                not something to simulate). "Growth %" relabelled "MoM %"
-                per SIM-004. */}
-            {(() => {
-              // Pull the active SKU's raw input unit from its recipe.
-              const rmUnit = baseline?.warehouseBreakdown?.inputs?.rm?.unit || "units";
-              const sfgUnit = baseline?.warehouseBreakdown?.inputs?.sfg?.unit || "units";
-              return [
-              { k: "fg",          label: "Produced FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
-              { k: "semiFg",      label: "Semi-FG",       unit: sfgUnit, min: 0, max: fgMax,  step: 1 },
-              { k: "rawMaterial", label: "Raw Material",  unit: rmUnit,  min: 0, max: fgMax * 2, step: rmUnit === "KG" || rmUnit === "Ltr" ? 0.1 : 1 },
-              { k: "packaging",   label: "Packaging",     unit: "units", min: 0, max: fgMax * 1.5, step: 1 },
-              { k: "velocity",    label: "Daily velocity", unit: "/day", min: 0, max: 500,    step: 1 },
-              { k: "leadTime",    label: "Supplier lead time", unit: "days", min: 1, max: 120, step: 1 },
-              { k: "growth",      label: "MoM %",         unit: "%",     min: -100, max: 500, step: 1 },
-              ];
-            })().map(({ k, label, unit, min, max, step }) => {
-              const base = baselineState(baseline)[k];
-              const delta = isDelta(k);
-              const absDelta = sim[k] - base;
-              const pctDelta = base !== 0 ? (absDelta / Math.abs(base)) * 100 : 0;
-              const sign = absDelta > 0 ? "+" : "";
-              const resetOne = () => setSim(prev => ({ ...prev, [k]: base }));
-              return (
-                <div key={k} className={"sim-input-row" + (delta ? " is-delta" : "")}>
-                  <div className="sim-input-label">
-                    <span>{label}</span>
-                    <span className="muted">{unit}</span>
+            {/* ── STOCK section ── */}
+            <SimSection title="Stock on hand" hint="How many units sit in each location right now.">
+              <SimRow label="Central warehouse · Produced FG" unit="units"
+                value={sim.fg} onChange={v => setOne("fg", v)}
+                min={0} max={fgMax} step={1}
+                base={baseRecord?.fg} delta={isDelta("fg")}
+                onReset={() => setOne("fg", baseRecord.fg)}/>
+              <SimRow label="Amazon FBA stock" unit="units"
+                value={sim.stockAmz} onChange={v => setOne("stockAmz", v)}
+                min={0} max={Math.max(2000, baseRecord?.stockAmz * 5 || 500)} step={1}
+                base={baseRecord?.stockAmz} delta={isDelta("stockAmz")}
+                onReset={() => setOne("stockAmz", baseRecord.stockAmz)}/>
+              <SimRow label="Flipkart stock" unit="units"
+                value={sim.stockFk} onChange={v => setOne("stockFk", v)}
+                min={0} max={Math.max(2000, baseRecord?.stockFk * 5 || 500)} step={1}
+                base={baseRecord?.stockFk} delta={isDelta("stockFk")}
+                onReset={() => setOne("stockFk", baseRecord.stockFk)}/>
+              <SimRow label="Blinkit stock" unit="units"
+                value={sim.stockBl} onChange={v => setOne("stockBl", v)}
+                min={0} max={Math.max(2000, baseRecord?.stockBl * 5 || 500)} step={1}
+                base={baseRecord?.stockBl} delta={isDelta("stockBl")}
+                onReset={() => setOne("stockBl", baseRecord.stockBl)}/>
+            </SimSection>
+
+            {/* ── VELOCITY section (nested) ── */}
+            <SimSection
+              title="Daily velocity"
+              hint="Set one overall number, or click 'split by channel' to control each marketplace independently."
+              right={
+                <button className="btn sm ghost" onClick={() => setOne("velMode", sim.velMode === "overall" ? "perChannel" : "overall")}>
+                  {sim.velMode === "overall" ? "Split by channel →" : "← Back to overall"}
+                </button>
+              }>
+              {sim.velMode === "overall" ? (
+                <SimRow label="Total velocity (auto-splits proportionally)" unit="/day"
+                  value={sim.velOverall} onChange={v => setOne("velOverall", v)}
+                  min={0} max={500} step={1}
+                  base={baseRecord?.velOverall} delta={isDelta("velOverall")}
+                  onReset={() => setOne("velOverall", baseRecord.velOverall)}
+                  hint={`Split: amz ${effVel.amz.toFixed(1)} · fk ${effVel.fk.toFixed(1)} · bl ${effVel.bl.toFixed(1)} · wh ${effVel.wh.toFixed(1)}`}/>
+              ) : (
+                <>
+                  <SimRow label="Amazon FBA (incl. Shopify D2C)" unit="/day"
+                    value={sim.velAmzOwn + sim.velShpOwn}
+                    onChange={v => {
+                      // distribute change proportionally between amz + shp
+                      const totalOld = sim.velAmzOwn + sim.velShpOwn || 1;
+                      setSim(prev => ({
+                        ...prev,
+                        velAmzOwn: prev.velAmzOwn * (v / totalOld),
+                        velShpOwn: prev.velShpOwn * (v / totalOld),
+                      }));
+                    }}
+                    min={0} max={500} step={0.1}
+                    base={(baseRecord?.velAmzOwn || 0) + (baseRecord?.velShpOwn || 0)}
+                    delta={sim.velAmzOwn !== baseRecord?.velAmzOwn || sim.velShpOwn !== baseRecord?.velShpOwn}
+                    onReset={() => setSim(prev => ({ ...prev, velAmzOwn: baseRecord.velAmzOwn, velShpOwn: baseRecord.velShpOwn }))}
+                    hint={`= ${sim.velAmzOwn.toFixed(1)} amz + ${sim.velShpOwn.toFixed(1)} d2c`}/>
+                  <SimRow label="Flipkart" unit="/day"
+                    value={sim.velFk} onChange={v => setOne("velFk", v)}
+                    min={0} max={500} step={0.1}
+                    base={baseRecord?.velFk} delta={isDelta("velFk")}
+                    onReset={() => setOne("velFk", baseRecord.velFk)}/>
+                  <SimRow label="Blinkit" unit="/day"
+                    value={sim.velBl} onChange={v => setOne("velBl", v)}
+                    min={0} max={500} step={0.1}
+                    base={baseRecord?.velBl} delta={isDelta("velBl")}
+                    onReset={() => setOne("velBl", baseRecord.velBl)}/>
+                  <SimRow label="Central warehouse (B2B + other)" unit="/day"
+                    value={sim.velWh} onChange={v => setOne("velWh", v)}
+                    min={0} max={500} step={0.1}
+                    base={baseRecord?.velWh} delta={isDelta("velWh")}
+                    onReset={() => setOne("velWh", baseRecord.velWh)}/>
+                  <div className="sim-section-foot muted">
+                    Sum: {effVel.overall.toFixed(1)} /day across all channels
                   </div>
-                  <input
-                    type="range"
-                    className="sim-range"
-                    min={min} max={max} step={step}
-                    value={sim[k]}
-                    onChange={set(k)}
-                  />
-                  <div className="sim-input-cluster">
-                    <input
-                      type="number"
-                      className="sim-number"
-                      min={min} max={max} step={step}
-                      value={sim[k]}
-                      onChange={set(k)}
-                    />
-                    <button
-                      type="button"
-                      className={"sim-baseline-pill" + (delta ? " is-changed" : "")}
-                      onClick={delta ? resetOne : undefined}
-                      title={delta ? `Reset to baseline (${base})` : `Baseline value from the sheet`}
-                      disabled={!delta}
-                    >
-                      {delta && <span className="sim-baseline-reset">↺</span>}
-                      <span className="sim-baseline-num mono">{Number.isFinite(base) ? base : "—"}</span>
-                      {delta && (
-                        <span className={"sim-baseline-delta " + (absDelta > 0 ? "up" : "down")}>
-                          {sign}{Math.abs(pctDelta) >= 100
-                            ? Math.round(pctDelta)
-                            : pctDelta.toFixed(0)}%
-                        </span>
-                      )}
-                    </button>
-                  </div>
+                </>
+              )}
+            </SimSection>
+
+            {/* ── GROWTH section (nested) ── */}
+            <SimSection
+              title="MoM % growth"
+              hint="Month-over-month growth applied to projected velocity."
+              right={
+                <button className="btn sm ghost" onClick={() => setOne("growthMode", sim.growthMode === "overall" ? "perChannel" : "overall")}>
+                  {sim.growthMode === "overall" ? "Split by channel →" : "← Back to overall"}
+                </button>
+              }>
+              {sim.growthMode === "overall" ? (
+                <SimRow label="Overall MoM %" unit="%"
+                  value={sim.growthOverall} onChange={v => setOne("growthOverall", v)}
+                  min={-100} max={500} step={1}
+                  base={baseRecord?.growthOverall} delta={isDelta("growthOverall")}
+                  onReset={() => setOne("growthOverall", baseRecord.growthOverall)}/>
+              ) : (
+                <>
+                  <SimRow label="Amazon FBA" unit="%"
+                    value={sim.growthAmz} onChange={v => setOne("growthAmz", v)}
+                    min={-100} max={500} step={1}
+                    base={baseRecord?.growthAmz} delta={isDelta("growthAmz")}
+                    onReset={() => setOne("growthAmz", baseRecord.growthAmz)}/>
+                  <SimRow label="Flipkart" unit="%"
+                    value={sim.growthFk} onChange={v => setOne("growthFk", v)}
+                    min={-100} max={500} step={1}
+                    base={baseRecord?.growthFk} delta={isDelta("growthFk")}
+                    onReset={() => setOne("growthFk", baseRecord.growthFk)}/>
+                  <SimRow label="Blinkit" unit="%"
+                    value={sim.growthBl} onChange={v => setOne("growthBl", v)}
+                    min={-100} max={500} step={1}
+                    base={baseRecord?.growthBl} delta={isDelta("growthBl")}
+                    onReset={() => setOne("growthBl", baseRecord.growthBl)}/>
+                  <SimRow label="Central warehouse" unit="%"
+                    value={sim.growthWh} onChange={v => setOne("growthWh", v)}
+                    min={-100} max={500} step={1}
+                    base={baseRecord?.growthWh} delta={isDelta("growthWh")}
+                    onReset={() => setOne("growthWh", baseRecord.growthWh)}/>
+                </>
+              )}
+            </SimSection>
+
+            {/* ── INPUT (SFG or RM) ── */}
+            <SimSection title={`Input · ${sim.inputKind === "semi" ? "SFG (Semi-Finished)" : "RM (Raw Material)"}`}
+              hint={sim.inputName + " — qty + supplier lead time"}>
+              <SimRow label={sim.inputName} unit={sim.inputUnit}
+                value={sim.inputQty} onChange={v => setOne("inputQty", v)}
+                min={0} max={Math.max(2000, (baseRecord?.inputQty || 100) * 5)}
+                step={sim.inputUnit === "KG" || sim.inputUnit === "Ltr" ? 0.1 : 1}
+                base={baseRecord?.inputQty} delta={isDelta("inputQty")}
+                onReset={() => setOne("inputQty", baseRecord.inputQty)}/>
+              <SimRow label="Supplier lead time" unit="days"
+                value={sim.inputLead} onChange={v => setOne("inputLead", v)}
+                min={1} max={120} step={1}
+                base={baseRecord?.inputLead} delta={isDelta("inputLead")}
+                onReset={() => setOne("inputLead", baseRecord.inputLead)}/>
+            </SimSection>
+
+            {/* ── PKG COMPONENTS (variable per SKU) ── */}
+            <SimSection title="Packaging components" hint="One row per PKG. Each can have its own qty and lead time.">
+              {sim.pkg.length === 0 ? (
+                <div className="sim-section-foot muted">No packaging components defined for this SKU.</div>
+              ) : sim.pkg.map((p, idx) => (
+                <div key={p.refCode}>
+                  <SimRow
+                    label={`PKG${idx + 1} · ${p.name}`}
+                    unit={p.unit}
+                    value={p.qty}
+                    onChange={v => setPkg(idx, "qty", v)}
+                    min={0} max={Math.max(2000, (baseRecord?.pkg[idx]?.qty || 100) * 5)} step={1}
+                    base={baseRecord?.pkg[idx]?.qty}
+                    delta={isDelta(["pkg", idx, "qty"])}
+                    onReset={() => setPkg(idx, "qty", baseRecord.pkg[idx].qty)}/>
+                  <SimRow
+                    label={`PKG${idx + 1} supplier lead time`}
+                    unit="days"
+                    value={p.leadTime}
+                    onChange={v => setPkg(idx, "leadTime", v)}
+                    min={1} max={120} step={1}
+                    base={baseRecord?.pkg[idx]?.leadTime}
+                    delta={isDelta(["pkg", idx, "leadTime"])}
+                    onReset={() => setPkg(idx, "leadTime", baseRecord.pkg[idx].leadTime)}/>
                 </div>
-              );
-            })}
+              ))}
+            </SimSection>
+
+            {/* ── MARKETPLACE INBOUND LEAD TIMES (SIM-014) ── */}
+            <SimSection title="Marketplace inbound lead time"
+              hint="Days to get fresh stock from central warehouse to each marketplace. Placeholder until real numbers arrive.">
+              <SimRow label="Amazon FBA inbound" unit="days"
+                value={sim.leadAmzInbound} onChange={v => setOne("leadAmzInbound", v)}
+                min={0} max={60} step={1}
+                base={baseRecord?.leadAmzInbound} delta={isDelta("leadAmzInbound")}
+                onReset={() => setOne("leadAmzInbound", baseRecord.leadAmzInbound)}/>
+              <SimRow label="Flipkart inbound" unit="days"
+                value={sim.leadFkInbound} onChange={v => setOne("leadFkInbound", v)}
+                min={0} max={60} step={1}
+                base={baseRecord?.leadFkInbound} delta={isDelta("leadFkInbound")}
+                onReset={() => setOne("leadFkInbound", baseRecord.leadFkInbound)}/>
+              <SimRow label="Blinkit inbound" unit="days"
+                value={sim.leadBlInbound} onChange={v => setOne("leadBlInbound", v)}
+                min={0} max={60} step={1}
+                base={baseRecord?.leadBlInbound} delta={isDelta("leadBlInbound")}
+                onReset={() => setOne("leadBlInbound", baseRecord.leadBlInbound)}/>
+            </SimSection>
           </div>
         </Card>
 
@@ -1222,17 +1469,34 @@ const SimulatorTab = ({ inventory }) => {
         <Card title="Live outputs" sub={status === "red" ? "Action needed — runway below lead time" : status === "amber" ? "Watch — under 30 days" : "Healthy — above lead time + 30d buffer"}>
           <div className={"sim-out sim-out-" + status}>
             <div className="sim-out-hero">
-              <div className="sim-out-hero-label">RUNWAY</div>
+              <div className="sim-out-hero-label">TOTAL RUNWAY (CASCADE)</div>
               <div className="sim-out-hero-num mono">{runway}d</div>
               <div className="sim-out-hero-sub">
-                at {Math.round(effectiveVel)} units/day
-                {sim.growth !== 0 && <span> ({sim.growth > 0 ? "+" : ""}{sim.growth}% growth)</span>}
+                day Central WH hits zero · channels drain in parallel first
               </div>
             </div>
 
-            {/* Producible FG / Total (WH) cards removed per SIM-003 — they
-                already appear in the Inputs panel above. Keep only the
-                action-oriented outputs: when to reorder, what's the cap. */}
+            {/* Per-channel runway breakdown — when each channel's own stock
+                runs out before falling back to central WH. */}
+            <div className="sim-out-channels">
+              {cascade.channels.map(c => (
+                <div key={c.key} className="sim-out-channel">
+                  <span className="sim-out-channel-label">{c.label}</span>
+                  <span className="sim-out-channel-runway mono">
+                    {Number.isFinite(c.runway) ? `${Math.round(c.runway)}d` : "∞"}
+                  </span>
+                  <span className="sim-out-channel-vel muted">{c.velocity.toFixed(1)}/d</span>
+                </div>
+              ))}
+              <div className="sim-out-channel">
+                <span className="sim-out-channel-label"><strong>Central WH (standalone)</strong></span>
+                <span className="sim-out-channel-runway mono">
+                  {Number.isFinite(cascade.wh.runway) ? `${Math.round(cascade.wh.runway)}d` : "∞"}
+                </span>
+                <span className="sim-out-channel-vel muted">{projVel.wh.toFixed(1)}/d</span>
+              </div>
+            </div>
+
             <div className="sim-out-stats">
               <div className="sim-out-stat">
                 <div className="sim-out-stat-label">Reorder by</div>
@@ -1242,20 +1506,80 @@ const SimulatorTab = ({ inventory }) => {
                     reorderByDays === 1 ? "Tomorrow" :
                     `In ${reorderByDays}d`}
                 </div>
-                <div className="sim-out-stat-sub">runway − lead time</div>
+                <div className="sim-out-stat-sub">runway − supplier lead time</div>
               </div>
               <div className="sim-out-stat">
                 <div className="sim-out-stat-label">Bottleneck</div>
-                <div className="sim-out-stat-num mono">{sim.semiFg <= sim.packaging ? "Semi-FG" : "Packaging"}</div>
-                <div className="sim-out-stat-sub">the input that caps producible FG</div>
+                <div className="sim-out-stat-num mono">{bottleneckLabel}</div>
+                <div className="sim-out-stat-sub">caps Producible FG</div>
               </div>
             </div>
 
             <div className="sim-out-timeline">
-              <RunwayTimeline runway={runway} leadTime={sim.leadTime} status={status}/>
+              <RunwayTimeline runway={runway} leadTime={sim.supplierLead} status={status}/>
             </div>
           </div>
         </Card>
+      </div>
+    </div>
+  );
+};
+
+// ── SimSection + SimRow — reusable input building blocks for the Simulator ──
+const SimSection = ({ title, hint, right, children }) => (
+  <div className="sim-section">
+    <div className="sim-section-head">
+      <div>
+        <div className="sim-section-title">{title}</div>
+        {hint && <div className="sim-section-hint muted">{hint}</div>}
+      </div>
+      {right}
+    </div>
+    <div className="sim-section-body">{children}</div>
+  </div>
+);
+
+const SimRow = ({ label, unit, value, onChange, min, max, step, base, delta, onReset, hint }) => {
+  const absDelta = (value || 0) - (base || 0);
+  const pctDelta = base ? (absDelta / Math.abs(base)) * 100 : 0;
+  const sign = absDelta > 0 ? "+" : "";
+  return (
+    <div className={"sim-input-row" + (delta ? " is-delta" : "")}>
+      <div className="sim-input-label">
+        <span>{label}</span>
+        <span className="muted">{unit}</span>
+        {hint && <span className="sim-input-hint muted">{hint}</span>}
+      </div>
+      <input
+        type="range"
+        className="sim-range"
+        min={min} max={max} step={step}
+        value={value}
+        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+      />
+      <div className="sim-input-cluster">
+        <input
+          type="number"
+          className="sim-number"
+          min={min} max={max} step={step}
+          value={value}
+          onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        />
+        <button
+          type="button"
+          className={"sim-baseline-pill" + (delta ? " is-changed" : "")}
+          onClick={delta ? onReset : undefined}
+          title={delta ? `Reset to baseline (${base})` : "Baseline value from the sheet"}
+          disabled={!delta}
+        >
+          {delta && <span className="sim-baseline-reset">↺</span>}
+          <span className="sim-baseline-num mono">{Number.isFinite(base) ? (typeof base === "number" && base % 1 !== 0 ? base.toFixed(1) : base) : "—"}</span>
+          {delta && (
+            <span className={"sim-baseline-delta " + (absDelta > 0 ? "up" : "down")}>
+              {sign}{Math.abs(pctDelta) >= 100 ? Math.round(pctDelta) : pctDelta.toFixed(0)}%
+            </span>
+          )}
+        </button>
       </div>
     </div>
   );

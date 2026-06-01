@@ -2233,6 +2233,90 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 
 .sim-out-timeline { padding: 4px 8px; }
 
+/* ── Simulator: per-channel runway list in the output panel ──
+   Shows each marketplace's own-stock runway + central WH's standalone
+   runway. Lets the user see where the cascade "phase 1" ends. */
+.sim-out-channels {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.sim-out-channel {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.sim-out-channel-label { color: var(--ink-2); }
+.sim-out-channel-runway {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 56px;
+  text-align: right;
+}
+.sim-out-channel-vel {
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-size: 10.5px;
+  min-width: 64px;
+  text-align: right;
+}
+
+/* ── Simulator: section grouping inside the Inputs panel ──
+   The new Sprint 3 inputs are too many for one flat list. Group them
+   into sections (Stock / Velocity / Growth / Input / PKG / Lead times)
+   with a small header bar each. The 'right' slot in the header carries
+   the "Split by channel ↔ Back to overall" toggle for velocity/growth. */
+.sim-section {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-card);
+  margin-bottom: 12px;
+}
+.sim-section:last-child { margin-bottom: 0; }
+.sim-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-canvas);
+  border-radius: 8px 8px 0 0;
+}
+.sim-section-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+.sim-section-hint {
+  font-size: 11px;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+.sim-section-body {
+  padding: 4px 14px;
+}
+.sim-section-foot {
+  padding: 8px 4px 2px;
+  font-size: 11px;
+  text-align: right;
+}
+.sim-input-hint {
+  font-size: 10.5px;
+  margin-top: 2px;
+  display: block;
+}
+
 /* ───────── Runway × Lead-time timeline ─────────
    Single horizontal bar combining the "how long does stock last" number
    (filled segment) with the "when must we reorder" marker (vertical line).
