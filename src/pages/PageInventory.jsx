@@ -101,6 +101,203 @@ const PageInventory = ({ subsection }) => {
   );
 };
 
+// ── Blinkit feeder-WH helpers (BLK-001 → BLK-005) ─────────────────────
+// Localised state key for the per-SKU amber threshold (BLK-005).
+const BLK_THRESHOLD_KEY = (skuCode) => `ns.blkAmberThreshold.${skuCode}`;
+const BLK_DEFAULT_AMBER = 25;
+
+function readBlkThreshold(skuCode) {
+  if (typeof window === "undefined") return BLK_DEFAULT_AMBER;
+  const v = window.localStorage.getItem(BLK_THRESHOLD_KEY(skuCode));
+  return v ? Number(v) || BLK_DEFAULT_AMBER : BLK_DEFAULT_AMBER;
+}
+function writeBlkThreshold(skuCode, val) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(BLK_THRESHOLD_KEY(skuCode), String(val));
+}
+
+// Given a SKU's blinkitFeeders + the per-SKU amber threshold, return
+// counts: out-of-stock, will-go-OOS-soon (≤ threshold), healthy, and
+// the lifetime "ever launched on" denominator.
+function blkFeederStats(feeders, sku, threshold) {
+  const ever = feeders?.ever?.length || 0;
+  const current = feeders?.current || {};
+  const blkVel = sku?.channelVelocity?.blinkit ?? 0;
+  // Per-WH velocity (rough): split total Blinkit velocity across launched WHs.
+  const perWhVel = ever > 0 ? blkVel / ever : 0;
+  let red = 0, orange = 0;
+  for (const code of feeders?.ever || []) {
+    const stock = current[code] ?? 0;
+    if (stock <= 0) red++;
+    else if (perWhVel > 0) {
+      // OOS within 14 days at current per-WH velocity OR stock ≤ amber threshold
+      const daysCover = stock / perWhVel;
+      if (daysCover <= 14 || stock <= threshold) orange++;
+    } else if (stock <= threshold) {
+      orange++;
+    }
+  }
+  return { red, orange, healthy: ever - red - orange, ever };
+}
+
+// Compact two-stat caption that goes in place of velocity/growth in the
+// Blinkit cell for Unified Stock + Runway tabs.
+const BlinkitFeederStats = ({ feeders, sku, threshold }) => {
+  const { red, orange, ever } = blkFeederStats(feeders, sku, threshold);
+  if (!ever) {
+    return <span className="muted" style={{ fontSize: 10.5 }}>not on Blinkit</span>;
+  }
+  return (
+    <div className="blk-feeder-stats">
+      <span className="blk-stat blk-stat-red"
+        title={`${red} of ${ever} feeder WHs are out of stock right now`}>
+        <span className="blk-stat-num">{red}</span>
+        <span className="blk-stat-denom">/{ever}</span>
+      </span>
+      <span className="blk-stat blk-stat-amber"
+        title={`${orange} of ${ever} feeder WHs will run out in ≤14d at current velocity`}>
+        <span className="blk-stat-num">{orange}</span>
+        <span className="blk-stat-denom">/{ever}</span>
+      </span>
+      {feeders?.isStub && (
+        <span className="blk-stub-badge" title="Stub data — swap when real Blinkit feeder-WH export arrives">STUB</span>
+      )}
+    </div>
+  );
+};
+
+// Drill modal — per-feeder-WH stock list, severity-tinted, with the
+// per-SKU amber threshold editable + persisted (BLK-004 + BLK-005).
+const BlinkitFeederModal = ({ sku, onClose }) => {
+  const D = NSData;
+  const [threshold, setThreshold] = useState(() => readBlkThreshold(sku.code));
+  const [draftThreshold, setDraftThreshold] = useState(threshold);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const feeders = sku.blinkitFeeders || { ever: [], current: {}, isStub: true };
+  const blkVel = sku?.channelVelocity?.blinkit ?? 0;
+  const perWhVel = feeders.ever.length > 0 ? blkVel / feeders.ever.length : 0;
+
+  const rows = feeders.ever.map(code => {
+    const wh = D.blinkitFeederWhs.find(w => w.code === code) || { code, name: code, city: "—" };
+    const stock = feeders.current[code] ?? 0;
+    const days = perWhVel > 0 ? Math.round(stock / perWhVel) : null;
+    let severity = "ok";
+    if (stock <= 0) severity = "crit";
+    else if (stock <= threshold) severity = "warn";
+    return { wh, stock, days, severity };
+  }).sort((a, b) => a.stock - b.stock);
+
+  const stats = blkFeederStats(feeders, sku, threshold);
+  const onSaveThreshold = () => {
+    const v = Number(draftThreshold) || BLK_DEFAULT_AMBER;
+    writeBlkThreshold(sku.code, v);
+    setThreshold(v);
+  };
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(680px, 92vw)" }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">
+              <span style={{ background: "var(--warning-soft)", color: "var(--warning)", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, marginRight: 8, letterSpacing: "0.06em" }}>BLINKIT</span>
+              {sku.name}
+            </div>
+            <div className="modal-sub sku">{sku.code} · {sku.variant} · {feeders.isStub ? "STUB DATA" : "live"}</div>
+          </div>
+          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+        </div>
+
+        <div className="modal-body">
+          {/* Summary row */}
+          <div className="blk-modal-summary">
+            <div className="blk-modal-summary-stat blk-modal-summary-red">
+              <div className="blk-modal-summary-num mono">{stats.red}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+              <div className="blk-modal-summary-label">out of stock</div>
+            </div>
+            <div className="blk-modal-summary-stat blk-modal-summary-amber">
+              <div className="blk-modal-summary-num mono">{stats.orange}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+              <div className="blk-modal-summary-label">running low</div>
+            </div>
+            <div className="blk-modal-summary-stat blk-modal-summary-ok">
+              <div className="blk-modal-summary-num mono">{stats.healthy}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+              <div className="blk-modal-summary-label">healthy</div>
+            </div>
+          </div>
+
+          {/* Threshold editor */}
+          <div className="blk-modal-threshold">
+            <div className="blk-modal-threshold-label">
+              <strong>Amber threshold for this SKU</strong>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                A feeder WH is flagged "running low" when its stock ≤ this number. Saved per-SKU on this device.
+              </div>
+            </div>
+            <div className="blk-modal-threshold-controls">
+              <input
+                type="number"
+                className="sim-number"
+                min={1} max={1000} step={1}
+                value={draftThreshold}
+                onChange={(e) => setDraftThreshold(parseInt(e.target.value, 10) || 0)}
+                style={{ width: 80 }}
+              />
+              <button
+                className="btn primary sm"
+                onClick={onSaveThreshold}
+                disabled={Number(draftThreshold) === threshold}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          {/* Per-feeder-WH list */}
+          <div className="blk-modal-list">
+            <div className="blk-modal-list-head">
+              <span>Feeder warehouse</span>
+              <span style={{ textAlign: "right" }}>Stock</span>
+              <span style={{ textAlign: "right" }}>Days of cover</span>
+            </div>
+            {rows.length === 0 && (
+              <div className="muted" style={{ padding: "20px 12px", textAlign: "center" }}>
+                Not launched on any Blinkit feeder warehouse yet.
+              </div>
+            )}
+            {rows.map(({ wh, stock, days, severity }) => (
+              <div key={wh.code} className={`blk-modal-row blk-modal-row-${severity}`}>
+                <div className="blk-modal-row-wh">
+                  <div className="blk-modal-row-name">{wh.name}</div>
+                  <div className="sku" style={{ fontSize: 10.5 }}>{wh.code} · {wh.city}</div>
+                </div>
+                <div className="blk-modal-row-stock mono">{D.fmtN(stock)}</div>
+                <div className="blk-modal-row-days mono muted">
+                  {days == null ? "—" : `${days}d`}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {feeders.isStub
+              ? "Stub data — replaces with real Blinkit Seller Panel export when DATA-001 arrives."
+              : `Source: Blinkit Seller Panel export`}
+          </span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── PlatformCell — one channel's stock + runway + velocity + growth stack ──
 // Used inside the Unified Stock table for every location column. Renders:
 //   1. Units on hand (hero) — with an optional inline breakdown caption to
@@ -183,6 +380,7 @@ const UnifiedStockTab = ({ inventory }) => {
 
   // Clicking any SKU row opens the breakdown popover.
   const [popoverSku, setPopoverSku] = useState(null);
+  const [blinkitDrillSku, setBlinkitDrillSku] = useState(null);
   const navigate = useNavigate();
 
   // ── Filter state ────────────────────────────────────────────
@@ -485,8 +683,20 @@ const UnifiedStockTab = ({ inventory }) => {
                   <td className="num mat-cell">
                     <PlatformCell units={s.stock.flipkart} velocity={vel.flipkart} growth={s.growth}/>
                   </td>
-                  <td className="num mat-cell">
-                    <PlatformCell units={s.stock.blinkit} velocity={vel.blinkit} growth={s.growth}/>
+                  <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
+                    {/* BLK-001 + BLK-002: stock headline + a/b feeder-WH counts
+                        (red OOS / amber OOS-soon over total launched). Whole
+                        cell clickable → drill modal. */}
+                    <div className="pf-cell">
+                      <div className="pf-cell-units-row">
+                        <div className="pf-cell-units mono">{D.fmtN(s.stock.blinkit)}</div>
+                      </div>
+                      <BlinkitFeederStats
+                        feeders={s.blinkitFeeders}
+                        sku={s}
+                        threshold={readBlkThreshold(s.code)}
+                      />
+                    </div>
                   </td>
                   <td className="num mat-cell">
                     <div className="mat-cell-num">{D.fmtINR(s.stock.warehouse * unitCost(s))}</div>
@@ -513,6 +723,9 @@ const UnifiedStockTab = ({ inventory }) => {
 
       {popoverSku && (
         <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
+      )}
+      {blinkitDrillSku && (
+        <BlinkitFeederModal sku={blinkitDrillSku} onClose={() => setBlinkitDrillSku(null)}/>
       )}
     </>
   );
@@ -1808,6 +2021,7 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
   const [statusFilter, setStatusFilter] = useState("all"); // all | red | amber | green
   const [popoverSku, setPopoverSku] = useState(null);
+  const [blinkitDrillSku, setBlinkitDrillSku] = useState(null);
 
   // Per-row growth input change handler
   const setGrowthFor = (code, val) => {
@@ -2103,11 +2317,21 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                   <td className="num mat-cell">
                     <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
                   </td>
-                  <td className="num mat-cell">
-                    <RunwayChannelCell units={s.stock.blinkit} vel={s.chVel.blinkit} leadTime={s.chLead.blinkit} growth={s.actualGrowth}/>
+                  <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
+                    {/* BLK-003: Runway tab Blinkit cell mirrors Unified Stock.
+                        Replace velocity/growth with feeder-WH OOS counts.
+                        Whole cell clickable → drill modal. */}
+                    <div className="rw-ch-cell">
+                      <div className="rw-ch-cell-stock mono">{D.fmtN(s.stock.blinkit)}</div>
+                      <BlinkitFeederStats
+                        feeders={s.blinkitFeeders}
+                        sku={s}
+                        threshold={readBlkThreshold(s.code)}
+                      />
+                    </div>
                   </td>
 
-                  {/* 8. Action needed */}
+                  {/* 8. Action needed (Runway tab) */}
                   <td className="mat-cell rw-cell-action">
                     <div className="rw-action-stack">
                       <div className={"runway-reorder" + (overdue ? " is-overdue" : "")}>
@@ -2129,6 +2353,9 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
       {popoverSku && (
         <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
+      )}
+      {blinkitDrillSku && (
+        <BlinkitFeederModal sku={blinkitDrillSku} onClose={() => setBlinkitDrillSku(null)}/>
       )}
     </>
   );

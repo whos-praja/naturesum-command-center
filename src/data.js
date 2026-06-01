@@ -407,6 +407,65 @@ const NSData = (function () {
     NSACDT30:  { amazon: "Acacia Catechu", flipkart: "Acacia Catechu", blinkit: null, shopify: "DIABETES CARE COLD BREW TEA WITH ACACIA CATECHU — Pack Of 30" },
   };
 
+  // ── Blinkit feeder warehouses — STUB DATA ──
+  // 8 representative feeder WHs across India. Replace with the real list
+  // from Blinkit Seller Panel when DATA-001 arrives.
+  // `isStub: true` makes the UI render a visible "STUB" badge so these
+  // numbers can't be mistaken for real ones.
+  const BLINKIT_FEEDER_WHS = [
+    { code: "BLK-DEL-N1", name: "Delhi NCR North",         city: "Delhi"     },
+    { code: "BLK-DEL-S1", name: "Delhi NCR South",         city: "Delhi"     },
+    { code: "BLK-MUM-1",  name: "Mumbai Andheri",          city: "Mumbai"    },
+    { code: "BLK-MUM-2",  name: "Mumbai Thane",            city: "Mumbai"    },
+    { code: "BLK-BLR-1",  name: "Bangalore Whitefield",    city: "Bangalore" },
+    { code: "BLK-BLR-2",  name: "Bangalore Koramangala",   city: "Bangalore" },
+    { code: "BLK-HYD-1",  name: "Hyderabad Gachibowli",    city: "Hyderabad" },
+    { code: "BLK-CCU-1",  name: "Kolkata Salt Lake",       city: "Kolkata"   },
+  ];
+
+  // Build per-SKU stub stock per feeder WH.
+  //   - SKUs with no Blinkit channel mix (NSMP100/250, NSSBBO15/30, NSJO100,
+  //     NSACDT30) get an empty `feeders` map — never launched on Blinkit.
+  //   - SKUs with channel mix get launched on 5-8 WHs depending on volume.
+  //   - Stock distribution is deterministic per SKU (uses code hash) so
+  //     numbers don't shift between renders.
+  function hashCode(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = (h * 31 + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+  }
+  function buildBlinkitFeeders(skuCode, totalStock, channelMixShare) {
+    if (channelMixShare <= 0) return { ever: [], current: {}, isStub: true };
+    const h = hashCode(skuCode);
+    // Higher-volume SKUs launched on more WHs (5-8); lower-volume on 5-6.
+    const launchCount = totalStock > 30 ? 6 + (h % 3) : 5 + (h % 2);
+    const ever = [...BLINKIT_FEEDER_WHS]
+      .map((w, i) => ({ w, sortKey: (h >> i) % 100 }))
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .slice(0, launchCount)
+      .map(x => x.w.code);
+
+    // Distribute total stock across the launched WHs. Some WHs get 0 (OOS),
+    // some get a low value (OOS-soon), the rest get the bulk.
+    const current = {};
+    const avgPerWh = totalStock / Math.max(1, launchCount);
+    ever.forEach((code, i) => {
+      const seed = ((h >> (i + 3)) & 0xff);
+      let stock;
+      if (seed < 40) {
+        stock = 0;                                            // ~16% OOS
+      } else if (seed < 90) {
+        stock = Math.max(1, Math.round(avgPerWh * 0.2));      // ~20% low
+      } else {
+        stock = Math.max(0, Math.round(avgPerWh * (0.7 + (seed % 60) / 100)));
+      }
+      current[code] = stock;
+    });
+    return { ever, current, isStub: true };
+  }
+
   const inventory = skus.map((s) => {
     const ops = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
     const recipe = SKU_RECIPE[s.code];
@@ -544,6 +603,8 @@ const NSData = (function () {
         channels:      cascadeChannels,
       },
       marketplaceNames: MARKETPLACE_NAMES[s.code] || { amazon: null, flipkart: null, blinkit: null, shopify: null },
+      // Per-SKU Blinkit feeder-warehouse map (STUB data — swap when DATA-001 arrives)
+      blinkitFeeders: buildBlinkitFeeders(s.code, totalStock.blinkit, ch.blinkit),
       leadTime:    ops.leadTime,
       stock:       totalStock,
       warehouseBreakdown,
@@ -742,6 +803,7 @@ const NSData = (function () {
     skus, channels, revenueToday, revenueYesterday, revenueMTD, revenueMTDLast, revenueMTDTarget,
     revenue7dAvg, cashExpected,
     trend30, alerts, skuSales, inventory, itemUsedBy, batches, suppliers, poLog,
+    blinkitFeederWhs: BLINKIT_FEEDER_WHS,
     adAccounts, googleCampaigns, metaCampaigns, influencers,
     marketplaceAmazon, recentReviews,
     costCards, pnl, cashflow, launches,

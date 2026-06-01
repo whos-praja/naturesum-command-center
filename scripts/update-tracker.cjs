@@ -27,7 +27,7 @@ const path = require("path");
 const fs = require("fs");
 
 const SRC = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker.xlsx";
-const OUT = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-30.xlsx";
+const OUT = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-31.xlsx";
 
 if (!fs.existsSync(SRC)) {
   console.error("Source file not found:", SRC);
@@ -94,13 +94,33 @@ const TRACKING_UPDATES = [
   { key: "SIM-004", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
   { key: "MAT-001", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
   { key: "MAT-002", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
-  // Sprint 2 (b71ac8b) — decisions answered + built
-  { key: "RUN-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Parallel cascade via lib/runwayCascade.js. Decision RUN-001-D1 = Parallel." },
-  { key: "AMZ-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Amazon channel = Amazon + Shopify combined. a+b split display. Decisions AMZ-001-D1/D2 answered." },
-  // Decisions unblocked → READY (awaiting next sprint)
-  { key: "SIM-017", status: "READY", blocker: "None", notes: "Decision RUN-001-D1 = Parallel. Cascade lib ready. Awaiting Sprint 3 Simulator overhaul." },
-  { key: "SIM-018", status: "READY", blocker: "None", notes: "Decisions AMZ-001-D1/D2 answered. Awaiting Sprint 3 Simulator overhaul." },
-  { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern already shipped in Unified Stock + Runway tab. Drill modal still awaits DATA-002." },
+  // Sprint 2 (b71ac8b)
+  { key: "RUN-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Parallel cascade via lib/runwayCascade.js." },
+  { key: "AMZ-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Amazon channel = Amazon + Shopify combined." },
+  // Sprint 3 (ea83955) — Simulator overhaul
+  { key: "SIM-010", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-marketplace velocity inputs — 31-May-2026 (ea83955)" },
+  { key: "SIM-011", status: "DONE", blocker: "None", sprint: "Done", notes: "Nested velocity behaviour — 31-May-2026 (ea83955)" },
+  { key: "SIM-012", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-marketplace MoM growth inputs — 31-May-2026 (ea83955)" },
+  { key: "SIM-013", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-marketplace WH stock inputs — 31-May-2026 (ea83955)" },
+  { key: "SIM-015", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-PKG component inputs — 31-May-2026 (ea83955)" },
+  { key: "SIM-017", status: "DONE", blocker: "None", sprint: "Done", notes: "Total runway cascade applied in Simulator — 31-May-2026 (ea83955)" },
+  { key: "SIM-018", status: "DONE", blocker: "None", sprint: "Done", notes: "AMZ-001 (Amazon + Shopify) applied in Simulator — 31-May-2026 (ea83955)" },
+  // Sprint 3 lead-time data wiring (1a0d379)
+  { key: "SIM-014", status: "DONE", blocker: "None", sprint: "Done", notes: "Real lead times wired: Amazon 14d / Flipkart 3d / Blinkit 8d — 31-May-2026 (1a0d379)" },
+  { key: "SIM-016", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-component lead times: SB raw 50d / Moringa 25d / SFG 20d / packaging 14d — 31-May-2026 (1a0d379)" },
+  // Sprint 4 — Blinkit cascade UI (BLK-001 → BLK-005)
+  { key: "BLK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit cell shows feeder-WH OOS counts (stub data, marked STUB) — 01-Jun-2026" },
+  { key: "BLK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "a/b split — denominator = lifetime launched WHs — 01-Jun-2026" },
+  { key: "BLK-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Same Blinkit treatment applied in Runway tab — 01-Jun-2026" },
+  { key: "BLK-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal — per-feeder-WH stock list with status pills + days-of-cover — 01-Jun-2026" },
+  { key: "BLK-005", status: "DONE", blocker: "None", sprint: "Done", notes: "Editable amber threshold (default 25, persisted per-SKU in localStorage) — 01-Jun-2026" },
+  // AMZ-004 sits unblocked from decisions but still awaiting drill modal
+  { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern shipped in Unified Stock + Runway. Drill modal awaits DATA-002." },
+];
+
+const DATA_RECEIVED = [
+  { key: "SIM-014-DATA", date: "31-May-2026" },
+  { key: "SIM-016-DATA", date: "31-May-2026" },
 ];
 
 console.log("\n── TRACKING sheet ──");
@@ -169,18 +189,25 @@ if (decisions) {
   });
 } else console.warn("  ⚠ No 'Decisions' sheet found");
 
-// ─── 4. DATA REQUESTS — set Date requested = 30-May-2026 ──────
+// ─── 4. DATA REQUESTS — date requested + received ─────────────
 console.log("\n── DATA REQUESTS sheet ──");
 const dreq = wb.Sheets["Data Requests"];
 if (dreq) {
   // Cols: 0=Data Key, 6=Received, 7=Date requested, 8=Date received
-  const D_COL = { key: 0, dateReq: 7 };
+  const D_COL = { key: 0, received: 6, dateReq: 7, dateRecv: 8 };
   const range = XLSX.utils.decode_range(dreq["!ref"]);
   for (let r = range.s.r + 1; r <= range.e.r; r++) {  // skip header
     const keyCell = dreq[addr(D_COL.key, r + 1)];
-    if (keyCell && String(keyCell.v).trim()) {
-      setCell(dreq, addr(D_COL.dateReq, r + 1), "30-May-2026");
-      console.log(`  ✓ ${String(keyCell.v).padEnd(14)} row ${r + 1} → date requested set`);
+    if (!keyCell || !String(keyCell.v).trim()) continue;
+    const key = String(keyCell.v).trim();
+    setCell(dreq, addr(D_COL.dateReq, r + 1), "30-May-2026");
+    const received = DATA_RECEIVED.find(d => d.key === key);
+    if (received) {
+      setCell(dreq, addr(D_COL.received, r + 1), "yes");
+      setCell(dreq, addr(D_COL.dateRecv, r + 1), received.date);
+      console.log(`  ✓ ${key.padEnd(14)} row ${r + 1} → RECEIVED on ${received.date}`);
+    } else {
+      console.log(`  ✓ ${key.padEnd(14)} row ${r + 1} → date requested set (not yet received)`);
     }
   }
 } else console.warn("  ⚠ No 'Data Requests' sheet found");

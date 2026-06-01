@@ -1778,6 +1778,154 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   color: var(--ink-3);
 }
 .rw-ch-cell-vel { color: var(--ink-3); font-feature-settings: "tnum"; }
+
+/* ── Blinkit feeder-WH stats inside cells (BLK-001/002/003) ──
+   Two small tinted pills (red OOS, amber OOS-soon) shown in a/b format.
+   The whole containing cell is clickable to open the drill modal. */
+.blk-cell { cursor: pointer; transition: background 0.12s ease; }
+.blk-cell:hover { background: var(--bg-canvas); }
+.blk-feeder-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: 10.5px;
+}
+.blk-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 1px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-feature-settings: "tnum";
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border: 1px solid transparent;
+}
+.blk-stat-num { font-size: 11px; }
+.blk-stat-denom { font-size: 9.5px; opacity: 0.7; }
+.blk-stat-red {
+  background: rgba(183, 56, 56, 0.10);
+  border-color: rgba(183, 56, 56, 0.32);
+  color: var(--critical);
+}
+.blk-stat-amber {
+  background: rgba(176, 122, 31, 0.10);
+  border-color: rgba(176, 122, 31, 0.32);
+  color: var(--warning);
+}
+.blk-stub-badge {
+  font-family: var(--sans);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--bg-sunken);
+  border: 1px dashed var(--border-strong);
+  color: var(--ink-4);
+  margin-left: 2px;
+}
+
+/* ── Blinkit drill modal (BLK-004 + BLK-005) ──
+   Summary row at top + threshold editor + per-feeder-WH list. */
+.blk-modal-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+.blk-modal-summary-stat {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-canvas);
+}
+.blk-modal-summary-red   { background: rgba(183, 56, 56, 0.06);  border-color: rgba(183, 56, 56, 0.25); }
+.blk-modal-summary-amber { background: rgba(176, 122, 31, 0.06); border-color: rgba(176, 122, 31, 0.25); }
+.blk-modal-summary-ok    { background: rgba(63, 114, 80, 0.06);  border-color: rgba(63, 114, 80, 0.25);  }
+.blk-modal-summary-num {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  line-height: 1;
+}
+.blk-modal-summary-red   .blk-modal-summary-num { color: var(--critical); }
+.blk-modal-summary-amber .blk-modal-summary-num { color: var(--warning); }
+.blk-modal-summary-ok    .blk-modal-summary-num { color: var(--success); }
+.blk-modal-summary-denom { font-size: 14px; font-weight: 500; opacity: 0.6; margin-left: 2px; }
+.blk-modal-summary-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.blk-modal-threshold {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.blk-modal-threshold-label { flex: 1; min-width: 0; font-size: 12px; }
+.blk-modal-threshold-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.blk-modal-list {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.blk-modal-list-head {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+  padding: 9px 14px;
+  background: var(--bg-sunken);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-soft);
+}
+.blk-modal-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+  padding: 11px 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-soft);
+}
+.blk-modal-row:last-child { border-bottom: 0; }
+.blk-modal-row-crit  { background: rgba(183, 56, 56, 0.05);  border-left: 3px solid var(--critical); padding-left: 11px; }
+.blk-modal-row-warn  { background: rgba(176, 122, 31, 0.05); border-left: 3px solid var(--warning);  padding-left: 11px; }
+.blk-modal-row-name  { font-size: 13px; font-weight: 500; color: var(--ink); }
+.blk-modal-row-stock {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 60px;
+  text-align: right;
+}
+.blk-modal-row-crit  .blk-modal-row-stock { color: var(--critical); }
+.blk-modal-row-warn  .blk-modal-row-stock { color: var(--warning); }
+.blk-modal-row-days {
+  font-size: 11.5px;
+  min-width: 56px;
+  text-align: right;
+}
+
 .rw-ch-cell-splittag {
   font-family: var(--sans);
   font-size: 8.5px;
