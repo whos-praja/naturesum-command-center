@@ -666,11 +666,26 @@ const MaterialsTab = ({ inventory }) => {
                         {s.wb.inputs.pkg.map((p, idx) => {
                           // Bottleneck pkg row = whichever pkg has the lowest capacity
                           // AND is the binding constraint overall (PKG bottleneck on this SKU)
-                          const isMinPkg = bnPack && p.capacity === Math.min(...s.wb.inputs.pkg.map(x => x.capacity));
+                          const minCap = Math.min(...s.wb.inputs.pkg.map(x => x.capacity));
+                          const isMinPkg = bnPack && p.capacity === minCap;
+                          // Per-PKG runway = component capacity (in pack-equivalents)
+                          // ÷ SKU velocity. Each PKG component drains at the
+                          // SKU's sell-through rate, so the slowest pkg caps
+                          // the whole producible-FG runway. Per MAT-002.
+                          const days = s.velocity > 0 ? p.capacity / s.velocity : null;
+                          const rwPkgRow = days != null ? {
+                            days,
+                            status: days < 14 ? "red" : days < 30 ? "amber" : "muted",
+                            label:  days >= 60 ? `~${(days / 30).toFixed(1)}mo` : `~${Math.round(days)}d`,
+                          } : null;
                           return (
-                            <div key={p.refCode} className={"mat-pkg-row" + (isMinPkg ? " is-min" : "")} title={p.name}>
-                              <span className="mat-pkg-tag">PKG{idx + 1}</span>
-                              <span className="mat-pkg-qty mono">{D.fmtN(p.qty)}</span>
+                            <div key={p.refCode} className={"mat-pkg-row" + (isMinPkg ? " is-min" : "")} title={`${p.name} · supports ${D.fmtN(p.capacity)} packs`}>
+                              <div className="mat-pkg-row-top">
+                                <span className="mat-pkg-tag">PKG{idx + 1}</span>
+                                <span className="mat-pkg-qty mono">{D.fmtN(p.qty)}</span>
+                                {rwPkgRow && <RunwayChip rw={rwPkgRow}/>}
+                              </div>
+                              <div className="mat-pkg-name muted">{p.name}</div>
                             </div>
                           );
                         })}
@@ -1111,16 +1126,25 @@ const SimulatorTab = ({ inventory }) => {
                 <span className="sim-input-head-current">Current</span>
               </div>
             </div>
-            {[
+            {/* Input rows. Unit on Raw Material is sourced from the active
+                SKU's recipe (KG/Ltr) instead of generic "units" per SIM-001.
+                "Raw per pack" removed per SIM-002 (it's a config constant,
+                not something to simulate). "Growth %" relabelled "MoM %"
+                per SIM-004. */}
+            {(() => {
+              // Pull the active SKU's raw input unit from its recipe.
+              const rmUnit = baseline?.warehouseBreakdown?.inputs?.rm?.unit || "units";
+              const sfgUnit = baseline?.warehouseBreakdown?.inputs?.sfg?.unit || "units";
+              return [
               { k: "fg",          label: "Produced FG",  unit: "units", min: 0, max: fgMax,  step: 1 },
-              { k: "semiFg",      label: "Semi-FG",       unit: "units", min: 0, max: fgMax,  step: 1 },
-              { k: "rawMaterial", label: "Raw Material",  unit: "units", min: 0, max: fgMax * 2, step: 1 },
+              { k: "semiFg",      label: "Semi-FG",       unit: sfgUnit, min: 0, max: fgMax,  step: 1 },
+              { k: "rawMaterial", label: "Raw Material",  unit: rmUnit,  min: 0, max: fgMax * 2, step: rmUnit === "KG" || rmUnit === "Ltr" ? 0.1 : 1 },
               { k: "packaging",   label: "Packaging",     unit: "units", min: 0, max: fgMax * 1.5, step: 1 },
               { k: "velocity",    label: "Daily velocity", unit: "/day", min: 0, max: 500,    step: 1 },
               { k: "leadTime",    label: "Supplier lead time", unit: "days", min: 1, max: 120, step: 1 },
-              { k: "growth",      label: "Growth %",      unit: "%",     min: -100, max: 500, step: 1 },
-              { k: "perPacketRaw",label: "Raw per pack",  unit: "ratio", min: 0.01, max: 10,   step: 0.05 },
-            ].map(({ k, label, unit, min, max, step }) => {
+              { k: "growth",      label: "MoM %",         unit: "%",     min: -100, max: 500, step: 1 },
+              ];
+            })().map(({ k, label, unit, min, max, step }) => {
               const base = baselineState(baseline)[k];
               const delta = isDelta(k);
               const absDelta = sim[k] - base;
@@ -1184,17 +1208,10 @@ const SimulatorTab = ({ inventory }) => {
               </div>
             </div>
 
+            {/* Producible FG / Total (WH) cards removed per SIM-003 — they
+                already appear in the Inputs panel above. Keep only the
+                action-oriented outputs: when to reorder, what's the cap. */}
             <div className="sim-out-stats">
-              <div className="sim-out-stat">
-                <div className="sim-out-stat-label">Producible FG</div>
-                <div className="sim-out-stat-num mono">{D.fmtN(producibleFg)}</div>
-                <div className="sim-out-stat-sub">min(input, packaging)</div>
-              </div>
-              <div className="sim-out-stat">
-                <div className="sim-out-stat-label">Total (WH)</div>
-                <div className="sim-out-stat-num mono" style={{ color: "var(--brand-deep)" }}>{D.fmtN(maxFg)}</div>
-                <div className="sim-out-stat-sub">Produced + Producible</div>
-              </div>
               <div className="sim-out-stat">
                 <div className="sim-out-stat-label">Reorder by</div>
                 <div className={"sim-out-stat-num mono" + (overdue ? " is-overdue" : "")}>
