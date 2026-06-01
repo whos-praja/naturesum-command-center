@@ -2719,11 +2719,12 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
    number alignment, row borders, hover, severity row markers — lives
    here, so every table reads as the same family. */
 .mat-table { table-layout: fixed; width: 100%; }
-.mat-table .col-sku    { width: 18%; }
-.mat-table .col-num    { width: 10%; }
-.mat-table .col-bn     { width: 10%; }
-.mat-table .col-result { width: 11%; }
-.mat-table .col-result:last-of-type { width: 13%; }
+.mat-table .col-sku    { width: 17%; }
+.mat-table .col-num    { width: 8%;  }
+.mat-table .col-pkg    { width: 22%; }  /* Packaging cell holds PKG name + qty + runway per row — needs room */
+.mat-table .col-bn     { width: 8%;  }
+.mat-table .col-result { width: 10%; }
+.mat-table .col-result:last-of-type { width: 11%; }
 
 /* Headers — uniform 40px height, 10.5px label, right-aligned for numerics */
 .mat-table thead th {
@@ -2876,7 +2877,9 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: flex-end;
+  align-items: stretch;     /* stretch lets each row use full cell width */
+  width: 100%;
+  min-width: 0;
 }
 .mat-pkg-row {
   display: flex;
@@ -2884,6 +2887,7 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   align-items: flex-end;
   gap: 1px;
   min-width: 0;
+  width: 100%;              /* anchor 100% so children can ellipsis-truncate */
 }
 .mat-pkg-row-top {
   display: inline-flex;

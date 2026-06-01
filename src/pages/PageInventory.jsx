@@ -1246,10 +1246,10 @@ const MaterialsTab = ({ inventory }) => {
         <table className="table mat-table">
           <colgroup>
             <col className="col-sku"/>
-            <col className="col-num"/>
-            <col className="col-num"/>
-            <col className="col-num"/>
-            <col className="col-num"/>
+            <col className="col-num"/>   {/* Produced FG */}
+            <col className="col-num"/>   {/* Semi-FG    */}
+            <col className="col-num"/>   {/* Raw        */}
+            <col className="col-pkg"/>   {/* Packaging — wider to fit PKG names like "Moringa Powder Empty Pouch 100g" */}
             <col className="col-bn"/>
             <col className="col-result"/>
             <col className="col-result"/>
