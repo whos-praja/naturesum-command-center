@@ -20,6 +20,43 @@ import {
   clearAll,
   summariseStore,
 } from "../lib/multiFileStore.js";
+import { detectFileType, checkAnomalies } from "../lib/claudeHelper.js";
+import { REAL_MARKETPLACE_DATA } from "../realMarketplaceData.js";
+import { NITIN_DATA } from "../realNitinData.js";
+
+// Extract the slice of bundled real-data that matches a given file type —
+// used as the "before" baseline when Claude is asked to spot anomalies in
+// a freshly-parsed upload.
+function bundledBaselineFor(fileType) {
+  if (fileType === "nitin") {
+    return {
+      fg: NITIN_DATA?.warehouseInventory?.fg || {},
+      dailyMovement: Object.fromEntries(
+        Object.entries(NITIN_DATA?.dailyMovement?.byCode || {})
+          .map(([code, d]) => [code, d.channels])
+      ),
+    };
+  }
+  const sliceKey = {
+    "amazon-ledger": "amazon",
+    "amazon-orders": "amazon",
+    "blinkit":       "blinkit",
+    "flipkart":      "flipkart",
+    "shopify":       "shopify",
+  }[fileType];
+  if (!sliceKey) return null;
+  const out = {};
+  for (const [code, perSku] of Object.entries(REAL_MARKETPLACE_DATA)) {
+    const slice = perSku?.[sliceKey];
+    if (slice == null) continue;
+    if (fileType === "amazon-orders") {
+      out[code] = slice.orders || null;
+    } else {
+      out[code] = slice;
+    }
+  }
+  return out;
+}
 
 const ZONES = [
   { key: "nitin",          ...FILE_TYPES["nitin"] },
@@ -111,6 +148,12 @@ function UploadZone({ zone, entry, onUpdate }) {
   const [error, setError] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [dateCutoff, setDateCutoff] = useState(entry?.dataAsOf || todayISO());
+  // AI-assist state — populated asynchronously after a successful parse.
+  // aiState: "idle" | "checking" | "done" | "skipped". When the /api/
+  // endpoint is unreachable or the env key isn't set we mark "skipped"
+  // and the deterministic JS parse stands on its own.
+  const [aiState, setAiState] = useState("idle");
+  const [anomalies, setAnomalies] = useState([]);
 
   const isUploaded = !!entry;
 
@@ -118,18 +161,42 @@ function UploadZone({ zone, entry, onUpdate }) {
     if (!file) return;
     setStage("parsing");
     setError(null);
+    setAiState("idle");
+    setAnomalies([]);
+    let parsed;
     try {
-      const parsed = await parseByType(zone.key, file, { dateCutoff });
-      const updated = upsertFile(zone.key, {
-        dataAsOf: dateCutoff,
-        fileName: file.name,
-        parsed,
-      });
-      onUpdate(updated);
-      setStage("uploaded");
+      parsed = await parseByType(zone.key, file, { dateCutoff });
     } catch (e) {
-      setError(e?.message || String(e));
+      // Format-guard fallback: ask Claude to identify the file type. If it
+      // confidently disagrees with the zone the file was dropped in,
+      // surface that as the error so the user can re-route.
+      const detected = await detectFileType(file).catch(() => null);
+      const hint = detected && detected.type !== zone.key && detected.confidence > 0.7
+        ? ` — Claude thinks this is a "${detected.type}" file (${Math.round(detected.confidence * 100)}% confidence). Try the ${detected.type} zone.`
+        : "";
+      setError((e?.message || String(e)) + hint);
       setStage("error");
+      return;
+    }
+    const updated = upsertFile(zone.key, {
+      dataAsOf: dateCutoff,
+      fileName: file.name,
+      parsed,
+    });
+    onUpdate(updated);
+    setStage("uploaded");
+
+    // Kick off the post-parse anomaly check in the background. Doesn't
+    // block the UI; results land in the zone when ready.
+    setAiState("checking");
+    try {
+      const before = bundledBaselineFor(zone.key);
+      const after = (zone.key === "shopify") ? parsed.byCode : parsed;
+      const anomList = await checkAnomalies(zone.key, before, after);
+      setAnomalies(anomList);
+      setAiState(anomList === null ? "skipped" : "done");
+    } catch {
+      setAiState("skipped");
     }
   };
 
@@ -190,6 +257,23 @@ function UploadZone({ zone, entry, onUpdate }) {
                 LOADED
               </span>
             )}
+            {aiState === "checking" && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(99,102,241,0.10)", color: "#6366f1", fontWeight: 600, letterSpacing: "0.04em" }}>
+                ✨ AI CHECKING…
+              </span>
+            )}
+            {aiState === "done" && anomalies.length === 0 && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(99,102,241,0.10)", color: "#6366f1", fontWeight: 600, letterSpacing: "0.04em" }}
+                title="Claude reviewed the parsed numbers vs baseline and found nothing out-of-pattern">
+                ✨ AI-CHECKED
+              </span>
+            )}
+            {aiState === "done" && anomalies.length > 0 && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(176,122,31,0.12)", color: "var(--warning)", fontWeight: 700, letterSpacing: "0.04em" }}
+                title="Claude flagged unusual deltas vs baseline">
+                ⚠ {anomalies.length} ANOMAL{anomalies.length === 1 ? "Y" : "IES"}
+              </span>
+            )}
           </div>
           {isUploaded ? (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
@@ -204,6 +288,38 @@ function UploadZone({ zone, entry, onUpdate }) {
             <div style={{ fontSize: 11.5, color: "var(--critical)", marginTop: 4 }}>
               ⚠ {error}
             </div>
+          )}
+          {anomalies.length > 0 && (
+            <ul style={{
+              listStyle: "none", margin: "8px 0 0", padding: "8px 10px",
+              background: "rgba(176,122,31,0.06)",
+              border: "1px solid rgba(176,122,31,0.20)",
+              borderRadius: 6,
+              fontSize: 11.5,
+              color: "var(--ink-2)",
+              display: "flex", flexDirection: "column", gap: 5,
+            }}>
+              {anomalies.slice(0, 6).map((a, i) => (
+                <li key={i}>
+                  <strong style={{ color: "var(--warning)" }}>{a.sku}</strong>
+                  <span className="muted" style={{ marginLeft: 4 }}>{a.metric}:</span>
+                  <span className="mono" style={{ marginLeft: 4 }}>
+                    {String(a.oldValue)} → {String(a.newValue)}
+                    {a.ratio != null && a.ratio !== Infinity && (
+                      <span className="muted"> ({Number.isFinite(a.ratio) ? a.ratio.toFixed(1) + "×" : "—"})</span>
+                    )}
+                  </span>
+                  <span style={{ display: "block", color: "var(--ink-3)", fontSize: 10.5, marginTop: 1 }}>
+                    {a.why}
+                  </span>
+                </li>
+              ))}
+              {anomalies.length > 6 && (
+                <li className="muted" style={{ fontSize: 10.5 }}>
+                  + {anomalies.length - 6} more
+                </li>
+              )}
+            </ul>
           )}
         </div>
 
