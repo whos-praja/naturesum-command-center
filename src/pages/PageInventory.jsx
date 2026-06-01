@@ -903,7 +903,7 @@ const UnifiedStockTab = ({ inventory }) => {
             </div>
           </div>
           <div className="rw-risk-num" style={{ color: "var(--success)" }}>
-            {topMover ? `${topMover.velocity}/d` : "—"}
+            {topMover ? `${D.fmtN(topMover.velocity)}/d` : "—"}
           </div>
           <div className="rw-risk-detail">
             {topMover
@@ -1586,7 +1586,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
               <dt>FG stock value</dt>
               <dd>{D.fmtINR(wb.fg * unitCost)}</dd>
               <dt>Rolling daily velocity</dt>
-              <dd>{sku.velocity} units/day</dd>
+              <dd>{D.fmtN(sku.velocity)} units/day</dd>
               <dt>Runway (central warehouse FG)</dt>
               <dd>{Math.round(wb.fg / sku.velocity)} days</dd>
               <dt>Supplier lead time</dt>
@@ -2965,7 +2965,7 @@ const ForecastTab = ({ inventory, days, setDays }) => {
                     <div className="sku">{s.code}</div>
                   </td>
                   <td className="num mat-cell">
-                    <div className="mat-cell-num">{s.velocity}</div>
+                    <div className="mat-cell-num">{D.fmtN(s.velocity)}</div>
                   </td>
                   <td className="num mat-cell">
                     <Delta value={s.trendPct}/>

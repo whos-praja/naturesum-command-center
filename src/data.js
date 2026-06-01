@@ -13,7 +13,19 @@ const NSData = (function () {
     if (Math.abs(n) >= 1000) return "₹" + (n/1000).toFixed(1) + "K";
     return "₹" + n;
   };
-  const fmtN = (n) => n.toLocaleString("en-IN");
+  // Format a number for display. Integers render as locale-grouped ("12,345").
+  // Floats with a non-trivial fractional part render to 1 decimal place
+  // (rounded). This is a defensive guard — most call sites pass pre-rounded
+  // integers, but velocity/growth values derived from real exports are floats
+  // and we don't want "34.333333..." leaking through to a card.
+  const fmtN = (n) => {
+    if (n == null || Number.isNaN(n)) return "—";
+    const rounded = Math.round(n * 10) / 10;
+    if (Math.abs(rounded - Math.round(rounded)) < 0.05) {
+      return Math.round(rounded).toLocaleString("en-IN");
+    }
+    return rounded.toLocaleString("en-IN", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  };
   const pct = (n, d=1) => (n>=0?"+":"") + n.toFixed(d) + "%";
 
   // ── SKUs ──────────────────────────────────────────────
@@ -600,10 +612,13 @@ const NSData = (function () {
       ? (realAmazonDaily ?? 0) + (realShopifyDaily ?? 0)
       : stubChannelVelocity.amazon;
 
+    // Round to 1 decimal — velocity is a daily rate, more precision than
+    // that is noise (and leaks ugly floats like 34.333333 into cards).
+    const r1 = (n) => Math.round((n || 0) * 10) / 10;
     const channelVelocity = {
-      amazon:   amazonChannelVel,
-      flipkart: realFlipkartDaily ?? stubChannelVelocity.flipkart,
-      blinkit:  realBlinkitDaily  ?? stubChannelVelocity.blinkit,
+      amazon:   r1(amazonChannelVel),
+      flipkart: r1(realFlipkartDaily ?? stubChannelVelocity.flipkart),
+      blinkit:  r1(realBlinkitDaily  ?? stubChannelVelocity.blinkit),
     };
     // Which legs of the velocity come from real exports? UI exposes this.
     const velocitySource = {
@@ -616,12 +631,11 @@ const NSData = (function () {
     // Warehouse own velocity ≈ 0 once Shopify is folded into Amazon and
     // the SKU has full coverage, but we preserve any residual stub share.
     const stubChannelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
-    const whBaseVelocity = stubVel * Math.max(0, 1 - stubChannelShare);
+    const whBaseVelocity = r1(stubVel * Math.max(0, 1 - stubChannelShare));
     const channelTotalVel = channelVelocity.amazon + channelVelocity.flipkart + channelVelocity.blinkit;
     // If we have ANY real signal, trust the sum-of-channels. Otherwise keep ops.vel as before.
-    const vel = (velocitySource.amazon === "real" || velocitySource.flipkart === "real" || velocitySource.blinkit === "real")
-      ? channelTotalVel + whBaseVelocity
-      : stubVel;
+    const hasRealSignal = velocitySource.amazon === "real" || velocitySource.flipkart === "real" || velocitySource.blinkit === "real";
+    const vel = r1(hasRealSignal ? channelTotalVel + whBaseVelocity : stubVel);
 
     const cascadeChannels = [
       { key: "amazon",   label: "Amazon FBA", stock: totalStock.amazonFBA, velocity: channelVelocity.amazon },
@@ -667,6 +681,7 @@ const NSData = (function () {
         derivedGrowth = 200; // explicit "zero base → bookable but capped"
       }
     }
+    derivedGrowth = r1(derivedGrowth); // 1-decimal cap for display
 
     return {
       ...s,
