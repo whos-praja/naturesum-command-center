@@ -138,7 +138,10 @@ const TRACKING_UPDATES = [
   { key: "SIM-004", status: "DONE", blocker: "None", sprint: "Done", notes: "MoM % now DERIVED from real Shopify 30d vs prior-30d (60d window split) — Sprint 8, 01-Jun-2026" },
   // DATA-003 + DATA-004 (Flipkart side) closed
   { key: "DATA-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Flipkart 'Current Inventory' export with 7D/14D/30D/60D/90D sales + reserved + F-Assured ingested — 01-Jun-2026" },
-  { key: "DATA-004", status: "READY", blocker: "Amazon ASP + Blinkit MRP per SKU still pending", sprint: "Done", notes: "Flipkart selling prices wired into drill modal. Amazon ASP + Blinkit MRP per-SKU still pending — partial." },
+  // Sprint 9 — full price list (SP + MRP) wired
+  { key: "DATA-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Full SP + MRP list received from founder for all 14 SKUs and wired into SKU_PRICING. Sprint 9, 01-Jun-2026. NSSBBO15/30 SP marked TBD — using MRP as upper bound." },
+  // Sprint 10 — Nitin's live inventory sheet parsed (DATA-005)
+  { key: "DATA-005", status: "DONE", blocker: "None", sprint: "Done", notes: "Nitin's standard .xlsx ingested via scripts/import-nitin-sheet.cjs. Drives: real central WH FG stock (5-May), real 72-day Amazon/FK/Blinkit/Website/Offline/Marketing daily velocities (multi-day avg replaces 1-day Amazon proxy). Sprint 10, 01-Jun-2026." },
   // AMZ-004 sits unblocked from decisions but still awaiting drill modal
   { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern shipped in Unified Stock + Runway. Drill modal awaits DATA-002." },
 ];

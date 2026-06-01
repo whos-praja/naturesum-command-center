@@ -5,6 +5,12 @@
 // scripts/import-marketplace-data.cjs for the regeneration pipeline.
 import { REAL_MARKETPLACE_DATA, REAL_DATA_SNAPSHOT_DATE } from "./realMarketplaceData.js";
 
+// Nitin's live inventory sheet (DATA-005 sample) — 72-day per-channel
+// movement log + central warehouse stock (as of 5-May-2026). Higher
+// precedence than the marketplace ledgers for: central WH stock (real
+// physical count) and Amazon daily velocity (72-day avg beats 1-day proxy).
+import { NITIN_DATA } from "./realNitinData.js";
+
 const NSData = (function () {
   const fmtINR = (n) => {
     if (n == null) return "—";
@@ -393,17 +399,32 @@ const NSData = (function () {
     NSJO100:   55.4,         NSACDT30: -100,
   };
 
-  // Avg sell price per unit (derived from May Shopify revenue ÷ orders).
-  // Used for the Stock value column. Defaults to ₹500 if no data.
-  const SKU_PRICE = {
-    NSMP100: 254,  NSMP250: 280,
-    NSSB100: 354,  NSSB250: 550,  NSSB500: 1131,
-    NSSBDB100: 293,NSSBDB250: 517,NSSBDB500: 1043,
-    NSSBJ300: 611, NSSBJ500: 883,
-    NSSBBO15: 500, NSSBBO30: 800,
-    NSJO100:  1068,
-    NSACDT30: 975,
+  // Per-SKU pricing — Selling Price (SP) and MRP, founder-provided 01-Jun-2026
+  // (DATA-004). SP = realised selling price across channels (matches blended
+  // ASP — used for stock-value math). MRP = list / max retail price.
+  // Two SKUs (Berry Oil 15/30) have SP "TBD" — use MRP as a conservative
+  // upper-bound stand-in until SP lands.
+  const SKU_PRICING = {
+    NSMP100:   { sp: 265,  mrp: 315  },
+    NSMP250:   { sp: 495,  mrp: 625  },
+    NSSB100:   { sp: 450,  mrp: 500  },   // user code: NSSBP100
+    NSSB250:   { sp: 750,  mrp: 880  },   // user code: NSSBP250
+    NSSB500:   { sp: 1350, mrp: 1550 },   // user code: NSSBP500
+    NSSBDB100: { sp: 390,  mrp: 520  },
+    NSSBDB250: { sp: 690,  mrp: 920  },
+    NSSBDB500: { sp: 1150, mrp: 1550 },
+    NSSBJ300:  { sp: 690,  mrp: 920  },
+    NSSBJ500:  { sp: 1100, mrp: 1300 },
+    NSSBBO15:  { sp: null, mrp: 1250 },   // SP TBD — using MRP as upper bound
+    NSSBBO30:  { sp: null, mrp: 1920 },   // SP TBD — using MRP as upper bound
+    NSJO100:   { sp: 1350, mrp: 1500 },
+    NSACDT30:  { sp: 975,  mrp: 1150 },
   };
+  // Back-compat: existing call sites read `SKU_PRICE[code]` as a flat number.
+  // Keep that working by exposing the SP (or MRP fallback for TBD SKUs).
+  const SKU_PRICE = Object.fromEntries(
+    Object.entries(SKU_PRICING).map(([code, p]) => [code, p.sp ?? p.mrp ?? 500])
+  );
 
   // What each SKU is listed as on each marketplace / channel. Pulled from
   // the actual sheet exports (Amazon/FK/Blinkit category reports + the
@@ -481,7 +502,12 @@ const NSData = (function () {
   }
 
   const inventory = skus.map((s) => {
-    const ops = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
+    const opsRaw = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
+    // Override central WH FG stock with Nitin's real physical count when
+    // available (5-May-2026 snapshot). Falls back to stub for any SKU not
+    // in the sheet.
+    const nitinFg = NITIN_DATA?.warehouseInventory?.fg?.[s.code];
+    const ops = nitinFg != null ? { ...opsRaw, fg: nitinFg } : opsRaw;
     const recipe = SKU_RECIPE[s.code];
     const ch = CHANNEL_MIX[s.code] || { amazon: 0, shopify: 0, flipkart: 0, blinkit: 0 };
     const totalChUnits = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) || 0;
@@ -600,10 +626,25 @@ const NSData = (function () {
       flipkart: stubVel * (ch.flipkart / denomUnits),
       blinkit:  stubVel * (ch.blinkit  / denomUnits),
     };
-    const realAmazonDaily   = real.amazon?.totalShippedToday   ?? null; // 1-day FBA shipments
-    const realShopifyDaily  = real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null;
-    const realFlipkartDaily = real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null;
-    const realBlinkitDaily  = real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null;
+    // Nitin's 72-day daily movement log — preferred when present because
+    // it's a multi-day average instead of the 1-day Amazon proxy (and gives
+    // us "offline" + "marketing" demand legs the marketplace exports miss).
+    const nitinCh = NITIN_DATA?.dailyMovement?.byCode?.[s.code]?.channels;
+    const nitinAmazonDaily   = nitinCh?.amazon?.dailyOut;
+    const nitinFlipkartDaily = nitinCh?.flipkart?.dailyOut;
+    const nitinBlinkitDaily  = nitinCh?.blinkit?.dailyOut;
+    const nitinWebsiteDaily  = nitinCh?.website?.dailyOut;
+    const nitinOfflineDaily  = nitinCh?.offline?.dailyOut;
+    const nitinMarketingDaily= nitinCh?.marketing?.dailyOut;
+
+    // Preference order: Nitin 72-day avg > marketplace 30-day > 1-day proxy.
+    const realAmazonDaily   = nitinAmazonDaily   ?? real.amazon?.totalShippedToday   ?? null;
+    const realShopifyDaily  = nitinWebsiteDaily  ?? (real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null);
+    const realFlipkartDaily = nitinFlipkartDaily ?? (real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null);
+    const realBlinkitDaily  = nitinBlinkitDaily  ?? (real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null);
+    // Offline + marketing demand the marketplace ledgers don't capture —
+    // gets added to central WH base velocity so total runway accounts for it.
+    const extraOffMktDaily  = (nitinOfflineDaily ?? 0) + (nitinMarketingDaily ?? 0);
 
     // For Amazon channel: combine real Amazon + real Shopify when either
     // has signal; otherwise fall back to the stub combined value.
@@ -631,7 +672,9 @@ const NSData = (function () {
     // Warehouse own velocity ≈ 0 once Shopify is folded into Amazon and
     // the SKU has full coverage, but we preserve any residual stub share.
     const stubChannelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
-    const whBaseVelocity = r1(stubVel * Math.max(0, 1 - stubChannelShare));
+    // Warehouse base velocity = whatever isn't claimed by marketplaces +
+    // Nitin's offline + marketing demand (shipped from central WH directly).
+    const whBaseVelocity = r1(stubVel * Math.max(0, 1 - stubChannelShare) + extraOffMktDaily);
     const channelTotalVel = channelVelocity.amazon + channelVelocity.flipkart + channelVelocity.blinkit;
     // If we have ANY real signal, trust the sum-of-channels. Otherwise keep ops.vel as before.
     const hasRealSignal = velocitySource.amazon === "real" || velocitySource.flipkart === "real" || velocitySource.blinkit === "real";
@@ -714,6 +757,11 @@ const NSData = (function () {
       runway,
       runwayStatus,
       stockValue:  total * price,
+      // Founder-provided pricing (DATA-004). pricing.sp is the realised
+      // selling price (matches what we book in stockValue); pricing.mrp is
+      // the list price. Two SKUs (Berry Oil 15/30) have sp=null because
+      // SP is TBD — UI should fall back to MRP for those.
+      pricing:     SKU_PRICING[s.code] || { sp: price, mrp: price },
     };
   });
 
@@ -907,6 +955,10 @@ const NSData = (function () {
     trend30, alerts, skuSales, inventory, itemUsedBy, batches, suppliers, poLog,
     blinkitFeederWhs: BLINKIT_FEEDER_WHS,
     realDataSnapshotDate: REAL_DATA_SNAPSHOT_DATE,
+    nitinSheetSnapshot: {
+      warehouseAsOf: NITIN_DATA?.warehouseInventory?.asOf ?? null,
+      movementDays:  NITIN_DATA?.dailyMovement?.days ?? 0,
+    },
     adAccounts, googleCampaigns, metaCampaigns, influencers,
     marketplaceAmazon, recentReviews,
     costCards, pnl, cashflow, launches,
