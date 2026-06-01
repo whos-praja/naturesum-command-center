@@ -127,6 +127,8 @@ const TRACKING_UPDATES = [
   // Sprint 6 — Amazon cascade UI (AMZ-003 + AMZ-004) — real FBA per-FC data wired
   { key: "AMZ-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-FC OOS counts in Amazon cell + drill modal — per-FC stock, customer shipments, damaged disposition — 01-Jun-2026" },
   { key: "AMZ-004", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal now shows real FBA + MCF split (32-day orders feed) — Sprint 11, 01-Jun-2026" },
+  // AMZ-002 (Amazon cell shows FBA + MCF combined) effectively shipped via AMZ-003 + AMZ-004 + Sprint 11 MCF feed
+  { key: "AMZ-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Closed via AMZ-003 (per-FC cell) + AMZ-004 (drill split) + Sprint 11 (MCF orders 32-day feed). The Amazon cell + drill modal now show FBA + MCF combined with real numbers — 01-Jun-2026" },
   // DATA-002 closed — Amazon orders report ingested, FBA + MCF daily split now live
   { key: "DATA-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Amazon 'Manage Orders' 32-day feed ingested (2052 orders). FBA + MCF daily split now drives AMZ-004 drill modal velocity decomposition. Sprint 11, 01-Jun-2026." },
   // Sprint 7 — Flipkart drill (FK-001 + FK-002 superseded for single-WH case)
