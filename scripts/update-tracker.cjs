@@ -124,6 +124,17 @@ const TRACKING_UPDATES = [
   { key: "BLK-005", status: "DONE", blocker: "None", sprint: "Done", notes: "Editable amber threshold (default 25, persisted per-SKU in localStorage) — 01-Jun-2026" },
   // DATA-001 satisfied — Blinkit Seller Panel export landed and wired
   { key: "DATA-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Blinkit feeder-WH 'Stock On Hand' export ingested via scripts/import-marketplace-data.cjs — 01-Jun-2026" },
+  // Sprint 6 — Amazon cascade UI (AMZ-003 + AMZ-004) — real FBA per-FC data wired
+  { key: "AMZ-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-FC OOS counts in Amazon cell + drill modal — per-FC stock, customer shipments, damaged disposition — 01-Jun-2026" },
+  { key: "AMZ-004", status: "DONE", blocker: "MCF orders still pending (DATA-002 partial)", sprint: "Done", notes: "Velocity decomposition (amz + d2c) in drill modal. MCF orders share will refine when DATA-002 MCF export arrives — 01-Jun-2026" },
+  // DATA-002 unblocked AMZ-003 fully; AMZ-004 partial (MCF orders still pending)
+  { key: "DATA-002", status: "READY", blocker: "MCF orders report still pending from Amazon", sprint: "Done", notes: "FBA inventory side: ingested 01-Jun-2026. MCF orders report still pending — partial." },
+  // Sprint 7 — Flipkart drill (FK-001 + FK-002 superseded for single-WH case)
+  { key: "FK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal: 7d/14d/30d/60d/90d avg daily trend, reserved + scheduled, F-Assured badge, real price — 01-Jun-2026" },
+  { key: "FK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Single-WH (Gurgaon Sandila) → OOS-count indicator is degenerate. Replaced with cell-level health pill: live count + days-of-cover + F-Assured chip — 01-Jun-2026" },
+  // DATA-003 + DATA-004 (Flipkart side) closed
+  { key: "DATA-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Flipkart 'Current Inventory' export with 7D/14D/30D/60D/90D sales + reserved + F-Assured ingested — 01-Jun-2026" },
+  { key: "DATA-004", status: "READY", blocker: "Amazon ASP + Blinkit MRP per SKU still pending", sprint: "Done", notes: "Flipkart selling prices wired into drill modal. Amazon ASP + Blinkit MRP per-SKU still pending — partial." },
   // AMZ-004 sits unblocked from decisions but still awaiting drill modal
   { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern shipped in Unified Stock + Runway. Drill modal awaits DATA-002." },
 ];

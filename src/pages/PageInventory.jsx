@@ -313,6 +313,389 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
   );
 };
 
+// ─────────────────────────────────────────────────────────────
+// Amazon FBA per-FC helpers (AMZ-003 + AMZ-004)
+// ─────────────────────────────────────────────────────────────
+// Maps the FC codes that appear in the Amazon ledger to a friendly name +
+// city. New FCs that show up in future exports get a sensible fallback.
+const AMZ_FC_META = {
+  BOM5: { name: "Bhiwandi (BOM5)", city: "Mumbai"     },
+  BOM7: { name: "Bhiwandi (BOM7)", city: "Mumbai"     },
+  CCX1: { name: "Bhiwandi (CCX1)", city: "Mumbai"     },
+  CCX2: { name: "Bhiwandi (CCX2)", city: "Mumbai"     },
+  CJB1: { name: "Coimbatore",      city: "Coimbatore" },
+  DED3: { name: "Delhi East 3",    city: "Delhi NCR"  },
+  DED4: { name: "Delhi East 4",    city: "Delhi NCR"  },
+  DEL4: { name: "Delhi NCR 4",     city: "Delhi NCR"  },
+  DEL5: { name: "Delhi NCR 5",     city: "Delhi NCR"  },
+  MAA4: { name: "Chennai",         city: "Chennai"    },
+  PNQ3: { name: "Pune",            city: "Pune"       },
+};
+function amzFcMeta(code) {
+  return AMZ_FC_META[code] || { name: code, city: "—" };
+}
+
+// Per-FC daily velocity for Amazon. Real per-FC velocity isn't in the
+// snapshot (we only have one day of ledger), so we estimate by splitting
+// the SKU's overall Amazon channel velocity proportionally across FCs by
+// current sellable. Falls back to a flat split if total is zero.
+function amzPerFcDailyVel(sku, fcCode) {
+  const real = sku.realData?.amazon;
+  if (!real?.byFc) return 0;
+  const totalSellable = real.totalSellable || 0;
+  const fcSellable    = real.byFc[fcCode]?.sellable ?? 0;
+  const amzChVel      = sku?.channelVelocity?.amazon ?? 0;
+  if (totalSellable <= 0) {
+    const nFcs = Object.keys(real.byFc).length || 1;
+    return amzChVel / nFcs;
+  }
+  return amzChVel * (fcSellable / totalSellable);
+}
+
+// FC-level stats for a SKU's Amazon FBA cell. Mirrors blkFeederStats:
+// "red" = OOS now, "amber" = ≤14d days-of-cover OR low absolute stock.
+function amzFcStats(sku) {
+  const real = sku.realData?.amazon;
+  if (!real?.byFc) return { red: 0, orange: 0, healthy: 0, ever: 0, hasReal: false };
+  const fcs = Object.keys(real.byFc);
+  let red = 0, orange = 0;
+  for (const fcCode of fcs) {
+    const stock = real.byFc[fcCode]?.sellable ?? 0;
+    if (stock <= 0) { red++; continue; }
+    const vel = amzPerFcDailyVel(sku, fcCode);
+    if (vel > 0 && stock / vel <= 14) orange++;
+    else if (stock <= 10) orange++; // very low absolute threshold for FCs
+  }
+  return { red, orange, healthy: fcs.length - red - orange, ever: fcs.length, hasReal: true };
+}
+
+// Compact two-stat caption for the Amazon FBA cell — same shape as Blinkit.
+const AmazonFcStats = ({ sku }) => {
+  const { red, orange, ever, hasReal } = amzFcStats(sku);
+  if (!hasReal) return <span className="muted" style={{ fontSize: 10.5 }}>—</span>;
+  if (!ever)    return <span className="muted" style={{ fontSize: 10.5 }}>not on FBA</span>;
+  return (
+    <div className="blk-feeder-stats">
+      <span className="blk-stat blk-stat-red"
+        title={`${red} of ${ever} FBA fulfillment centers are out of stock right now`}>
+        <span className="blk-stat-num">{red}</span>
+        <span className="blk-stat-denom">/{ever}</span>
+      </span>
+      <span className="blk-stat blk-stat-amber"
+        title={`${orange} of ${ever} FBA FCs will run out in ≤14d at their share of velocity`}>
+        <span className="blk-stat-num">{orange}</span>
+        <span className="blk-stat-denom">/{ever}</span>
+      </span>
+    </div>
+  );
+};
+
+// Drill modal — per-FC stock list with daily customer shipments + damaged
+// + velocity decomposition (Amazon orders vs Shopify D2C per AMZ-001).
+const AmazonFcModal = ({ sku, onClose }) => {
+  const D = NSData;
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const real = sku.realData?.amazon;
+  const sp   = sku.splits || {};
+  const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+  const amzVel = sku.velocity * ((sp.amazon  || 0) / revTotal);
+  const shpVel = sku.velocity * ((sp.shopify || 0) / revTotal);
+  const totalAmzCh = amzVel + shpVel;
+
+  const rows = real?.byFc
+    ? Object.entries(real.byFc)
+        .map(([fcCode, d]) => {
+          const meta = amzFcMeta(fcCode);
+          const stock = d.sellable || 0;
+          const vel = amzPerFcDailyVel(sku, fcCode);
+          const days = vel > 0 ? Math.round(stock / vel) : null;
+          let severity = "ok";
+          if (stock <= 0) severity = "crit";
+          else if (vel > 0 && stock / vel <= 14) severity = "warn";
+          else if (stock <= 10) severity = "warn";
+          return { fcCode, meta, stock, damaged: d.damaged || 0, shipped: d.shipped || 0, days, severity };
+        })
+        .sort((a, b) => a.stock - b.stock)
+    : [];
+
+  const stats = amzFcStats(sku);
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(720px, 92vw)" }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">
+              <span style={{ background: "rgba(228, 121, 17, 0.12)", color: "#C45A0A", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, marginRight: 8, letterSpacing: "0.06em" }}>AMAZON</span>
+              {sku.name}
+            </div>
+            <div className="modal-sub sku">
+              {sku.code} · {sku.variant} ·{" "}
+              {real ? `live · snapshot ${D.realDataSnapshotDate}` : "no real data"}
+            </div>
+          </div>
+          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+        </div>
+
+        <div className="modal-body">
+          {/* Summary row */}
+          {real && (
+            <div className="blk-modal-summary">
+              <div className="blk-modal-summary-stat blk-modal-summary-red">
+                <div className="blk-modal-summary-num mono">{stats.red}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+                <div className="blk-modal-summary-label">out of stock</div>
+              </div>
+              <div className="blk-modal-summary-stat blk-modal-summary-amber">
+                <div className="blk-modal-summary-num mono">{stats.orange}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+                <div className="blk-modal-summary-label">running low</div>
+              </div>
+              <div className="blk-modal-summary-stat blk-modal-summary-ok">
+                <div className="blk-modal-summary-num mono">{stats.healthy}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
+                <div className="blk-modal-summary-label">healthy</div>
+              </div>
+            </div>
+          )}
+
+          {/* Velocity decomposition — AMZ-001 split (Amazon + Shopify combined) */}
+          <div className="blk-modal-threshold" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+            <div className="blk-modal-threshold-label" style={{ width: "100%" }}>
+              <strong>Velocity decomposition</strong>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                Amazon FBA serves both Amazon orders + Shopify D2C (AMZ-001 split).
+              </div>
+            </div>
+            <div className="mono" style={{ fontSize: 12 }}>
+              <span style={{ color: "var(--ink-2)" }}>{amzVel.toFixed(1)}</span>
+              <span className="muted" style={{ marginLeft: 4 }}>/d Amazon orders</span>
+              <span className="muted" style={{ margin: "0 6px" }}>+</span>
+              <span style={{ color: "var(--ink-2)" }}>{shpVel.toFixed(1)}</span>
+              <span className="muted" style={{ marginLeft: 4 }}>/d Shopify D2C</span>
+              <span className="muted" style={{ margin: "0 6px" }}>=</span>
+              <span style={{ color: "var(--ink)", fontWeight: 600 }}>{totalAmzCh.toFixed(1)}</span>
+              <span className="muted" style={{ marginLeft: 4 }}>/d total</span>
+            </div>
+          </div>
+
+          {/* Per-FC list */}
+          <div className="blk-modal-list">
+            <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+              <span>Fulfillment center</span>
+              <span style={{ textAlign: "right" }}>Stock</span>
+              <span style={{ textAlign: "right" }}>Shipped*</span>
+              <span style={{ textAlign: "right" }}>Days</span>
+            </div>
+            {rows.length === 0 && (
+              <div className="muted" style={{ padding: "20px 12px", textAlign: "center" }}>
+                Not active on any Amazon FBA fulfillment center.
+              </div>
+            )}
+            {rows.map(({ fcCode, meta, stock, damaged, shipped, days, severity }) => (
+              <div key={fcCode} className={`blk-modal-row blk-modal-row-${severity}`} style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                <div className="blk-modal-row-wh">
+                  <div className="blk-modal-row-name">{meta.name}</div>
+                  <div className="sku" style={{ fontSize: 10.5 }}>
+                    {fcCode} · {meta.city}
+                    {damaged > 0 && <span style={{ marginLeft: 6, color: "var(--critical)" }}>· {damaged} damaged</span>}
+                  </div>
+                </div>
+                <div className="blk-modal-row-stock mono">{D.fmtN(stock)}</div>
+                <div className="blk-modal-row-days mono muted">{shipped > 0 ? `+${shipped}` : "—"}</div>
+                <div className="blk-modal-row-days mono muted">{days == null ? "—" : `${days}d`}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {real
+              ? `Source: Amazon FBA "Warehouse-Wise Ledger" export (snapshot ${D.realDataSnapshotDate}). *Shipped = customer shipments on that single day; multi-day velocity awaits historical exports. MCF orders still pending (DATA-002).`
+              : "No Amazon FBA data — stub fallback in use."}
+          </span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Flipkart drill (FK-001)
+// ─────────────────────────────────────────────────────────────
+// Flipkart only has one warehouse (gur_san_wh_nl_01nl, Gurgaon Sandila NL)
+// for our account so the per-WH OOS-count pattern doesn't apply. Instead
+// the cell shows a compact health pill and the drill modal shows the
+// 5-window sales trend + reserved/scheduled + F-Assured + real price.
+const FlipkartHealthPill = ({ sku }) => {
+  const fk = sku.realData?.flipkart;
+  if (!fk) return <span className="muted" style={{ fontSize: 10.5 }}>—</span>;
+  const live = fk.live || 0;
+  const daily30 = (fk.sales30d || 0) / 30;
+  const days = daily30 > 0 ? Math.floor(live / daily30) : null;
+  let tier = "ok", label = "healthy";
+  if (live <= 0) { tier = "red";   label = "out of stock"; }
+  else if (days != null && days <= 7)  { tier = "red";   label = `${days}d cover`; }
+  else if (days != null && days <= 21) { tier = "amber"; label = `${days}d cover`; }
+  return (
+    <div className="blk-feeder-stats">
+      <span className={`blk-stat blk-stat-${tier === "ok" ? "amber" : tier}`}
+        style={tier === "ok" ? { background: "rgba(63, 114, 80, 0.10)", borderColor: "rgba(63, 114, 80, 0.32)", color: "var(--success)" } : {}}
+        title={`Live: ${live} units · 30-day sales: ${fk.sales30d} · ${days != null ? `${days}d cover` : "—"}`}>
+        <span className="blk-stat-num" style={{ fontFamily: "var(--sans)", fontSize: 9.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</span>
+      </span>
+      {fk.isFAssured && (
+        <span className="blk-stub-badge"
+          style={{ background: "rgba(40, 116, 240, 0.10)", borderStyle: "solid", borderColor: "rgba(40, 116, 240, 0.32)", color: "#2874F0" }}
+          title="F-Assured badge active">F-ASSR</span>
+      )}
+    </div>
+  );
+};
+
+const FlipkartDrillModal = ({ sku, onClose }) => {
+  const D = NSData;
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const fk = sku.realData?.flipkart;
+  if (!fk) return null;
+
+  // Average daily sales across 5 windows. Each value = total / window-days.
+  const windows = [
+    { label: "7d",  days:  7, total: fk.sales7d  },
+    { label: "14d", days: 14, total: fk.sales14d },
+    { label: "30d", days: 30, total: fk.sales30d },
+    { label: "60d", days: 60, total: fk.sales60d },
+    { label: "90d", days: 90, total: fk.sales90d },
+  ].map(w => ({ ...w, daily: w.total / w.days }));
+  const maxDaily = Math.max(0.1, ...windows.map(w => w.daily));
+
+  const live = fk.live || 0;
+  const daily30 = (fk.sales30d || 0) / 30;
+  const days = daily30 > 0 ? Math.floor(live / daily30) : null;
+  const trend7vs30 = windows[0].daily - windows[2].daily; // 7d daily vs 30d daily
+  const trendPct = windows[2].daily > 0 ? (trend7vs30 / windows[2].daily) * 100 : 0;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(680px, 92vw)" }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">
+              <span style={{ background: "rgba(40, 116, 240, 0.12)", color: "#2874F0", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, marginRight: 8, letterSpacing: "0.06em" }}>FLIPKART</span>
+              {sku.name}
+            </div>
+            <div className="modal-sub sku">
+              {sku.code} · {sku.variant} · live · snapshot {D.realDataSnapshotDate}
+            </div>
+          </div>
+          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+        </div>
+
+        <div className="modal-body">
+          {/* Stock summary */}
+          <div className="blk-modal-summary">
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(live)}</div>
+              <div className="blk-modal-summary-label">live on website</div>
+            </div>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(fk.reservedOrders + fk.reservedInt)}</div>
+              <div className="blk-modal-summary-label">reserved</div>
+            </div>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
+                {days != null ? `${days}d` : "—"}
+              </div>
+              <div className="blk-modal-summary-label">days of cover</div>
+            </div>
+          </div>
+
+          {/* Sales trend across 5 windows */}
+          <div className="blk-modal-threshold" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+            <div className="blk-modal-threshold-label">
+              <strong>Sales velocity trend</strong>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                Average daily units sold across rolling windows. {Math.abs(trendPct) >= 5
+                  ? `7-day pace is ${trendPct > 0 ? "+" : ""}${trendPct.toFixed(0)}% vs the 30-day average — ${trendPct > 0 ? "accelerating" : "decelerating"}.`
+                  : "7-day pace is stable vs 30-day average."}
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+              {windows.map(w => {
+                const heightPx = Math.max(4, Math.round((w.daily / maxDaily) * 60));
+                return (
+                  <div key={w.label} style={{ textAlign: "center" }}>
+                    <div style={{ height: 60, display: "flex", alignItems: "flex-end", justifyContent: "center", marginBottom: 4 }}>
+                      <div style={{
+                        width: "60%",
+                        height: heightPx,
+                        background: "linear-gradient(180deg, #2874F0 0%, rgba(40, 116, 240, 0.5) 100%)",
+                        borderRadius: "3px 3px 0 0",
+                      }}/>
+                    </div>
+                    <div className="mono" style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)" }}>{w.daily.toFixed(1)}</div>
+                    <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>{w.label} avg</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Inventory state detail */}
+          <div className="blk-modal-list">
+            <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr auto" }}>
+              <span>State</span>
+              <span style={{ textAlign: "right" }}>Units</span>
+            </div>
+            {[
+              { label: "Live on website",       value: fk.live              },
+              { label: "Reserved (orders)",     value: fk.reservedOrders    },
+              { label: "Reserved (internal)",   value: fk.reservedInt       },
+              { label: "Incoming transfers",    value: fk.transferIncoming  },
+              { label: "Damaged",               value: fk.damaged           , danger: true },
+            ].map(({ label, value, danger }) => (
+              <div key={label} className="blk-modal-row" style={{ gridTemplateColumns: "1fr auto", padding: "9px 14px" }}>
+                <div className="blk-modal-row-name">{label}</div>
+                <div className="blk-modal-row-stock mono" style={{ color: danger && value > 0 ? "var(--critical)" : "var(--ink)", fontWeight: value > 0 ? 600 : 400 }}>{D.fmtN(value)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Pricing + meta */}
+          <div className="blk-modal-threshold" style={{ alignItems: "flex-start" }}>
+            <div className="blk-modal-threshold-label" style={{ flex: 1 }}>
+              <strong>Selling price</strong>
+              <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                Listed price on Flipkart · {fk.fulfilmentType || "—"}
+                {fk.isFAssured && <span style={{ marginLeft: 6, color: "#2874F0", fontWeight: 600 }}>· F-Assured</span>}
+              </div>
+            </div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>
+              ₹{D.fmtN(fk.sellingPrice)}
+            </div>
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            Source: Flipkart Seller Hub "Current Inventory" export · single WH (Gurgaon {fk.warehouseId})
+          </span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── PlatformCell — one channel's stock + runway + velocity + growth stack ──
 // Used inside the Unified Stock table for every location column. Renders:
 //   1. Units on hand (hero) — with an optional inline breakdown caption to
@@ -395,7 +778,9 @@ const UnifiedStockTab = ({ inventory }) => {
 
   // Clicking any SKU row opens the breakdown popover.
   const [popoverSku, setPopoverSku] = useState(null);
-  const [blinkitDrillSku, setBlinkitDrillSku] = useState(null);
+  const [blinkitDrillSku,  setBlinkitDrillSku]  = useState(null);
+  const [amazonDrillSku,   setAmazonDrillSku]   = useState(null);
+  const [flipkartDrillSku, setFlipkartDrillSku] = useState(null);
   const navigate = useNavigate();
 
   // ── Filter state ────────────────────────────────────────────
@@ -678,25 +1063,41 @@ const UnifiedStockTab = ({ inventory }) => {
                       growth={s.growth}
                     />
                   </td>
-                  <td className="num mat-cell">
-                    <PlatformCell
-                      units={s.stock.amazonFBA}
-                      velocity={vel.amazonFBA}
-                      growth={s.growth}
-                      breakdown={
-                        <>
-                          <span className="pf-cell-bd-num mono">{amazonOwnVel.toFixed(1)}</span>
-                          <span className="pf-cell-bd-tag">amz</span>
-                          <span className="pf-cell-bd-op">+</span>
-                          <span className="pf-cell-bd-num mono">{shopifyOwnVel.toFixed(1)}</span>
-                          <span className="pf-cell-bd-tag">d2c</span>
-                        </>
-                      }
-                      breakdownLabel={`Amazon FBA serves both Amazon orders (${amazonOwnVel.toFixed(1)}/d) + Shopify D2C (${shopifyOwnVel.toFixed(1)}/d)`}
-                    />
+                  {/* AMZ-003: stock + per-FC OOS counts. AMZ-004: drill modal
+                      includes velocity decomposition (amz + d2c per AMZ-001).
+                      Whole cell clickable when real FBA data is present. */}
+                  <td
+                    className={"num mat-cell" + (s.realData?.amazon ? " blk-cell" : "")}
+                    onClick={(e) => {
+                      if (!s.realData?.amazon) return;
+                      e.stopPropagation();
+                      setAmazonDrillSku(s);
+                    }}
+                  >
+                    <div className="pf-cell">
+                      <div className="pf-cell-units-row">
+                        <div className="pf-cell-units mono">{D.fmtN(s.stock.amazonFBA)}</div>
+                      </div>
+                      <AmazonFcStats sku={s}/>
+                    </div>
                   </td>
-                  <td className="num mat-cell">
-                    <PlatformCell units={s.stock.flipkart} velocity={vel.flipkart} growth={s.growth}/>
+                  {/* FK-001: clickable cell w/ Flipkart health pill +
+                      F-Assured badge. Drill modal shows trend, reserved,
+                      F-Assured, real price. */}
+                  <td
+                    className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
+                    onClick={(e) => {
+                      if (!s.realData?.flipkart) return;
+                      e.stopPropagation();
+                      setFlipkartDrillSku(s);
+                    }}
+                  >
+                    <div className="pf-cell">
+                      <div className="pf-cell-units-row">
+                        <div className="pf-cell-units mono">{D.fmtN(s.stock.flipkart)}</div>
+                      </div>
+                      <FlipkartHealthPill sku={s}/>
+                    </div>
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
                     {/* BLK-001 + BLK-002: stock headline + a/b feeder-WH counts
@@ -724,11 +1125,11 @@ const UnifiedStockTab = ({ inventory }) => {
         <div className="table-footnote">
           <span className="footnote-ref">*</span>
           <span>
-            Amazon FBA, Flipkart and Blinkit numbers are placeholders. Per-channel velocity
-            is currently estimated from the SKU's 30-day revenue mix and growth is mirrored
-            from the SKU's overall MoM — once each marketplace integration is wired up, these
-            values will be replaced with the real per-channel figures. For the FG / Semi-FG /
-            Raw / Packaging split, click any Item row or {" "}
+            Amazon FBA, Flipkart and Blinkit numbers come from real marketplace exports
+            (snapshot {NSData.realDataSnapshotDate}) — click any cell to drill into per-warehouse
+            stock. Per-channel velocity is still estimated from the SKU's 30-day revenue mix
+            while MCF orders (Amazon) and historical multi-day ledgers are pending. For the
+            FG / Semi-FG / Raw / Packaging split, click any Item row or {" "}
             <button className="link-btn" onClick={() => navigate("/inventory/materials")}>
               open the Materials breakdown
             </button>.
@@ -741,6 +1142,12 @@ const UnifiedStockTab = ({ inventory }) => {
       )}
       {blinkitDrillSku && (
         <BlinkitFeederModal sku={blinkitDrillSku} onClose={() => setBlinkitDrillSku(null)}/>
+      )}
+      {amazonDrillSku && (
+        <AmazonFcModal sku={amazonDrillSku} onClose={() => setAmazonDrillSku(null)}/>
+      )}
+      {flipkartDrillSku && (
+        <FlipkartDrillModal sku={flipkartDrillSku} onClose={() => setFlipkartDrillSku(null)}/>
       )}
     </>
   );
@@ -2036,7 +2443,9 @@ const RunwayTab = ({ inventory: rawInventory }) => {
 
   const [statusFilter, setStatusFilter] = useState("all"); // all | red | amber | green
   const [popoverSku, setPopoverSku] = useState(null);
-  const [blinkitDrillSku, setBlinkitDrillSku] = useState(null);
+  const [blinkitDrillSku,  setBlinkitDrillSku]  = useState(null);
+  const [amazonDrillSku,   setAmazonDrillSku]   = useState(null);
+  const [flipkartDrillSku, setFlipkartDrillSku] = useState(null);
 
   // Per-row growth input change handler
   const setGrowthFor = (code, val) => {
@@ -2317,20 +2726,51 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                   </td>
 
                   {/* 5-7. Marketplace channels */}
-                  <td className="num mat-cell">
-                    <RunwayChannelCell
-                      units={s.stock.amazonFBA}
-                      vel={s.chVel.amazonFBA}
-                      leadTime={s.chLead.amazonFBA}
-                      growth={s.actualGrowth}
-                      splitA={s.chVel._amazonOnly}
-                      splitB={s.chVel._shopifyOnly}
-                      splitALabel="amz"
-                      splitBLabel="d2c"
-                    />
+                  {/* AMZ-003 (Runway tab): stock + per-FC OOS counts when real
+                      FBA data is present; falls back to the existing velocity
+                      breakdown cell otherwise. */}
+                  <td
+                    className={"num mat-cell" + (s.realData?.amazon ? " blk-cell" : "")}
+                    onClick={(e) => {
+                      if (!s.realData?.amazon) return;
+                      e.stopPropagation();
+                      setAmazonDrillSku(s);
+                    }}
+                  >
+                    {s.realData?.amazon ? (
+                      <div className="rw-ch-cell">
+                        <div className="rw-ch-cell-stock mono">{D.fmtN(s.stock.amazonFBA)}</div>
+                        <AmazonFcStats sku={s}/>
+                      </div>
+                    ) : (
+                      <RunwayChannelCell
+                        units={s.stock.amazonFBA}
+                        vel={s.chVel.amazonFBA}
+                        leadTime={s.chLead.amazonFBA}
+                        growth={s.actualGrowth}
+                        splitA={s.chVel._amazonOnly}
+                        splitB={s.chVel._shopifyOnly}
+                        splitALabel="amz"
+                        splitBLabel="d2c"
+                      />
+                    )}
                   </td>
-                  <td className="num mat-cell">
-                    <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
+                  <td
+                    className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
+                    onClick={(e) => {
+                      if (!s.realData?.flipkart) return;
+                      e.stopPropagation();
+                      setFlipkartDrillSku(s);
+                    }}
+                  >
+                    {s.realData?.flipkart ? (
+                      <div className="rw-ch-cell">
+                        <div className="rw-ch-cell-stock mono">{D.fmtN(s.stock.flipkart)}</div>
+                        <FlipkartHealthPill sku={s}/>
+                      </div>
+                    ) : (
+                      <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
+                    )}
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
                     {/* BLK-003: Runway tab Blinkit cell mirrors Unified Stock.
@@ -2371,6 +2811,12 @@ const RunwayTab = ({ inventory: rawInventory }) => {
       )}
       {blinkitDrillSku && (
         <BlinkitFeederModal sku={blinkitDrillSku} onClose={() => setBlinkitDrillSku(null)}/>
+      )}
+      {amazonDrillSku && (
+        <AmazonFcModal sku={amazonDrillSku} onClose={() => setAmazonDrillSku(null)}/>
+      )}
+      {flipkartDrillSku && (
+        <FlipkartDrillModal sku={flipkartDrillSku} onClose={() => setFlipkartDrillSku(null)}/>
       )}
     </>
   );
