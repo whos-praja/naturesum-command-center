@@ -710,11 +710,16 @@ const NSData = (function () {
     // CHANNEL_MIX-style numbers continue to work. Real numbers replace
     // stub for any channel with real signal; the rest fall back to the
     // hardcoded May-2026 mix.
+    // Splits express units/30d. We multiply the per-channel daily rate by 30
+    // rather than reading `real.<channel>.<sales-field>` directly — because
+    // `realFooDaily` may have come from Nitin's daily-movement log even when
+    // the corresponding marketplace export is null. Reading the marketplace
+    // field unconditionally would crash for SKUs covered only by Nitin.
     const realSplits = {
       amazon:   realAmazonDaily   != null ? Math.round(realAmazonDaily   * 30) : ch.amazon,
-      shopify:  realShopifyDaily  != null ? Math.round(real.shopify.sales30d)  : ch.shopify,
-      flipkart: realFlipkartDaily != null ? Math.round(real.flipkart.sales30d) : ch.flipkart,
-      blinkit:  realBlinkitDaily  != null ? Math.round(real.blinkit.totalSales30d) : ch.blinkit,
+      shopify:  realShopifyDaily  != null ? Math.round(realShopifyDaily  * 30) : ch.shopify,
+      flipkart: realFlipkartDaily != null ? Math.round(realFlipkartDaily * 30) : ch.flipkart,
+      blinkit:  realBlinkitDaily  != null ? Math.round(realBlinkitDaily  * 30) : ch.blinkit,
     };
 
     // ── MoM growth: derived from Shopify 30d vs prior 30d ─────────────
