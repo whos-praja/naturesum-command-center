@@ -364,11 +364,11 @@ function UploadZone({ zone, entry, onUpdate }) {
   );
 }
 
-// ── DataAsOfPill — topbar chip ────────────────────────────────────────
-// Compact status: "Live data · 3 / 6" or "Sample data" when nothing
-// uploaded. Click to open the upload modal.
+// ── DataAsOfPill — topbar entry point for the multi-file uploader ─────
+// Doubles as a status badge: shows whether the dashboard is on sample or
+// live data, plus an upload-arrow so the click affordance is obvious.
 export function DataAsOfPill({ onClick }) {
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
   useEffect(() => {
     const onStorage = () => setTick((n) => n + 1);
     window.addEventListener("storage", onStorage);
@@ -376,16 +376,23 @@ export function DataAsOfPill({ onClick }) {
   }, []);
   const store = loadMultiFile();
   const summary = summariseStore(store);
-  if (!summary.count) {
-    return (
-      <button className="data-asof-pill" onClick={onClick} title="No files uploaded — click to upload">
-        <span className="dot dot-muted"/> Sample data
-      </button>
-    );
-  }
+  const isLive = summary.count > 0;
   return (
-    <button className="data-asof-pill is-live" onClick={onClick} title={`Last upload: ${summary.uploadedAt ? new Date(summary.uploadedAt).toLocaleString("en-IN") : "—"}`}>
-      <span className="dot dot-live"/> Live · {summary.count}/6
+    <button
+      className={"btn" + (isLive ? "" : " ghost")}
+      onClick={onClick}
+      title={isLive
+        ? `Last upload: ${summary.uploadedAt ? new Date(summary.uploadedAt).toLocaleString("en-IN") : "—"} · click to update`
+        : "Dashboard is on bundled sample data — click to upload"}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+    >
+      <Icon name="download" size={13}/>
+      <span style={{
+        width: 7, height: 7, borderRadius: "50%",
+        background: isLive ? "var(--success)" : "var(--ink-4)",
+        display: "inline-block",
+      }}/>
+      {isLive ? `Live data · ${summary.count}/6` : "Upload data"}
     </button>
   );
 }

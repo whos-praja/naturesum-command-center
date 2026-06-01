@@ -65,11 +65,12 @@ const PageInventory = ({ subsection }) => {
           <div className="page-sub">Unified stock · runway · batch & expiry · reorder logic</div>
         </div>
         <div className="actions">
+          {/* DataAsOfPill IS the upload entry point — shows live/sample status,
+              clicking it opens the multi-file upload modal. Removed the
+              redundant "Upload MIS" button and the stub "Sync central
+              warehouse" button (no handler, was reserved for a future
+              Apps Script trigger). Place PO stays as the primary action. */}
           <DataAsOfPill onClick={() => setUploadOpen(true)}/>
-          <button className="btn" onClick={() => setUploadOpen(true)}>
-            <Icon name="download" size={13}/>Upload MIS
-          </button>
-          <button className="btn"><Icon name="refresh" size={13}/>Sync central warehouse</button>
           <button className="btn primary"><Icon name="plus" size={13}/>Place PO</button>
         </div>
       </div>
