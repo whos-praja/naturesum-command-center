@@ -1,0 +1,222 @@
+/**
+ * Update the NatureSum Command Center Tracker xlsx to reflect what's
+ * actually shipped to production. Reads the original from Downloads,
+ * writes a new file in the same folder with " - Updated <date>" suffix.
+ *
+ * Run: cd ~/naturesum-command-center && node scripts/update-tracker.cjs
+ *
+ * What it does:
+ *   1. Tracking sheet — flips Status / Sprint / Notes for items shipped
+ *      in commits 3a06aa9 (Sprint 1) and b71ac8b (Sprint 2)
+ *   2. Tracking sheet — flips Status from DECISION-BLOCKED → READY for
+ *      items whose blocking decisions are now answered
+ *   3. Tracking sheet — appends LIB-001 and DISPLAY-001 cross-cutting
+ *      items that emerged during Sprint 2
+ *   4. Decisions sheet — fills the Decided column for RUN-001-D1,
+ *      AMZ-001-D1, AMZ-001-D2
+ *   5. Data Requests sheet — sets Date requested = 30-May-2026 on all
+ *      seven rows (none received yet)
+ *   6. Dashboard counts — recomputes DONE / READY / DECISION-BLOCKED
+ *      totals (only if those cells contain static numbers, not formulas)
+ *
+ * Preserves formulas and cell styles via { cellFormula: true,
+ * cellStyles: true } on read/write.
+ */
+const XLSX = require("xlsx");
+const path = require("path");
+const fs = require("fs");
+
+const SRC = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker.xlsx";
+const OUT = "/Users/shivamprajapati/Downloads/NatureSum Command Center Tracker - Updated 2026-05-30.xlsx";
+
+if (!fs.existsSync(SRC)) {
+  console.error("Source file not found:", SRC);
+  process.exit(1);
+}
+
+const wb = XLSX.readFile(SRC, { cellFormula: true, cellStyles: true });
+
+// ─── helpers ────────────────────────────────────────────────────
+const colLetter = (n) => {
+  // 0-indexed column number → A, B, ..., Z, AA, ...
+  let s = "";
+  while (n >= 0) { s = String.fromCharCode((n % 26) + 65) + s; n = Math.floor(n / 26) - 1; }
+  return s;
+};
+const addr = (col, row1Based) => `${colLetter(col)}${row1Based}`;
+
+// Update a single cell. If the existing cell has a formula, we preserve it;
+// otherwise overwrite with a plain string/number.
+function setCell(sheet, address, value) {
+  const existing = sheet[address];
+  if (existing && existing.f) {
+    // Don't overwrite formula cells silently
+    console.warn(`  ⚠ skipping ${address} (formula present: =${existing.f})`);
+    return;
+  }
+  sheet[address] = { t: typeof value === "number" ? "n" : "s", v: value };
+}
+
+// Find the row (1-based for xlsx addressing) where column `keyCol` (0-based)
+// matches `keyValue`. Returns -1 if not found.
+function findRow(sheet, range, keyCol, keyValue) {
+  const r = XLSX.utils.decode_range(range);
+  for (let row = r.s.r; row <= r.e.r; row++) {
+    const cell = sheet[addr(keyCol, row + 1)];
+    if (cell && String(cell.v).trim() === String(keyValue).trim()) return row + 1;
+  }
+  return -1;
+}
+
+// Extend the sheet's !ref range to include a new row/column if needed.
+function extendRange(sheet, row1, col0) {
+  const r = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  let dirty = false;
+  if (row1 - 1 > r.e.r) { r.e.r = row1 - 1; dirty = true; }
+  if (col0 > r.e.c)     { r.e.c = col0;     dirty = true; }
+  if (dirty) sheet["!ref"] = XLSX.utils.encode_range(r);
+}
+
+// ─── 1. TRACKING sheet — flip Status / Sprint / Notes ──────────
+const tracking = wb.Sheets["Tracking"];
+if (!tracking) { console.error("No 'Tracking' sheet found"); process.exit(1); }
+
+// Column indices (0-based) per the header row we read:
+//   2 = Item Key, 10 = Status, 11 = Blocker, 15 = Sprint, 16 = Notes
+const COL = { key: 2, status: 10, blocker: 11, sprint: 15, notes: 16 };
+
+const SHIPPED_NOTE = "Shipped 30-May-2026 (commit %s)";
+const TRACKING_UPDATES = [
+  // Sprint 1 (3a06aa9) — all DONE
+  { key: "SIM-001", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  { key: "SIM-002", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  { key: "SIM-003", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  { key: "SIM-004", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  { key: "MAT-001", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  { key: "MAT-002", status: "DONE", blocker: "None", sprint: "Done", notes: SHIPPED_NOTE.replace("%s", "3a06aa9") },
+  // Sprint 2 (b71ac8b) — decisions answered + built
+  { key: "RUN-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Parallel cascade via lib/runwayCascade.js. Decision RUN-001-D1 = Parallel." },
+  { key: "AMZ-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Shipped 30-May-2026 (b71ac8b). Amazon channel = Amazon + Shopify combined. a+b split display. Decisions AMZ-001-D1/D2 answered." },
+  // Decisions unblocked → READY (awaiting next sprint)
+  { key: "SIM-017", status: "READY", blocker: "None", notes: "Decision RUN-001-D1 = Parallel. Cascade lib ready. Awaiting Sprint 3 Simulator overhaul." },
+  { key: "SIM-018", status: "READY", blocker: "None", notes: "Decisions AMZ-001-D1/D2 answered. Awaiting Sprint 3 Simulator overhaul." },
+  { key: "AMZ-004", status: "READY", blocker: "DATA-002 for drill modal numbers", notes: "Decisions AMZ-001-D1/D2 answered. Display pattern already shipped in Unified Stock + Runway tab. Drill modal still awaits DATA-002." },
+];
+
+console.log("\n── TRACKING sheet ──");
+const trackRange = tracking["!ref"];
+TRACKING_UPDATES.forEach(u => {
+  const row = findRow(tracking, trackRange, COL.key, u.key);
+  if (row < 0) { console.warn("  ⚠ key not found:", u.key); return; }
+  if (u.status   !== undefined) setCell(tracking, addr(COL.status,  row), u.status);
+  if (u.blocker  !== undefined) setCell(tracking, addr(COL.blocker, row), u.blocker);
+  if (u.sprint   !== undefined) setCell(tracking, addr(COL.sprint,  row), u.sprint);
+  if (u.notes    !== undefined) setCell(tracking, addr(COL.notes,   row), u.notes);
+  console.log(`  ✓ ${u.key.padEnd(10)} row ${row} → ${u.status || "(blocker only)"}`);
+});
+
+// ─── 2. TRACKING sheet — append new cross-cutting items ────────
+console.log("\n── TRACKING sheet — append new rows ──");
+const lastRowExisting = XLSX.utils.decode_range(tracking["!ref"]).e.r + 1; // 1-based
+const NEW_ITEMS = [
+  {
+    Bucket: "Cross-cutting", Priority: "—", "Item Key": "LIB-001",
+    Title: "Shared cascade library (lib/runwayCascade.js)",
+    Description: "Multi-phase parallel-cascade simulator module shared across Runway calculator + Simulator + Materials breakdown. Encapsulates the formula so all consumers stay consistent.",
+    "Acceptance Criteria": "Library lives at src/lib/runwayCascade.js. Exports computeCascade() + fmtRunway(). Used by Runway calculator's adjRunway calc.",
+    "Inputs Needed": "—", "Decisions Needed": "—", "Data Needed": "—",
+    Effort: "S", Status: "DONE", Blocker: "None", Workaround: "—",
+    Dependencies: "—", Owner: "Claude", Sprint: "Done",
+    Notes: "Shipped 30-May-2026 (b71ac8b) alongside RUN-001.",
+  },
+  {
+    Bucket: "Cross-cutting", Priority: "—", "Item Key": "DISPLAY-001",
+    Title: "a+b split display pattern for combined channels",
+    Description: "Reusable display pattern (caption beneath stock number, optional split tags) used by Amazon channel cell across Unified Stock + Runway tab. Generalises to any future combined channel.",
+    "Acceptance Criteria": "PlatformCell + RunwayChannelCell both accept splitA/splitB/labels props and render the breakdown. No regression on cells without splits.",
+    "Inputs Needed": "—", "Decisions Needed": "—", "Data Needed": "—",
+    Effort: "XS", Status: "DONE", Blocker: "None", Workaround: "—",
+    Dependencies: "AMZ-001", Owner: "Claude", Sprint: "Done",
+    Notes: "Shipped 30-May-2026 (b71ac8b) alongside AMZ-001.",
+  },
+];
+const headerOrder = ["Bucket","Priority","Item Key","Title","Description","Acceptance Criteria","Inputs Needed","Decisions Needed","Data Needed","Effort","Status","Blocker","Workaround","Dependencies","Owner","Sprint","Notes"];
+NEW_ITEMS.forEach((item, i) => {
+  const r = lastRowExisting + 1 + i;  // 1-based
+  headerOrder.forEach((h, ci) => {
+    setCell(tracking, addr(ci, r), item[h] ?? "");
+  });
+  extendRange(tracking, r, headerOrder.length - 1);
+  console.log(`  ✓ added ${item["Item Key"]} at row ${r}`);
+});
+
+// ─── 3. DECISIONS sheet — fill Decided column ──────────────────
+console.log("\n── DECISIONS sheet ──");
+const decisions = wb.Sheets["Decisions"];
+if (decisions) {
+  const DEC_COL = { key: 0, decided: 5 };
+  const decRange = decisions["!ref"];
+  const DECISION_UPDATES = [
+    { key: "RUN-001-D1", decided: "Parallel" },
+    { key: "AMZ-001-D1", decided: "If FBA has stock, both Amazon + Shopify orders ship via FBA. When FBA hits zero, demand falls back to central warehouse." },
+    { key: "AMZ-001-D2", decided: "Combined" },
+  ];
+  DECISION_UPDATES.forEach(u => {
+    const row = findRow(decisions, decRange, DEC_COL.key, u.key);
+    if (row < 0) { console.warn("  ⚠ key not found:", u.key); return; }
+    setCell(decisions, addr(DEC_COL.decided, row), u.decided);
+    console.log(`  ✓ ${u.key.padEnd(14)} row ${row} → "${u.decided.slice(0, 40)}${u.decided.length > 40 ? "..." : ""}"`);
+  });
+} else console.warn("  ⚠ No 'Decisions' sheet found");
+
+// ─── 4. DATA REQUESTS — set Date requested = 30-May-2026 ──────
+console.log("\n── DATA REQUESTS sheet ──");
+const dreq = wb.Sheets["Data Requests"];
+if (dreq) {
+  // Cols: 0=Data Key, 6=Received, 7=Date requested, 8=Date received
+  const D_COL = { key: 0, dateReq: 7 };
+  const range = XLSX.utils.decode_range(dreq["!ref"]);
+  for (let r = range.s.r + 1; r <= range.e.r; r++) {  // skip header
+    const keyCell = dreq[addr(D_COL.key, r + 1)];
+    if (keyCell && String(keyCell.v).trim()) {
+      setCell(dreq, addr(D_COL.dateReq, r + 1), "30-May-2026");
+      console.log(`  ✓ ${String(keyCell.v).padEnd(14)} row ${r + 1} → date requested set`);
+    }
+  }
+} else console.warn("  ⚠ No 'Data Requests' sheet found");
+
+// ─── 5. DASHBOARD counts (formulas) — extend COUNTIF ranges ────
+console.log("\n── DASHBOARD & LEGEND sheet ──");
+const dash = wb.Sheets["Dashboard & Legend"];
+if (dash) {
+  // The dashboard counts are COUNTIF formulas like:
+  //   =COUNTIF(Tracking!K2:K40,"DONE")
+  // We added LIB-001 + DISPLAY-001 at rows 41-42, so the existing range
+  // (K2:K40) misses them. Bump every COUNTIF range to row 50 so future
+  // appends up to ~10 more items are picked up automatically.
+  const formulaCells = Object.keys(dash).filter(k => dash[k] && dash[k].f);
+  let extended = 0;
+  formulaCells.forEach(addr => {
+    const f = dash[addr].f;
+    // Match "Tracking!K2:K40" → "Tracking!K2:K50". Range uses a colon
+    // which \w+ won't catch, so spell it out.
+    const updated = f.replace(/(Tracking![A-Z]+\d+:[A-Z]+)40/g, "$150");
+    if (updated !== f) {
+      // IMPORTANT: keep `v` (cached value) — the xlsx writer strips
+      // cells that only have `f` with no `v`. Excel + Sheets recompute
+      // formulas when the file opens, so the cached value just shows
+      // briefly before being replaced.
+      dash[addr] = { ...dash[addr], f: updated };
+      extended++;
+    }
+  });
+  console.log(`  ✓ extended ${extended} COUNTIF formula ranges → row 50`);
+  console.log("  ℹ all summary counts will auto-recompute when the file is opened");
+} else console.warn("  ⚠ No 'Dashboard & Legend' sheet found");
+
+// ─── write out ─────────────────────────────────────────────────
+XLSX.writeFile(wb, OUT, { cellStyles: true });
+console.log("\n✓ Wrote updated tracker to:");
+console.log("  " + OUT);
+console.log("\nOpen it in Numbers / Excel / Google Sheets to verify, then");
+console.log("replace your original or rename as you prefer.");
