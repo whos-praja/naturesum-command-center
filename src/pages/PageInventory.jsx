@@ -734,7 +734,10 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 // Runway color tier: <14d red, <30d amber, otherwise neutral.
 const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) => {
   const D = NSData;
-  const hasVel = velocity != null && velocity > 0;
+  // Threshold of 0.05 (half the 1-dp display precision) — anything that
+  // rounds to "0.0/d" on display must not produce a runway from a
+  // floating-point residual like 5e-16.
+  const hasVel = velocity != null && velocity > 0.05;
   const runway = hasVel ? Math.round(units / velocity) : null;
   const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
   return (
@@ -1060,13 +1063,18 @@ const UnifiedStockTab = ({ inventory }) => {
               // velocity = whatever isn't claimed by a marketplace.
               const amazonOwnVel  = s.velocity * ((sp.amazon  || 0) / revTotal);
               const shopifyOwnVel = s.velocity * ((sp.shopify || 0) / revTotal);
+              const flipkartVel   = s.velocity * ((sp.flipkart || 0) / revTotal);
+              const blinkitVel    = s.velocity * ((sp.blinkit  || 0) / revTotal);
+              // Round each leg to 1dp so floating-point residuals (channels
+              // summing to s.velocity within 1e-15) don't leave a near-zero
+              // warehouse velocity that produces 18-digit runway days when
+              // divided into the central WH stock.
+              const r1 = (n) => Math.round((n || 0) * 10) / 10;
               const vel = {
-                amazonFBA: amazonOwnVel + shopifyOwnVel,
-                flipkart:  s.velocity * ((sp.flipkart || 0) / revTotal),
-                blinkit:   s.velocity * ((sp.blinkit  || 0) / revTotal),
-                warehouse: Math.max(0, s.velocity - amazonOwnVel - shopifyOwnVel
-                            - s.velocity * ((sp.flipkart || 0) / revTotal)
-                            - s.velocity * ((sp.blinkit  || 0) / revTotal)),
+                amazonFBA: r1(amazonOwnVel + shopifyOwnVel),
+                flipkart:  r1(flipkartVel),
+                blinkit:   r1(blinkitVel),
+                warehouse: r1(Math.max(0, s.velocity - amazonOwnVel - shopifyOwnVel - flipkartVel - blinkitVel)),
               };
 
               return (
@@ -1584,7 +1592,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           </div>
           <div className="wb-channels">
             {channels.map(ch => {
-              const hasVel = ch.vel > 0;
+              const hasVel = ch.vel > 0.05;
               const runway = hasVel ? Math.round(ch.units / ch.vel) : null;
               return (
                 <div className="wb-ch-row" key={ch.key} title={ch.hint}>
@@ -2343,7 +2351,7 @@ const CustomGrowthInput = ({ code, initial, isOverride, onCommit }) => {
 // FBA / Flipkart / Blinkit columns.
 const RunwayChannelCell = ({ units, vel, leadTime, growth, splitA, splitB, splitALabel = "amz", splitBLabel = "d2c" }) => {
   const D = NSData;
-  const hasVel = vel != null && vel > 0;
+  const hasVel = vel != null && vel > 0.05; // see PlatformCell — same floating-point residual guard
   const runway = hasVel ? Math.round(units / vel) : null;
   // Use the channel's own lead time for severity, not the warehouse one.
   const tier = runway == null
