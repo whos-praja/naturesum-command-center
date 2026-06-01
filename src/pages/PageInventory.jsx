@@ -1076,8 +1076,9 @@ const ItemPicker = ({ items, value, onChange }) => {
 //   - Total runway uses parallel cascade (lib/runwayCascade.js)
 //   - Amazon channel = Amazon orders + Shopify orders combined (AMZ-001)
 //
-// Marketplace inbound lead time placeholders (SIM-014, swap when data arrives)
-const MP_INBOUND_LEAD_DEFAULT = { amazonFBA: 3, flipkart: 2, blinkit: 1 };
+// Marketplace inbound lead times (SIM-014-DATA — founder-confirmed 31-May-2026).
+// Days from "decide to ship" → "marketplace warehouse has it available to sell".
+const MP_INBOUND_LEAD_DEFAULT = { amazonFBA: 14, flipkart: 3, blinkit: 8 };
 
 const SimulatorTab = ({ inventory }) => {
   const D = NSData;
@@ -1121,21 +1122,24 @@ const SimulatorTab = ({ inventory }) => {
       growthFk:     s.growth ?? 0,
       growthBl:     s.growth ?? 0,
       growthWh:     s.growth ?? 0,
-      // Input (SFG or RM — exactly one per SKU)
+      // Input (SFG or RM — exactly one per SKU). Lead time defaults to the
+      // component's own value from COMPONENT_LEAD_TIMES (SIM-016-DATA), falls
+      // back to the SKU's lead time if unmapped.
       inputKind:    wb.kind || "raw",
       inputQty:     (wb.inputs?.sfg || wb.inputs?.rm)?.qty ?? 0,
       inputName:    (wb.inputs?.sfg || wb.inputs?.rm)?.name || "—",
       inputUnit:    (wb.inputs?.sfg || wb.inputs?.rm)?.unit || "units",
       inputPerPack: (wb.inputs?.sfg || wb.inputs?.rm)?.perPack || 1,
-      inputLead:    s.leadTime ?? 21,
-      // Packaging components (variable per SKU)
+      inputLead:    (wb.inputs?.sfg || wb.inputs?.rm)?.leadTime ?? s.leadTime ?? 21,
+      // Packaging components — per-component lead time from
+      // COMPONENT_LEAD_TIMES (default 14d for every PKG today).
       pkg: (wb.inputs?.pkg || []).map(p => ({
         refCode:      p.refCode,
         name:         p.name,
         unit:         p.unit,
         qty:          p.qty,
         unitsPerPack: p.unitsPerPack,
-        leadTime:     s.leadTime ?? 21,  // placeholder until SIM-016-DATA lands
+        leadTime:     p.leadTime ?? s.leadTime ?? 21,
       })),
       // Lead times
       leadAmzInbound: MP_INBOUND_LEAD_DEFAULT.amazonFBA,

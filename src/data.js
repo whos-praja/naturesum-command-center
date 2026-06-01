@@ -274,22 +274,74 @@ const NSData = (function () {
     },
   };
 
-  // 30-day velocity + lead time per SKU.
+  // Per-component supplier lead time in days (founder-provided 31-May-2026).
+  // Buckets per the latest data:
+  //   Sea Buckthorn raw materials (juice pulp, powder, oil, dry berries) → 50d
+  //   Moringa leaves powder → 25d
+  //   Semi-FG (Acacia + Jatamansi filled) → 20d
+  //   Packaging (every PKGn component, pouches/bottles/boxes/labels) → 14d
+  // SIM-016-DATA satisfied. Used both as the default lead time for any
+  // component in the Simulator AND as the source for each SKU's overall
+  // supplier lead time (= max of all its component lead times — the
+  // slowest input is the binding one).
+  const COMPONENT_LEAD_TIMES = {
+    // Semi-FG
+    NSACDSF30: 20,   // AC Tea Dip Sachets (Filled)
+    NSJOF100:  20,   // Jatamansi Hair Oil Filled Bottles
+    NSACTPF:   20,   // AC Tea Pouches (Filled) — same family
+    // Raw materials
+    NSSBPR:    50,   // SB Powder (Raw)
+    NSSBJPLP:  50,   // SB Juice Pulp
+    NSSBDBR:   50,   // SB Dry Berries (Raw)
+    NSSBOR:    50,   // SB Face Oil (Raw)
+    NSMLPR:    25,   // Moringa Leaves Powder
+    // Packaging — everywhere 14 days
+    NSPKGCB100:   14, NSPKGCB250:   14,
+    NSPKGMP100:   14, NSPKGMP250:   14,
+    NSPKGSBP100:  14, NSPKGSBP250:  14, NSPKGSBP500:  14,
+    NSPKGDBP100:  14, NSPKGDBP250:  14, NSPKGDBP500:  14,
+    NSPKGJB300:   14, NSPKGJB500:   14,
+    NSPKGJBOT300: 14, NSPKGJBOT500: 14,
+    NSPKGJTUB300: 14, NSPKGJTUB500: 14,
+    NSPKGJLBL300: 14, NSPKGJLBL500: 14,
+    NSPKGBOB15:   14, NSPKGBOB30:   14,
+    NSPKGBOBT15:  14, NSPKGBOBT30:  14,
+    NSPKGBOCAP:   14, NSPKGBODROP:  14,
+    NSPKGJOB100:  14,
+    NSPKGACTC30:  14, NSPKGACTCBOX: 14,
+  };
+
+  // Compute per-SKU lead time = max(component lead times). The slowest
+  // component blocks the whole pack. Falls back to a sensible default if
+  // recipe is missing.
+  function maxLeadTimeForSku(code) {
+    const r = SKU_RECIPE[code];
+    if (!r) return 21;
+    const candidates = [
+      COMPONENT_LEAD_TIMES[r.input.refCode],
+      ...r.pkg.map(p => COMPONENT_LEAD_TIMES[p.refCode]),
+    ].filter(n => Number.isFinite(n));
+    return candidates.length ? Math.max(...candidates) : 21;
+  }
+
+  // 30-day velocity per SKU. Lead time derived automatically from the
+  // slowest component above — overrides the old hardcoded values to
+  // keep one source of truth.
   const SKU_OPERATIONS = {
-    NSMP100:   { fg: 0,   vel: 0,    leadTime: 25 },
-    NSMP250:   { fg: 0,   vel: 0,    leadTime: 25 },
-    NSSB100:   { fg: 37,  vel: 14.3, leadTime: 22 },
-    NSSB250:   { fg: 185, vel: 17.9, leadTime: 22 },
-    NSSB500:   { fg: 99,  vel: 7.8,  leadTime: 22 },
-    NSSBDB100: { fg: 620, vel: 21.2, leadTime: 28 },
-    NSSBDB250: { fg: 493, vel: 18.9, leadTime: 28 },
-    NSSBDB500: { fg: 725, vel: 16.7, leadTime: 28 },
-    NSSBJ300:  { fg: 0,   vel: 0,    leadTime: 20 },
-    NSSBJ500:  { fg: 677, vel: 0,    leadTime: 20 },
-    NSSBBO15:  { fg: 0,   vel: 0,    leadTime: 35 },
-    NSSBBO30:  { fg: 0,   vel: 0.5,  leadTime: 35 },
-    NSJO100:   { fg: 788, vel: 8.3,  leadTime: 30 },
-    NSACDT30:  { fg: 39,  vel: 3.3,  leadTime: 30 },
+    NSMP100:   { fg: 0,   vel: 0,    leadTime: maxLeadTimeForSku("NSMP100")   },
+    NSMP250:   { fg: 0,   vel: 0,    leadTime: maxLeadTimeForSku("NSMP250")   },
+    NSSB100:   { fg: 37,  vel: 14.3, leadTime: maxLeadTimeForSku("NSSB100")   },
+    NSSB250:   { fg: 185, vel: 17.9, leadTime: maxLeadTimeForSku("NSSB250")   },
+    NSSB500:   { fg: 99,  vel: 7.8,  leadTime: maxLeadTimeForSku("NSSB500")   },
+    NSSBDB100: { fg: 620, vel: 21.2, leadTime: maxLeadTimeForSku("NSSBDB100") },
+    NSSBDB250: { fg: 493, vel: 18.9, leadTime: maxLeadTimeForSku("NSSBDB250") },
+    NSSBDB500: { fg: 725, vel: 16.7, leadTime: maxLeadTimeForSku("NSSBDB500") },
+    NSSBJ300:  { fg: 0,   vel: 0,    leadTime: maxLeadTimeForSku("NSSBJ300")  },
+    NSSBJ500:  { fg: 677, vel: 0,    leadTime: maxLeadTimeForSku("NSSBJ500")  },
+    NSSBBO15:  { fg: 0,   vel: 0,    leadTime: maxLeadTimeForSku("NSSBBO15")  },
+    NSSBBO30:  { fg: 0,   vel: 0.5,  leadTime: maxLeadTimeForSku("NSSBBO30")  },
+    NSJO100:   { fg: 788, vel: 8.3,  leadTime: maxLeadTimeForSku("NSJO100")   },
+    NSACDT30:  { fg: 39,  vel: 3.3,  leadTime: maxLeadTimeForSku("NSACDT30")  },
   };
 
   // May 2026 per-channel unit totals — drives the per-channel velocity split
@@ -387,6 +439,7 @@ const NSData = (function () {
         perPack: recipe.input.perPack,
         // Per-input capacity = how many FG packs this input alone can make.
         capacity: recipe.input.perPack > 0 ? Math.floor(inputQty / recipe.input.perPack) : 0,
+        leadTime: COMPONENT_LEAD_TIMES[recipe.input.refCode] ?? null,
       };
       if (recipe.kind === "semi") sfg = inputRow;
       else rm = inputRow;
@@ -401,6 +454,7 @@ const NSData = (function () {
         qty,
         unitsPerPack: p.unitsPerPack,
         capacity:     p.unitsPerPack > 0 ? Math.floor(qty / p.unitsPerPack) : 0,
+        leadTime:     COMPONENT_LEAD_TIMES[p.refCode] ?? null,
       };
     });
 
