@@ -3558,11 +3558,11 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .dp-popover {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
-  z-index: 100;
-  width: 252px;
+  right: 0;                            /* anchor to trigger's right edge, grows leftward — the cutoff field sits on the right side of each upload zone, so this keeps the popover inside the modal */
+  z-index: 1050;                       /* sits above the modal card (z-index 1000) */
+  width: 248px;                        /* slimmed slightly so the 7-col grid never crowds the modal edges */
   padding: 10px;
-  background: var(--bg);
+  background: var(--bg-card);          /* solid card bg — was `var(--bg)` which doesn't exist */
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   box-shadow:
