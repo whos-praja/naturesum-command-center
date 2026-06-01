@@ -569,26 +569,59 @@ const NSData = (function () {
     };
 
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
-    const vel = ops.vel;
 
-    // ── Per-channel velocity derived from the May-2026 unit mix ──────
-    // Each channel's share of total velocity = its share of total units.
-    // The Amazon channel here is COMBINED Amazon orders + Shopify (D2C)
-    // orders per AMZ-001 — Shopify ships out of Amazon FBA. Stock-wise,
-    // amazonFBA holds the inventory for both demand streams.
+    // ── Per-channel velocity: real-first, stub fallback ──────────────
+    // Where real export data is present we use it directly; otherwise we
+    // fall back to the CHANNEL_MIX-derived stub. Sources:
+    //   - Flipkart: real `sales30d` ÷ 30 (live 30-day average)
+    //   - Blinkit:  real `totalSales30d` ÷ 30 (sum across feeder WHs)
+    //   - Shopify:  real `sales30d` ÷ 30 (Shopify website CSV)
+    //   - Amazon:   real `totalShippedToday` is one day's FBA customer
+    //               shipments — used as a daily proxy. Multi-day ledger
+    //               will firm this up.
+    // The Amazon channel per AMZ-001 combines Amazon FBA + Shopify D2C,
+    // so its velocity = Amazon daily + Shopify daily.
+    const stubVel = ops.vel;
     const denomUnits = totalChUnits || 1;
-    const channelVelocity = {
-      amazon:   vel * ((ch.amazon + ch.shopify) / denomUnits),
-      flipkart: vel * (ch.flipkart / denomUnits),
-      blinkit:  vel * (ch.blinkit  / denomUnits),
+    const stubChannelVelocity = {
+      amazon:   stubVel * ((ch.amazon + ch.shopify) / denomUnits),
+      flipkart: stubVel * (ch.flipkart / denomUnits),
+      blinkit:  stubVel * (ch.blinkit  / denomUnits),
     };
-    // Warehouse's own velocity = whatever isn't shipped by a marketplace.
-    // With Shopify folded into Amazon, central WH ships only direct B2B
-    // and "other" (the 7% slack in the synth channel mix). If channels
-    // sum to 100%, this is 0 — meaning the warehouse runway is "supply
-    // for marketplace fall-back only".
-    const channelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
-    const whBaseVelocity = vel * Math.max(0, 1 - channelShare);
+    const realAmazonDaily   = real.amazon?.totalShippedToday   ?? null; // 1-day FBA shipments
+    const realShopifyDaily  = real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null;
+    const realFlipkartDaily = real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null;
+    const realBlinkitDaily  = real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null;
+
+    // For Amazon channel: combine real Amazon + real Shopify when either
+    // has signal; otherwise fall back to the stub combined value.
+    const hasAmazonSignal = realAmazonDaily != null || realShopifyDaily != null;
+    const amazonChannelVel = hasAmazonSignal
+      ? (realAmazonDaily ?? 0) + (realShopifyDaily ?? 0)
+      : stubChannelVelocity.amazon;
+
+    const channelVelocity = {
+      amazon:   amazonChannelVel,
+      flipkart: realFlipkartDaily ?? stubChannelVelocity.flipkart,
+      blinkit:  realBlinkitDaily  ?? stubChannelVelocity.blinkit,
+    };
+    // Which legs of the velocity come from real exports? UI exposes this.
+    const velocitySource = {
+      amazon:   real.amazon || real.shopify ? "real" : "stub",
+      flipkart: real.flipkart ? "real"  : "stub",
+      blinkit:  real.blinkit  ? "real"  : "stub",
+    };
+
+    // Total velocity now = sum of channel velocities + warehouse own.
+    // Warehouse own velocity ≈ 0 once Shopify is folded into Amazon and
+    // the SKU has full coverage, but we preserve any residual stub share.
+    const stubChannelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
+    const whBaseVelocity = stubVel * Math.max(0, 1 - stubChannelShare);
+    const channelTotalVel = channelVelocity.amazon + channelVelocity.flipkart + channelVelocity.blinkit;
+    // If we have ANY real signal, trust the sum-of-channels. Otherwise keep ops.vel as before.
+    const vel = (velocitySource.amazon === "real" || velocitySource.flipkart === "real" || velocitySource.blinkit === "real")
+      ? channelTotalVel + whBaseVelocity
+      : stubVel;
 
     const cascadeChannels = [
       { key: "amazon",   label: "Amazon FBA", stock: totalStock.amazonFBA, velocity: channelVelocity.amazon },
@@ -605,14 +638,47 @@ const NSData = (function () {
     const runway = vel > 0 ? Math.round(total / vel) : 0;
     const runwayStatus = vel <= 0 ? "amber" : runway <= ops.leadTime ? "red" : runway < 30 ? "amber" : "green";
     const price = SKU_PRICE[s.code] || 500;
+
+    // ── Splits: amount-of-units-per-channel-per-month ─────────────────
+    // Used by the Simulator (per-marketplace inputs) + Action-needed
+    // cell math. Express as units/30d so existing call sites that read
+    // CHANNEL_MIX-style numbers continue to work. Real numbers replace
+    // stub for any channel with real signal; the rest fall back to the
+    // hardcoded May-2026 mix.
+    const realSplits = {
+      amazon:   realAmazonDaily   != null ? Math.round(realAmazonDaily   * 30) : ch.amazon,
+      shopify:  realShopifyDaily  != null ? Math.round(real.shopify.sales30d)  : ch.shopify,
+      flipkart: realFlipkartDaily != null ? Math.round(real.flipkart.sales30d) : ch.flipkart,
+      blinkit:  realBlinkitDaily  != null ? Math.round(real.blinkit.totalSales30d) : ch.blinkit,
+    };
+
+    // ── MoM growth: derived from Shopify 30d vs prior 30d ─────────────
+    // Shopify exports give us 91 days of daily sales — split into the
+    // current 30 days (sales30d) and the prior 30 days (sales60d - sales30d).
+    // Falls back to MOM_GROWTH stub when Shopify data is missing.
+    let derivedGrowth = MOM_GROWTH[s.code] ?? 0;
+    if (real.shopify) {
+      const cur30  = real.shopify.sales30d || 0;
+      const prev30 = (real.shopify.sales60d || 0) - cur30;
+      if (prev30 > 0) {
+        const g = ((cur30 - prev30) / prev30) * 100;
+        derivedGrowth = Math.max(-100, Math.min(200, g));
+      } else if (cur30 > 0) {
+        derivedGrowth = 200; // explicit "zero base → bookable but capped"
+      }
+    }
+
     return {
       ...s,
       velocity:    vel,
-      growth:      MOM_GROWTH[s.code] ?? 0,
-      splits:      { amazon: ch.amazon, shopify: ch.shopify, flipkart: ch.flipkart, blinkit: ch.blinkit },
+      growth:      derivedGrowth,
+      splits:      realSplits,
       // Per-channel velocities and a pre-built cascade input set.
       // channelVelocity.amazon already includes Shopify (folded per AMZ-001).
       channelVelocity,
+      // Per-channel "real | stub" marker — set when we substituted real
+      // export data into the velocity. UI uses this to show provenance.
+      velocitySource,
       cascade: {
         whStock:       ops.fg,
         whBaseVelocity,

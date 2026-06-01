@@ -132,6 +132,10 @@ const TRACKING_UPDATES = [
   // Sprint 7 — Flipkart drill (FK-001 + FK-002 superseded for single-WH case)
   { key: "FK-001", status: "DONE", blocker: "None", sprint: "Done", notes: "Drill modal: 7d/14d/30d/60d/90d avg daily trend, reserved + scheduled, F-Assured badge, real price — 01-Jun-2026" },
   { key: "FK-002", status: "DONE", blocker: "None", sprint: "Done", notes: "Single-WH (Gurgaon Sandila) → OOS-count indicator is degenerate. Replaced with cell-level health pill: live count + days-of-cover + F-Assured chip — 01-Jun-2026" },
+  // Sprint 8 — channelVelocity + total velocity + growth all derive from real exports
+  { key: "SIM-010", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-marketplace velocity NOW derived from real exports: Flipkart sales30d/30, Blinkit totalSales30d/30, Shopify sales30d/30, Amazon 1-day shipments as daily proxy — Sprint 8, 01-Jun-2026" },
+  { key: "SIM-013", status: "DONE", blocker: "None", sprint: "Done", notes: "Per-marketplace stock from real exports (Sprint 5); per-channel velocity also real (Sprint 8) — 01-Jun-2026" },
+  { key: "SIM-004", status: "DONE", blocker: "None", sprint: "Done", notes: "MoM % now DERIVED from real Shopify 30d vs prior-30d (60d window split) — Sprint 8, 01-Jun-2026" },
   // DATA-003 + DATA-004 (Flipkart side) closed
   { key: "DATA-003", status: "DONE", blocker: "None", sprint: "Done", notes: "Flipkart 'Current Inventory' export with 7D/14D/30D/60D/90D sales + reserved + F-Assured ingested — 01-Jun-2026" },
   { key: "DATA-004", status: "READY", blocker: "Amazon ASP + Blinkit MRP per SKU still pending", sprint: "Done", notes: "Flipkart selling prices wired into drill modal. Amazon ASP + Blinkit MRP per-SKU still pending — partial." },

@@ -1125,11 +1125,11 @@ const UnifiedStockTab = ({ inventory }) => {
         <div className="table-footnote">
           <span className="footnote-ref">*</span>
           <span>
-            Amazon FBA, Flipkart and Blinkit numbers come from real marketplace exports
-            (snapshot {NSData.realDataSnapshotDate}) — click any cell to drill into per-warehouse
-            stock. Per-channel velocity is still estimated from the SKU's 30-day revenue mix
-            while MCF orders (Amazon) and historical multi-day ledgers are pending. For the
-            FG / Semi-FG / Raw / Packaging split, click any Item row or {" "}
+            Stock + velocity now drawn from real marketplace exports (snapshot {NSData.realDataSnapshotDate}) —
+            Flipkart + Blinkit use 30-day sales averages, Shopify uses website 30-day totals, Amazon FBA uses
+            the latest day's customer shipments as a daily proxy (multi-day ledger will refine). MoM growth
+            is derived from Shopify 30d vs prior-30d (60d window split). Click any cell to drill into per-WH
+            stock. For the FG / Semi-FG / Raw / Packaging split, click any Item row or {" "}
             <button className="link-btn" onClick={() => navigate("/inventory/materials")}>
               open the Materials breakdown
             </button>.

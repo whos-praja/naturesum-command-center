@@ -33,7 +33,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 231,
       "totalDamaged": 0,
-      "totalShipped30d": 2
+      "totalShippedToday": 2
     },
     "blinkit": null,
     "flipkart": {
@@ -85,7 +85,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 7,
       "totalDamaged": 0,
-      "totalShipped30d": 1
+      "totalShippedToday": 1
     },
     "blinkit": {
       "byWh": {
@@ -187,7 +187,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 171,
       "totalDamaged": 1,
-      "totalShipped30d": 0
+      "totalShippedToday": 0
     },
     "blinkit": {
       "byWh": {
@@ -246,7 +246,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 42,
       "totalDamaged": 0,
-      "totalShipped30d": 2
+      "totalShippedToday": 2
     },
     "blinkit": {
       "byWh": {
@@ -325,7 +325,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 17,
       "totalDamaged": 0,
-      "totalShipped30d": 0
+      "totalShippedToday": 0
     },
     "blinkit": {
       "byWh": {
@@ -446,7 +446,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 859,
       "totalDamaged": 0,
-      "totalShipped30d": 11
+      "totalShippedToday": 11
     },
     "blinkit": {
       "byWh": {
@@ -631,7 +631,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 509,
       "totalDamaged": 0,
-      "totalShipped30d": 6
+      "totalShippedToday": 6
     },
     "blinkit": {
       "byWh": {
@@ -829,7 +829,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 545,
       "totalDamaged": 0,
-      "totalShipped30d": 10
+      "totalShippedToday": 10
     },
     "blinkit": {
       "byWh": {
@@ -898,7 +898,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 3,
       "totalDamaged": 3,
-      "totalShipped30d": 1
+      "totalShippedToday": 1
     },
     "blinkit": null,
     "flipkart": {
@@ -950,7 +950,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 110,
       "totalDamaged": 0,
-      "totalShipped30d": 29
+      "totalShippedToday": 29
     },
     "blinkit": {
       "byWh": {
@@ -1049,7 +1049,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 81,
       "totalDamaged": 0,
-      "totalShipped30d": 3
+      "totalShippedToday": 3
     },
     "blinkit": null,
     "flipkart": {
@@ -1086,7 +1086,7 @@ export const REAL_MARKETPLACE_DATA = {
       },
       "totalSellable": 97,
       "totalDamaged": 0,
-      "totalShipped30d": 1
+      "totalShippedToday": 1
     },
     "blinkit": null,
     "flipkart": {

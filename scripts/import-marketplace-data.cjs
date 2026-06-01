@@ -118,7 +118,7 @@ function parseAmazon(lookups) {
     const endBal = num(r["Ending Warehouse Balance"]);
     const shipped = -num(r["Customer Shipments"]); // outbound shipments are negative
     const damaged = -num(r["Damaged"]);            // disposition = WAREHOUSE_DAMAGED etc.
-    if (!byCode[code]) byCode[code] = { byFc: {}, totalSellable: 0, totalDamaged: 0, totalShipped30d: 0 };
+    if (!byCode[code]) byCode[code] = { byFc: {}, totalSellable: 0, totalDamaged: 0, totalShippedToday: 0 };
     const fc = byCode[code].byFc[loc] || { sellable: 0, damaged: 0, shipped: 0 };
     if (disp === "SELLABLE") fc.sellable += endBal;
     else fc.damaged += endBal;
@@ -126,7 +126,9 @@ function parseAmazon(lookups) {
     byCode[code].byFc[loc] = fc;
     if (disp === "SELLABLE") byCode[code].totalSellable += endBal;
     else byCode[code].totalDamaged += endBal;
-    byCode[code].totalShipped30d += shipped;
+    // NB: Amazon ledger we ingest is a SINGLE day's data, so `shipped` is
+    // one day's customer shipments. That's also the daily-velocity proxy.
+    byCode[code].totalShippedToday += shipped;
   }
   console.log(`  mapped SKUs: ${Object.keys(byCode).length}`);
   if (unmapped.size) console.log(`  unmapped MSKUs (won't appear): ${[...unmapped].join(", ")}`);
