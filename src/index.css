@@ -3621,22 +3621,23 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
   border-radius: 50%;
-  color: var(--ink-4);
-  font-size: 11px;
+  color: var(--ink-3);                /* slight bump from ink-4 — was too faint to spot */
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
   transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
 .formula-icon:hover {
   color: var(--brand-deep);
   background: var(--brand-soft);
-  border-color: rgba(47, 94, 71, 0.32);
+  border-color: rgba(47, 94, 71, 0.40);
 }
 .formula-popover {
   position: fixed;                                /* viewport-anchored — never clipped by a modal */

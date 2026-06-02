@@ -80,12 +80,12 @@ export default function FormulasTab() {
             <div className="sub">Every derived number on the dashboard, in plain English + the math expression. Not editable here — these define the shape of the calculation.</div>
           </div>
         </div>
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table className="table">
+        <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="table" style={{ tableLayout: "fixed", width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ width: "22%" }}>Number</th>
-                <th>Expression</th>
+                <th style={{ width: "20%" }}>Number</th>
+                <th style={{ width: "32%" }}>Expression</th>
                 <th style={{ width: "30%" }}>Plain English</th>
                 <th style={{ width: "18%" }}>Where</th>
               </tr>
@@ -93,10 +93,15 @@ export default function FormulasTab() {
             <tbody>
               {FORMULA_REFERENCE.map((f, i) => (
                 <tr key={i}>
-                  <td><strong style={{ fontSize: 12.5 }}>{f.name}</strong></td>
-                  <td><code style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--ink-2)" }}>{f.expression}</code></td>
-                  <td style={{ fontSize: 11.5, color: "var(--ink-3)" }}>{f.plain}</td>
-                  <td style={{ fontSize: 10.5, color: "var(--ink-4)" }}><code>{f.where}</code></td>
+                  <td style={{ verticalAlign: "top" }}><strong style={{ fontSize: 12.5 }}>{f.name}</strong></td>
+                  <td style={{ verticalAlign: "top" }}>
+                    <code style={{
+                      fontSize: 11, fontFamily: "var(--mono)", color: "var(--ink-2)",
+                      whiteSpace: "pre-wrap", wordBreak: "break-word", display: "block",
+                    }}>{f.expression}</code>
+                  </td>
+                  <td style={{ fontSize: 11.5, color: "var(--ink-3)", verticalAlign: "top" }}>{f.plain}</td>
+                  <td style={{ fontSize: 10.5, color: "var(--ink-4)", verticalAlign: "top", wordBreak: "break-all" }}><code>{f.where}</code></td>
                 </tr>
               ))}
             </tbody>
@@ -112,13 +117,13 @@ export default function FormulasTab() {
             <div className="sub">Force-set any value for a single SKU — bypasses the derived/uploaded number. Useful for what-if scenarios. Click any cell to edit; empty input clears the override.</div>
           </div>
         </div>
-        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-          <table className="table">
+        <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 920 }}>
             <thead>
               <tr>
-                <th style={{ width: "16%" }}>SKU</th>
+                <th style={{ width: 160, minWidth: 160 }}>SKU</th>
                 {Object.entries(SKU_OVERRIDE_FIELDS).map(([field, meta]) => (
-                  <th key={field} className="num" style={{ fontSize: 10.5 }}>
+                  <th key={field} className="num" style={{ fontSize: 10.5, minWidth: 90 }}>
                     {meta.label}<br/>
                     <span style={{ fontWeight: 400, color: "var(--ink-4)" }}>{meta.unit}</span>
                   </th>
