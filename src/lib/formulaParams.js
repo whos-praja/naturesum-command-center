@@ -332,4 +332,33 @@ export const FORMULA_REFERENCE = [
     plain: "Per-WH momentum signal: did the WH sell more in the last 15 days than the 15 before that? Same cap rules as MoM — +200% on zero baseline, −100% on stopped.",
     where: "src/pages/PageInventory.jsx · BlinkitFeederModal · computeBiweeklyDelta()",
   },
+  // ─── Simulator formulas ────────────────────────────────────────
+  {
+    id: "simReorderBy",
+    name: "Reorder by (days)",
+    expression: "reorderByDays = totalRunway − supplierLeadTime\nstatus:  reorderByDays < 0  → overdue\n         reorderByDays = 0  → reorder today\n         else               → reorder in N days",
+    plain: "How long you have until the latest moment you can place a new order and still have it land before stock runs out. Negative means you're already late.",
+    where: "src/pages/PageInventory.jsx · SimulatorTab · reorderByDays",
+  },
+  {
+    id: "simBottleneck",
+    name: "Producible FG bottleneck",
+    expression: "bottleneck = argmin{ inputCapacity, pkg1Capacity, pkg2Capacity, ... }\n  where each capacity = floor(component qty / units-per-pack)",
+    plain: "Which input or packaging component runs out first when packing more FG. That component caps Producible FG — fix it and you unblock more units.",
+    where: "src/pages/PageInventory.jsx · SimulatorTab · bottleneck",
+  },
+  {
+    id: "simTotalVelocity",
+    name: "Simulator total daily velocity",
+    expression: "totalVel = projVel.amazon + projVel.flipkart + projVel.blinkit + projVel.wh\n  each projVel.ch = baseVel.ch × (1 + perChannelMoM / 100)",
+    plain: "Sum of per-channel projected velocities. In overall mode the input is one number split across channels by current revenue mix. In per-channel mode each channel is set independently.",
+    where: "src/pages/PageInventory.jsx · SimulatorTab · projVel",
+  },
+  {
+    id: "simMomGrowth",
+    name: "Simulator MoM % growth",
+    expression: "projVel.ch = baseVel.ch × (1 + perChannelMoM / 100)",
+    plain: "Each channel's velocity is multiplied by (1 + its growth%). Overall mode applies the same growth to every channel; per-channel mode lets you stress-test each independently.",
+    where: "src/pages/PageInventory.jsx · SimulatorTab · projVel",
+  },
 ];

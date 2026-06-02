@@ -2307,7 +2307,7 @@ const SimulatorTab = ({ inventory }) => {
 
             {/* ── VELOCITY section (nested) ── */}
             <SimSection
-              title="Daily velocity"
+              title={<>Daily velocity <FormulaIcon formulaId="simTotalVelocity" skuCode={baseline?.code} currentValue={`${effVel.overall.toFixed(1)}/d total (amz ${effVel.amz.toFixed(1)} · fk ${effVel.fk.toFixed(1)} · bl ${effVel.bl.toFixed(1)} · wh ${effVel.wh.toFixed(1)})`}/></>}
               hint="Set one overall number, or switch to per-channel to control each marketplace independently."
               right={
                 <SimToggle
@@ -2368,7 +2368,7 @@ const SimulatorTab = ({ inventory }) => {
 
             {/* ── GROWTH section (nested) ── */}
             <SimSection
-              title="MoM % growth"
+              title={<>MoM % growth <FormulaIcon formulaId="simMomGrowth" skuCode={baseline?.code} currentValue={`overall ${sim.growthOverall}%`}/></>}
               hint="Month-over-month growth applied to projected velocity."
               right={
                 <SimToggle
@@ -2482,7 +2482,9 @@ const SimulatorTab = ({ inventory }) => {
                 output panel doesn't feel front-heavy. */}
             <div className="sim-out-hero sim-out-hero-compact">
               <div className="sim-out-hero-meta">
-                <div className="sim-out-hero-label">Total runway (cascade)</div>
+                <div className="sim-out-hero-label">
+                  Total runway (cascade) <FormulaIcon formulaId="cascadeRunway" skuCode={baseline?.code} currentValue={`${runway}d`}/>
+                </div>
                 <div className="sim-out-hero-sub muted">day Central WH hits zero · channels drain in parallel first</div>
               </div>
               <div className="sim-out-hero-num mono">{runway}d</div>
@@ -2520,7 +2522,9 @@ const SimulatorTab = ({ inventory }) => {
 
             <div className="sim-out-stats">
               <div className="sim-out-stat">
-                <div className="sim-out-stat-label">Reorder by</div>
+                <div className="sim-out-stat-label">
+                  Reorder by <FormulaIcon formulaId="simReorderBy" skuCode={baseline?.code} currentValue={`${reorderByDays}d (runway ${runway}d − lead ${sim.supplierLead}d)`}/>
+                </div>
                 <div className={"sim-out-stat-num mono" + (overdue ? " is-overdue" : "")}>
                   {overdue ? `Overdue by ${Math.abs(reorderByDays)}d` :
                     reorderByDays === 0 ? "Today" :
@@ -2530,7 +2534,9 @@ const SimulatorTab = ({ inventory }) => {
                 <div className="sim-out-stat-sub">runway − supplier lead time</div>
               </div>
               <div className="sim-out-stat">
-                <div className="sim-out-stat-label">Bottleneck</div>
+                <div className="sim-out-stat-label">
+                  Bottleneck <FormulaIcon formulaId="simBottleneck" skuCode={baseline?.code} currentValue={bottleneckLabel}/>
+                </div>
                 <div className="sim-out-stat-num mono">{bottleneckLabel}</div>
                 <div className="sim-out-stat-sub">caps Producible FG</div>
               </div>
