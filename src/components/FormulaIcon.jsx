@@ -26,10 +26,39 @@ import {
 
 export function FormulaIcon({ formulaId, paramKey, skuCode, skuField, currentValue, valueLabel = "Current" }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const wrapRef = useRef(null);
+  const popoverRef = useRef(null);
+
+  // Compute viewport-aware position so the popover never spills off-
+  // screen — anchor below the icon, clamp horizontally to a 16px gutter.
+  useEffect(() => {
+    if (!open || !wrapRef.current) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    const popoverW = 360;
+    const popoverHEst = 380;                            // rough — refined after first paint
+    const gutter = 16;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Default: align popover's left edge with icon's left edge, just below.
+    let left = rect.left;
+    // If that pushes the right edge off-screen, shift left.
+    if (left + popoverW > vw - gutter) left = vw - popoverW - gutter;
+    // If still off-screen left, clamp to gutter.
+    if (left < gutter) left = gutter;
+    // Default: below the icon. If that pushes past viewport bottom, flip above.
+    let top = rect.bottom + 6;
+    if (top + popoverHEst > vh - gutter) top = Math.max(gutter, rect.top - popoverHEst - 6);
+    setPos({ top, left });
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onDoc = (e) => {
+      if (wrapRef.current?.contains(e.target)) return;
+      if (popoverRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -44,7 +73,7 @@ export function FormulaIcon({ formulaId, paramKey, skuCode, skuField, currentVal
   const skuFieldDef = skuField ? SKU_OVERRIDE_FIELDS[skuField] : null;
 
   return (
-    <span className="formula-icon-wrap" ref={ref}>
+    <span className="formula-icon-wrap" ref={wrapRef}>
       <button
         type="button"
         className="formula-icon"
@@ -55,7 +84,13 @@ export function FormulaIcon({ formulaId, paramKey, skuCode, skuField, currentVal
         ⓘ
       </button>
       {open && (
-        <div className="formula-popover" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={popoverRef}
+          className="formula-popover"
+          style={{ top: pos.top, left: pos.left }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
           {formula ? (
             <>
               <div className="formula-popover-head">
