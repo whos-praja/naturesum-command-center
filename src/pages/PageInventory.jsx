@@ -606,13 +606,18 @@ const AmazonFcModal = ({ sku, onClose }) => {
         </div>
 
         <div className="modal-body">
-          {/* ── HERO METRICS — three cards: Velocity / MoM Growth / Runway ──
-              Per founder: these are the numbers that should jump out first.
+          {/* ── HERO METRICS — four cards: Stock / Velocity / MoM Growth / Runway ──
+              Per founder: Stock-left is the actionable "how much do I have?"
+              number — must be visible at a glance, same as FK modal.
               Runway uses combined velocity (Amazon orders + Shopify D2C) over
               total FBA stock, since both demand streams pull from the same
               pool. Velocity is the 30d average. Growth is MoM (from data.js,
               with agency-sheet override applied per truth table). */}
-          <div className="blk-modal-summary">
+          <div className="blk-modal-summary" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(totalFbaStock)}</div>
+              <div className="blk-modal-summary-label">stock left · FBA</div>
+            </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
                 {amzChannelDaily.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span>
