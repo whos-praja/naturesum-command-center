@@ -551,6 +551,16 @@ const AmazonFcModal = ({ sku, onClose }) => {
     growthValue >=  10  ? "var(--success)" :
     growthValue <= -10  ? "var(--critical)" :
                           "var(--ink-3)";
+  // Caption beneath the +200% / −100% caps so the number isn't read as literal.
+  // For Amazon we can't always distinguish zero-base vs >200%-actual from sku.growth
+  // alone; cross-check the Shopify cur30/prev30 when present.
+  const shopAt200 = sku.realData?.shopify;
+  const shopPrev30 = shopAt200 ? Math.max(0, (shopAt200.sales60d || 0) - (shopAt200.sales30d || 0)) : null;
+  const shopCur30  = shopAt200?.sales30d ?? null;
+  const growthCapNote =
+    growthValue === 200  ? (shopPrev30 === 0 ? "zero baseline · prior 30d = 0" : "capped at +200% (actual growth > cap)") :
+    growthValue === -100 ? (shopCur30 === 0  ? "stopped · current 30d = 0"      : "capped at −100%") :
+                           null;
 
   // ── Per-FC rows (warehouse breakdown) ──────────────────────────
   const rows = real?.byFc
@@ -606,6 +616,11 @@ const AmazonFcModal = ({ sku, onClose }) => {
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: growthColor }}>{growthLabel}</div>
               <div className="blk-modal-summary-label">MoM growth</div>
+              {growthCapNote && (
+                <div className="muted" style={{ fontSize: 9.5, marginTop: 2, fontStyle: "italic", lineHeight: 1.25 }}>
+                  {growthCapNote}
+                </div>
+              )}
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
@@ -787,8 +802,14 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
   if (prior30Daily > 0)       momPct = Math.max(-100, Math.min(200, ((daily30 - prior30Daily) / prior30Daily) * 100));
   else if (daily30 > 0)       momPct = 200;
   const momLabel = momPct == null ? "—" :
-    momPct >= 200 ? "+new" :
-    `${momPct > 0 ? "+" : momPct < 0 ? "−" : ""}${Math.abs(Math.round(momPct))}%`;
+    `${momPct > 0 ? "+" : momPct < 0 ? "−" : ""}${Math.abs(momPct).toFixed(1)}%`;
+  // Per founder: a +200% reading is always a cap (either zero-baseline —
+  // prior 30d had 0 sales — or the actual growth was >200% and got clipped).
+  // Caption explains which case so the number isn't read as literal +200%.
+  const momCapNote =
+    momPct === 200  ? (prior30Daily === 0 ? "zero baseline · prior 30d = 0" : "capped from above (>200%)") :
+    momPct === -100 ? (daily30 === 0 ? "stopped · current 30d = 0" : "capped from below (<−100%)") :
+                      null;
   const momColor = momPct == null ? "var(--ink-4)" :
     momPct >=  10 ? "var(--success)" :
     momPct <= -10 ? "var(--critical)" :
@@ -811,10 +832,18 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
         </div>
 
         <div className="modal-body">
-          {/* Hero summary — velocity + MoM growth are the headline metrics
-              per founder. Reserved / Live / Damaged etc. are still shown
-              below in the inventory state table for completeness. */}
-          <div className="blk-modal-summary">
+          {/* Hero summary — 4 cards: Stock / Velocity / MoM growth / Days.
+              Stock = real FK "Live on website" qty (the actionable current
+              stock left, per founder). Reserved / Damaged etc. stay in the
+              detail table below.
+              When MoM hits a cap (+200% / −100%), a small caption beneath
+              the number explains which case (zero baseline, capped from
+              above, etc.). */}
+          <div className="blk-modal-summary" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(live)}</div>
+              <div className="blk-modal-summary-label">stock left</div>
+            </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{daily30.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span></div>
               <div className="blk-modal-summary-label">velocity · 30d avg</div>
@@ -822,6 +851,11 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: momColor }}>{momLabel}</div>
               <div className="blk-modal-summary-label">MoM growth</div>
+              {momCapNote && (
+                <div className="muted" style={{ fontSize: 9.5, marginTop: 2, fontStyle: "italic", lineHeight: 1.25 }}>
+                  {momCapNote}
+                </div>
+              )}
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
@@ -1323,12 +1357,10 @@ const UnifiedStockTab = ({ inventory }) => {
                     />
                   </td>
                   {/* FK-001: Flipkart cell. Stock hero shows real "listed
-                      quantity" from the FK Seller Hub export, NOT the bundled
-                      stub split. Important caveat: Flipkart inventory lives at
-                      our central WH (gur_san_wh_nl_01nl IS the central WH) —
-                      it's the same physical pool, not a separate location. We
-                      annotate with "@ central WH" to make the dependency clear.
-                      Velocity + growth are the actually-actionable numbers. */}
+                      quantity" from the FK Seller Hub export (NOT the bundled
+                      stub split). The "physically at central WH" caveat is
+                      explained once in the table footnote — annotating every
+                      row was too noisy per founder. */}
                   <td
                     className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
                     onClick={(e) => {
@@ -1339,12 +1371,6 @@ const UnifiedStockTab = ({ inventory }) => {
                   >
                     <PlatformCell
                       units={s.realData?.flipkart?.live ?? null}
-                      breakdown={
-                        s.realData?.flipkart
-                          ? <span style={{ fontSize: 10, color: "var(--ink-3)", letterSpacing: "0.01em" }}>@ central WH</span>
-                          : null
-                      }
-                      breakdownLabel="Listed on Flipkart — physically stored at central WH (gur_san_wh_nl_01nl). The Central Warehouse column already includes this stock; not a separate location."
                       velocity={vel.flipkart}
                       growth={s.growth}
                     />
@@ -1378,10 +1404,9 @@ const UnifiedStockTab = ({ inventory }) => {
             Stock + velocity now drawn from real marketplace exports (snapshot {NSData.realDataSnapshotDate}) —
             Flipkart + Blinkit use 30-day sales averages, Shopify uses website 30-day totals, Amazon FBA uses
             the latest day's customer shipments as a daily proxy (multi-day ledger will refine). MoM growth
-            is derived from Shopify 30d vs prior-30d (60d window split). <strong>Flipkart inventory is the
-            seller-hub "listed quantity" — physically stored at our central WH (gur_san_wh_nl_01nl), already
-            included in the Central Warehouse column.</strong> Click any cell to drill into per-WH stock. For the
-            FG / Semi-FG / Raw / Packaging split, click any Item row or {" "}
+            is derived from Shopify 30d vs prior-30d (60d window split). Flipkart inventory is the seller-hub
+            "listed quantity" (already included in the Central Warehouse total — same physical pool). Click any
+            cell to drill into per-WH stock. For the FG / Semi-FG / Raw / Packaging split, click any Item row or {" "}
             <button className="link-btn" onClick={() => navigate("/inventory/materials")}>
               open the Materials breakdown
             </button>.
@@ -3109,8 +3134,8 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                     />
                   </td>
                   {/* Runway tab — Flipkart: real "listed quantity" from FK
-                      Seller Hub (not bundled stub). FK stock physically lives
-                      at central WH — see Unified Stock cell for the caveat. */}
+                      Seller Hub (not bundled stub). Same stock pool as central
+                      WH — disclosed in Unified Stock tab footnote. */}
                   <td
                     className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
                     onClick={(e) => {
