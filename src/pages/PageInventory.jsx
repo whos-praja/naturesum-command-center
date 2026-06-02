@@ -1319,10 +1319,15 @@ const UnifiedStockTab = ({ inventory }) => {
               const amazonOnlyDaily = Math.max(0, (channelVel.amazon || 0) - shopifyD2CDaily);
               const amazonOwnVel  = r1(amazonOnlyDaily);
               const shopifyOwnVel = r1(shopifyD2CDaily);
-              // Per founder: Central WH velocity = sum of marketplace velocities
-              // only (option A — exclude WH-direct offline/marketing residual).
-              // Each cell uses its OWN channel's growth, not a shared SKU.growth.
-              const whSumVel = r1((channelVel.amazon ?? 0) + (channelVel.flipkart ?? 0) + (channelVel.blinkit ?? 0));
+              // Central WH velocity + growth: pulled from the engine output
+              // (docs/central-wh-spec.md). depletion_velocity = total drain
+              // rate across all 6 movement channels (Amazon, FK, Blinkit,
+              // Website, Offline, Marketing) computed from Daily Movement of
+              // FG against the 5-May audit anchor. Falls back to marketplace
+              // sum when central data is missing for the SKU.
+              const whSumVel = s.centralWhVelocity != null
+                ? r1(s.centralWhVelocity)
+                : r1((channelVel.amazon ?? 0) + (channelVel.flipkart ?? 0) + (channelVel.blinkit ?? 0));
               const vel = {
                 amazonFBA: r1(channelVel.amazon ?? 0),
                 flipkart:  r1(channelVel.flipkart ?? 0),
@@ -1351,9 +1356,9 @@ const UnifiedStockTab = ({ inventory }) => {
                           <span className="pf-cell-bd-tag">producible</span>
                         </>
                       }
-                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}`}
+                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}${s.centralWhBinding ? ` (binding component: ${s.centralWhBinding})` : ""}`}
                       velocity={vel.warehouse}
-                      growth={channelGrowth.warehouse}
+                      growth={s.centralWhGrowth ?? channelGrowth.warehouse}
                     />
                   </td>
                   {/* AMZ-001 + AMZ-003 + AMZ-004: Amazon cell mirrors the

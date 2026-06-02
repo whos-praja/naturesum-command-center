@@ -19,6 +19,15 @@ import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
 import { BUNDLED_AGENCY_DATA } from "./bundledAgencyData.js";
 const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
 
+// Central warehouse engine output (scripts/build-central-wh.cjs). Source of
+// truth for: FG stock, producible cap, binding component, depletion velocity
+// (across all 6 movement channels), MoM growth (on net units), runway days,
+// SKU lead time (max over BOM), per-component stock + days-of-cover.
+// Spec: docs/central-wh-spec.md.
+import { CENTRAL_WH_DATA } from "./bundledCentralWHData.js";
+const CWH_FG   = CENTRAL_WH_DATA?.fg || {};
+const CWH_COMP = CENTRAL_WH_DATA?.components || {};
+
 // Per-SKU overrides — stored in localStorage per-device under
 // `ns.skuOverride.<code>.<field>`. Set via the FormulaIcon (ⓘ) popover
 // on any cell that supports override (velocity, growth, leadTime, etc).
@@ -917,6 +926,54 @@ const NSData = (function () {
       // SP is TBD — UI should fall back to MRP for those.
       pricing:     SKU_PRICING[s.code] || { sp: price, mrp: price },
     };
+  }).map((sku) => {
+    // ── CENTRAL WH OVERLAY — apply numbers from the build-central-wh
+    //    engine (rolls forward from the 5-May audit + Production matrix +
+    //    Daily Movement of FG). Per spec docs/central-wh-spec.md, these
+    //    are the authoritative numbers for Central WH; marketplace cells
+    //    keep their own per-channel sources (Agency / Shopify / FK Hub).
+    const cwh = CWH_FG[sku.code];
+    if (!cwh) return sku;
+
+    const next = {
+      ...sku,
+      // Stock pool: replace warehouse-direct with audited FG; per-WH/per-FC
+      // marketplace stocks (amazonFBA, flipkart.live, blinkit feeders) are
+      // untouched — they come from their own exports.
+      stock: { ...sku.stock, warehouse: cwh.fgStock },
+      // Builder block — feeds the Materials breakdown popover.
+      warehouseBreakdown: {
+        ...sku.warehouseBreakdown,
+        fg: cwh.fgStock,
+        producibleFG: cwh.producible,
+        bindingComponent: cwh.binding,
+        bindingMissing: cwh.binding && CWH_COMP[cwh.binding]?.stock === 0,
+      },
+      // Central WH-specific fields the cell + drill modal read directly
+      // (kept separate from per-channel velocity/growth so each cell
+      // displays its own source). depletion includes all 6 movement
+      // channels — Amazon/FK/Blinkit/Website/Offline/Marketing.
+      centralWhVelocity: cwh.depletion30,
+      centralWhSalesVel: cwh.sales30,           // excludes Marketing channel
+      centralWhGrowth:   cwh.momGrowth,
+      centralWhRunway:   cwh.runwayDays,
+      centralWhBinding:  cwh.binding,
+      centralWhWorstCover: cwh.worstCoverDays,
+      // Lead time from the spec = max component lead in BOM.
+      leadTime: cwh.leadDays ?? sku.leadTime,
+      // FG stock value per spec: FG_WH_stock × price.
+      stockValue: cwh.stockValue,
+      // Reorder flag from the spec.
+      reorder: cwh.reorder,
+    };
+    // Recompute totalStock + status using the new WH stock.
+    next.totalStock = (next.stock.warehouse || 0) + (next.stock.amazonFBA || 0)
+                    + (next.stock.flipkart  || 0) + (next.stock.blinkit    || 0);
+    next.runwayStatus = next.velocity <= 0 ? "amber"
+      : (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime) ? "red"
+      : (next.centralWhRunway != null && next.centralWhRunway < 30) ? "amber"
+      : "green";
+    return next;
   }).map((sku) => {
     // ── FINAL STEP — apply per-SKU overrides from Formulas tab ──
     // For each override field set in localStorage, replace the derived
