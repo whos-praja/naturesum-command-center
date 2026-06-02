@@ -3040,8 +3040,16 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
 .modal-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .modal-sub { font-size: 11.5px; margin-top: 2px; }
 .modal-body {
+  /* flex: 1 + min-height: 0 are required for overflow-y: auto to actually
+     kick in. Without them, the body takes its content height; the modal-card
+     (max-height 95vh + overflow hidden) silently clips the bottom and no
+     scrollbar appears. -webkit-overflow-scrolling for iOS momentum scrolling. */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 16px 18px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 14px;
