@@ -511,11 +511,17 @@ const AmazonFcModal = ({ sku, onClose }) => {
   const real = sku.realData?.amazon;
 
   // ── Channel split derivation ───────────────────────────────────
-  // sku.channelVelocity.amazon already encodes the AMZ-001 fold
-  // (Amazon orders + Shopify D2C). Decompose so the two parts sum
-  // back to it exactly — no drift between modal and dashboard.
+  // sku.channelVelocity.amazon encodes the AMZ-001 fold
+  // (Amazon orders + Shopify D2C). Decompose:
+  //   - Shopify D2C: directly from Shopify CSV sales30d/30 (or agency Shopify row).
+  //     We CANNOT read sku.channelVelocity.shopify — that key doesn't exist in
+  //     data.js (Shopify is folded into amazon per AMZ-001).
+  //   - Amazon orders: channel total − Shopify D2C (so they sum exactly).
   const amzChannelDaily = sku?.channelVelocity?.amazon ?? 0;
-  const shopifyD2CDaily = sku?.channelVelocity?.shopify ?? 0;
+  const shopifyD2CDaily =
+    (sku.realData?.shopify?.sales30d != null
+      ? sku.realData.shopify.sales30d / 30
+      : sku.realData?.agency?.shopify?.dailyOut) ?? 0;
   const amazonOnlyDaily = Math.max(0, amzChannelDaily - shopifyD2CDaily);
 
   // Where did the Amazon number come from? (Used in the channel-split
@@ -1270,28 +1276,35 @@ const UnifiedStockTab = ({ inventory }) => {
               const producible  = s.warehouseBreakdown?.producibleFG ?? 0;
               const maxFg       = fg + producible;
 
-              // Per-channel velocity = total velocity × that channel's revenue
-              // share. Shopify share approximates the warehouse channel (D2C
-              // ships from warehouse). Synthesised — replace once per-channel
-              // sales data is wired in.
-              const sp = s.splits || {};
-              const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
-              // Per AMZ-001: Amazon channel velocity = amazon orders +
-              // shopify orders (Shopify ships from Amazon FBA). Warehouse
-              // velocity = whatever isn't claimed by a marketplace.
-              const amazonOwnVel  = s.velocity * ((sp.amazon  || 0) / revTotal);
-              const shopifyOwnVel = s.velocity * ((sp.shopify || 0) / revTotal);
-              const flipkartVel   = s.velocity * ((sp.flipkart || 0) / revTotal);
-              const blinkitVel    = s.velocity * ((sp.blinkit  || 0) / revTotal);
-              // Round each leg to 1dp so floating-point residuals (channels
-              // summing to s.velocity within 1e-15) don't leave a near-zero
-              // warehouse velocity that produces 18-digit runway days when
-              // divided into the central WH stock.
+              // Per-channel velocity — pulled DIRECTLY from sku.channelVelocity
+              // (computed in data.js from real marketplace exports). This is
+              // the same source the drill modals use, so the cell and modal
+              // always agree.
+              //
+              // Channel split for the breakdown line:
+              //   • Amazon channel = real Amazon orders + real Shopify D2C
+              //     (AMZ-001 fold — both ship from FBA stock pool).
+              //   • Shopify D2C daily = Shopify CSV sales30d ÷ 30 (or agency
+              //     Shopify row when uploaded).
+              //   • Amazon-only daily = channel − Shopify D2C (so they sum
+              //     exactly to the channel total).
+              //
+              // The old formula (total SKU velocity × revenue share) was
+              // wrong: it included warehouse-direct demand (B2B / offline)
+              // that has nothing to do with Amazon FBA stock.
               const r1 = (n) => Math.round((n || 0) * 10) / 10;
+              const channelVel = s.channelVelocity || {};
+              const shopifyD2CDaily =
+                (s.realData?.shopify?.sales30d != null
+                  ? s.realData.shopify.sales30d / 30
+                  : s.realData?.agency?.shopify?.dailyOut) ?? 0;
+              const amazonOnlyDaily = Math.max(0, (channelVel.amazon || 0) - shopifyD2CDaily);
+              const amazonOwnVel  = r1(amazonOnlyDaily);
+              const shopifyOwnVel = r1(shopifyD2CDaily);
               const vel = {
-                amazonFBA: r1(amazonOwnVel + shopifyOwnVel),
-                flipkart:  r1(flipkartVel),
-                blinkit:   r1(blinkitVel),
+                amazonFBA: r1(channelVel.amazon ?? 0),
+                flipkart:  r1(channelVel.flipkart ?? 0),
+                blinkit:   r1(channelVel.blinkit ?? 0),
                 // WH velocity for the Unified-Stock display = total SKU velocity.
                 // i.e. "if marketplaces emptied and WH had to supply all demand
                 // alone, here's the drain rate". Gives every SKU a meaningful
