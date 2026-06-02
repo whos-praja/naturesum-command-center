@@ -81,10 +81,15 @@ const NITIN_DATA = __liveNitin || BUNDLED_NITIN;
 const NSData = (function () {
   const fmtINR = (n) => {
     if (n == null) return "—";
-    if (Math.abs(n) >= 10000000) return "₹" + (n/10000000).toFixed(2) + " Cr";
-    if (Math.abs(n) >= 100000) return "₹" + (n/100000).toFixed(2) + " L";
-    if (Math.abs(n) >= 1000) return "₹" + (n/1000).toFixed(1) + "K";
-    return "₹" + n;
+    // Bug #9 — put the minus sign BEFORE the rupee glyph so negatives
+    // render as "−₹0.2K" instead of the ugly "₹-0.2K". Use the typographic
+    // minus (U+2212) to match the Delta component's convention.
+    const sign = n < 0 ? "−" : "";
+    const a = Math.abs(n);
+    if (a >= 10000000) return sign + "₹" + (a/10000000).toFixed(2) + " Cr";
+    if (a >= 100000)   return sign + "₹" + (a/100000).toFixed(2) + " L";
+    if (a >= 1000)     return sign + "₹" + (a/1000).toFixed(1) + "K";
+    return sign + "₹" + a;
   };
   // Format a number for display. Integers render as locale-grouped ("12,345").
   // Floats with a non-trivial fractional part render to 1 decimal place
@@ -618,7 +623,10 @@ const NSData = (function () {
         qty:     inputQty,
         perPack: recipe.input.perPack,
         // Per-input capacity = how many FG packs this input alone can make.
-        capacity: recipe.input.perPack > 0 ? Math.floor(inputQty / recipe.input.perPack) : 0,
+        // Bug #12 — clamp non-negative: negative component stocks (a real
+        // data-quality issue surfaced by the central WH engine) shouldn't
+        // contaminate downstream capacity arithmetic with negative caps.
+        capacity: recipe.input.perPack > 0 ? Math.max(0, Math.floor(inputQty / recipe.input.perPack)) : 0,
         leadTime: COMPONENT_LEAD_TIMES[recipe.input.refCode] ?? null,
       };
       if (recipe.kind === "semi") sfg = inputRow;
@@ -633,7 +641,8 @@ const NSData = (function () {
         unit:         p.unit,
         qty,
         unitsPerPack: p.unitsPerPack,
-        capacity:     p.unitsPerPack > 0 ? Math.floor(qty / p.unitsPerPack) : 0,
+        // Same non-negative clamp (Bug #12).
+        capacity:     p.unitsPerPack > 0 ? Math.max(0, Math.floor(qty / p.unitsPerPack)) : 0,
         leadTime:     COMPONENT_LEAD_TIMES[p.refCode] ?? null,
       };
     });
@@ -647,6 +656,7 @@ const NSData = (function () {
       const pkgCaps  = pkgList.map(p => p.capacity);
       producibleFG = Math.min(inputCap, ...(pkgCaps.length ? pkgCaps : [Infinity]));
       if (!isFinite(producibleFG)) producibleFG = 0;
+      producibleFG = Math.max(0, producibleFG); // Bug #12 — never negative
     }
 
     const warehouseBreakdown = {
@@ -953,9 +963,11 @@ const NSData = (function () {
       // (kept separate from per-channel velocity/growth so each cell
       // displays its own source). depletion includes all 6 movement
       // channels — Amazon/FK/Blinkit/Website/Offline/Marketing.
-      centralWhVelocity: cwh.depletion30,
-      centralWhSalesVel: cwh.sales30,           // excludes Marketing channel
-      centralWhGrowth:   cwh.momGrowth,
+      // Round velocity to 1dp for display parity with channelVelocity (Bug
+      // #10 — engine emits raw floats like 7.067).
+      centralWhVelocity: r1(cwh.depletion30),
+      centralWhSalesVel: r1(cwh.sales30),       // excludes Marketing channel
+      centralWhGrowth:   cwh.momGrowth != null ? r1(cwh.momGrowth) : null,
       centralWhRunway:   cwh.runwayDays,
       centralWhBinding:  cwh.binding,
       centralWhWorstCover: cwh.worstCoverDays,
@@ -969,6 +981,13 @@ const NSData = (function () {
     // Recompute totalStock + status using the new WH stock.
     next.totalStock = (next.stock.warehouse || 0) + (next.stock.amazonFBA || 0)
                     + (next.stock.flipkart  || 0) + (next.stock.blinkit    || 0);
+    // Bug #4 — sku.runway was set in the main derive (line 919 ish) using
+    // the pre-overlay totalStock + velocity. Now we have the engine's
+    // proper FG-runway, use it; fall back to total/vel for SKUs with no
+    // engine signal.
+    next.runway = next.centralWhRunway != null
+      ? next.centralWhRunway
+      : (next.velocity > 0 ? Math.round(next.totalStock / next.velocity) : 0);
     next.runwayStatus = next.velocity <= 0 ? "amber"
       : (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime) ? "red"
       : (next.centralWhRunway != null && next.centralWhRunway < 30) ? "amber"

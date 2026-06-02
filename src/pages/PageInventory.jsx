@@ -975,12 +975,19 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 // Runway color tier: <14d red, <30d amber, otherwise neutral.
 const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) => {
   const D = NSData;
-  // Velocity floor — anything below this hides the runway pill. Tunable
-  // from Inventory → Formulas (default 0.05 / matches 1-dp display).
+  // Velocity floor — anything below this hides the runway pill (rounds to
+  // 0.0/d on display anyway). Tunable from the ⚙ Settings modal.
   const floor = readParam("velocityFloor");
-  const hasVel = velocity != null && velocity > floor;
-  const runway = hasVel ? Math.round(units / velocity) : null;
+  const hasPositiveVel = velocity != null && velocity > floor;
+  const isNetReturns   = velocity != null && velocity < 0;   // Bug #6 hook —
+                                                              // returns outpacing sales
+  const runway = hasPositiveVel ? Math.round(units / velocity) : null;
   const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
+  // Bug #7 — render the growth chip independently of velocity. A SKU with
+  // 0 sales today can still have a meaningful growth signal (e.g. just
+  // relaunched at +200%, or stopped at −100%) and the founder needs to see it.
+  const hasGrowth = growth != null;
+  const showMeta  = hasPositiveVel || isNetReturns || hasGrowth;
   return (
     <div className="pf-cell">
       <div className="pf-cell-units-row">
@@ -989,11 +996,21 @@ const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) =>
         )}
         <div className="pf-cell-units mono">{units != null ? D.fmtN(units) : "—"}</div>
       </div>
-      {hasVel && (
+      {showMeta && (
         <div className="pf-cell-meta">
-          <span className={"pf-cell-runway" + tier}>{runway}d</span>
-          <span className="pf-cell-vel mono">{velocity.toFixed(1)}/d</span>
-          {growth != null && (
+          {hasPositiveVel && <span className={"pf-cell-runway" + tier}>{runway}d</span>}
+          {isNetReturns && (
+            <span
+              className="pf-cell-runway crit"
+              title="Net returns — more units coming back than going out over the last 30 days"
+            >
+              net returns
+            </span>
+          )}
+          {(hasPositiveVel || isNetReturns) && (
+            <span className="pf-cell-vel mono">{velocity.toFixed(1)}/d</span>
+          )}
+          {hasGrowth && (
             <span className="pf-cell-growth">
               <Delta value={growth} hideArrow/>
             </span>
@@ -1959,20 +1976,40 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
             })}
           </div>
 
-          <div className="wb-meta">
-            <dl className="kv">
-              <dt>FG stock value <FormulaIcon formulaId="stockValue" currentValue={D.fmtINR(wb.fg * unitCost)} valueLabel="Current (WH only)"/></dt>
-              <dd>{D.fmtINR(wb.fg * unitCost)}</dd>
-              <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={`${D.fmtN(sku.velocity)} /day`}/></dt>
-              <dd>{D.fmtN(sku.velocity)} units/day</dd>
-              <dt>Runway (central warehouse FG) <FormulaIcon formulaId="runway" currentValue={`${Math.round(wb.fg / sku.velocity)} days`}/></dt>
-              <dd>{Math.round(wb.fg / sku.velocity)} days</dd>
-              <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
-              <dd>{sku.leadTime} days</dd>
-              <dt>MoM growth <FormulaIcon formulaId="growth" skuCode={sku.code} skuField="growth" currentValue={`${sku.growth > 0 ? "+" : ""}${sku.growth.toFixed(1)}%`}/></dt>
-              <dd>{sku.growth > 0 ? "+" : ""}{sku.growth.toFixed(1)}%</dd>
-            </dl>
-          </div>
+          {/* KV block — all four metrics now resilient to missing / zero /
+              negative inputs (Bug #5 — was rendering literal "Infinity days"
+              when sku.velocity = 0; Bug #8 — sku.growth could be null after
+              the new per-channel derivation). */}
+          {(() => {
+            const fgValue = wb.fg * (sku.pricing?.sp ?? sku.pricing?.mrp ?? unitCost);
+            const vel = sku.centralWhVelocity ?? sku.velocity ?? 0;
+            const runwayDays = sku.centralWhRunway != null
+              ? sku.centralWhRunway
+              : (vel > 0 ? Math.round(wb.fg / vel) : null);
+            const runwayStr = runwayDays == null
+              ? "—"
+              : runwayDays >= 999 ? "999+ days" : `${runwayDays} days`;
+            const growthValue = sku.centralWhGrowth ?? sku.growth;
+            const growthStr = growthValue == null
+              ? "—"
+              : `${growthValue > 0 ? "+" : ""}${growthValue.toFixed(1)}%`;
+            return (
+              <div className="wb-meta">
+                <dl className="kv">
+                  <dt>FG stock value <FormulaIcon formulaId="stockValue" currentValue={D.fmtINR(fgValue)} valueLabel="Current (WH only)"/></dt>
+                  <dd>{D.fmtINR(fgValue)}</dd>
+                  <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={`${D.fmtN(vel)} /day`}/></dt>
+                  <dd>{D.fmtN(vel)} units/day</dd>
+                  <dt>Runway (central warehouse FG) <FormulaIcon formulaId="runway" currentValue={runwayStr}/></dt>
+                  <dd>{runwayStr}</dd>
+                  <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
+                  <dd>{sku.leadTime} days</dd>
+                  <dt>MoM growth <FormulaIcon formulaId="growth" skuCode={sku.code} skuField="growth" currentValue={growthStr}/></dt>
+                  <dd>{growthStr}</dd>
+                </dl>
+              </div>
+            );
+          })()}
 
           {/* Per-SKU desired stock level (days of cover) — drives the
               Forecast tab's reorder-qty recommendation. Defaults to 30

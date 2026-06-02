@@ -44,7 +44,11 @@ const Icon = ({ name, size = 16 }) => {
 
 // ── Stat / Delta ─────────────────────────────────────────
 const Delta = ({ value, unit = "%", suffix, hideArrow }) => {
+  // Bug #8 — null-safe. parseFloat(null) → NaN → "NaN%" used to leak through.
+  // Now we render an "—" muted chip instead, matching the rest of the design.
+  if (value == null) return <span className="delta flat muted">—</span>;
   const v = parseFloat(value);
+  if (!Number.isFinite(v)) return <span className="delta flat muted">—</span>;
   const cls = v > 0.05 ? "up" : v < -0.05 ? "down" : "flat";
   return (
     <span className={"delta " + cls}>
