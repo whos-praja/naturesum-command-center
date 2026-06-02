@@ -15,7 +15,7 @@
  *   currentValue — optional, the actual displayed value (shown in the popover)
  *   valueLabel   — optional, label for the current value (default "Current")
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import {
   getFormula,
   FORMULA_PARAMS,
@@ -24,11 +24,33 @@ import {
   readOverride, writeOverride, clearOverride,
 } from "../lib/formulaParams.js";
 
+// Singleton broadcast — when one popover opens, every other instance
+// hears it and closes itself. Keeps at most ONE formula popover visible
+// at a time across the whole app.
+const POPOVER_EVENT = "ns-formula-popover-opened";
+
 export function FormulaIcon({ formulaId, paramKey, skuCode, skuField, currentValue, valueLabel = "Current" }) {
+  const instanceId = useId();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const wrapRef = useRef(null);
   const popoverRef = useRef(null);
+
+  // Hear when any OTHER FormulaIcon opens — close ours if so.
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.detail?.id !== instanceId) setOpen(false);
+    };
+    window.addEventListener(POPOVER_EVENT, handler);
+    return () => window.removeEventListener(POPOVER_EVENT, handler);
+  }, [instanceId]);
+
+  // When our own popover opens, broadcast so siblings close.
+  useEffect(() => {
+    if (open) {
+      window.dispatchEvent(new CustomEvent(POPOVER_EVENT, { detail: { id: instanceId } }));
+    }
+  }, [open, instanceId]);
 
   // Compute viewport-aware position so the popover never spills off-
   // screen — anchor below the icon, clamp horizontally to a 16px gutter.
@@ -76,10 +98,11 @@ export function FormulaIcon({ formulaId, paramKey, skuCode, skuField, currentVal
     <span className="formula-icon-wrap" ref={wrapRef}>
       <button
         type="button"
-        className="formula-icon"
+        className={"formula-icon" + (open ? " is-active" : "")}
         onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
         title="See how this number is calculated"
         aria-label="Show formula"
+        aria-expanded={open}
       >
         ⓘ
       </button>

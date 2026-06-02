@@ -3639,6 +3639,18 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   background: var(--brand-soft);
   border-color: rgba(47, 94, 71, 0.40);
 }
+/* Active = its popover is currently open. Flips to filled brand so the
+   user can spot which icon they clicked among many. */
+.formula-icon.is-active {
+  background: var(--brand);
+  color: #F5F2EA;
+  border-color: var(--brand-deep);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+.formula-icon.is-active:hover {
+  background: var(--brand-deep);
+  color: #F5F2EA;
+}
 .formula-popover {
   position: fixed;                                /* viewport-anchored — never clipped by a modal */
   z-index: 1100;
