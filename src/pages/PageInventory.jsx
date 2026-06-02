@@ -1044,9 +1044,15 @@ const UnifiedStockTab = ({ inventory }) => {
     if (b.velocity !== a.velocity) return b.velocity - a.velocity;
     return (b.stockValue || 0) - (a.stockValue || 0);
   })[0];
-  const topMoverRev = topMover
-    ? Math.round((topMover.velocity * 30) * ((topMover.stockValue || 0) / Math.max(1, topMover.totalStock || 1)))
+  // Monthly revenue = velocity × 30 days × selling price per unit. Use the
+  // actual selling price (pricing.sp), NOT stockValue/totalStock — when an
+  // SKU is fully sold out (FG stock = 0, e.g. NSSBJ500 after a sales spike),
+  // the derived ratio collapses to 0 and revenue lies as ₹0/mo even though
+  // the SKU is the top mover. The price is constant; use it directly.
+  const topMoverPrice = topMover
+    ? (topMover.pricing?.sp ?? topMover.pricing?.mrp ?? 0)
     : 0;
+  const topMoverRev = topMover ? Math.round(topMover.velocity * 30 * topMoverPrice) : 0;
 
   // Clicking any SKU row opens the breakdown popover.
   const [popoverSku, setPopoverSku] = useState(null);
