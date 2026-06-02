@@ -944,6 +944,9 @@ const NSData = (function () {
     //    keep their own per-channel sources (Agency / Shopify / FK Hub).
     const cwh = CWH_FG[sku.code];
     if (!cwh) return sku;
+    // r1 is local to the previous .map() callback scope — redeclare here.
+    // (The crash this caused turned the whole Inventory page white.)
+    const r1 = (n) => Math.round((n || 0) * 10) / 10;
 
     const next = {
       ...sku,
