@@ -248,14 +248,169 @@ export async function parseShopify(file, opts = {}) {
 }
 
 // ─── 6. Agency channel-wise sales sheet ─────────────────────
-// Source-of-truth for Amazon velocity + growth per founder's table.
-// Format is flexible — the parser tries both common shapes:
-//   WIDE: one row per SKU, with per-channel columns ("Amazon", "Flipkart",
-//         "Blinkit", "Shopify") + optional growth columns ("Amazon Growth")
-//   LONG: one row per (SKU × channel), columns: SKU · Channel · Sales 30d · Growth
-// Header matching is case-insensitive, substring-tolerant.
+// Source-of-truth for Amazon / Blinkit / Flipkart velocity + growth per
+// founder's truth table. Three shapes are auto-detected (top wins):
+//
+//   DAILY-LOG (the actual founder workbook): multi-tab xlsx with one
+//     channel-named tab each ("AMZ Categorywise", "Blinkit Categorywise",
+//     "FK Categorywise"). Each tab is a daily-log — Column A = Date,
+//     columns B..N = product category display names with daily sales
+//     ints. SKU resolution via NAME_MAP (display-name → canonical).
+//     Sum last 30 rows for sales30d, last 60 for sales60d → growth from
+//     (cur30 vs prior30 = sales60d − sales30d).
+//
+//   WIDE: single sheet, one row per SKU, per-channel columns ("Amazon",
+//         "Flipkart", "Blinkit", "Shopify") + optional growth columns.
+//
+//   LONG: single sheet, one row per (SKU × channel), columns: SKU ·
+//         Channel · Sales 30d · Growth.
+//
+// Full spec: docs/data-extraction-spec.md
+//
+// Agency-sheet category display name → canonical SKU code. Matching is
+// case-insensitive and whitespace/punctuation-tolerant (see normalize()).
+const AGENCY_NAME_MAP = {
+  "jatamansi oil":                "NSJO100",
+  "sea buckthorn berries 100g":   "NSSBDB100",
+  "sea buckthorn berries 250g":   "NSSBDB250",
+  "sea buckthorn berries 500g":   "NSSBDB500",
+  "sea buckthorn powder 100g":    "NSSB100",
+  "sea buckthorn powder 250g":    "NSSB250",
+  "sea buckthorn powder 500g":    "NSSB500",
+  "sea buckthorn oil 15ml":       "NSSBBO15",
+  "sea buckthorn oil 30ml":       "NSSBBO30",
+  "sea buckthorn juice 300ml":    "NSSBJ300",
+  "sea buckthorn juice 500ml":    "NSSBJ500",
+  "moringa powder 100g":          "NSMP100",
+  "moringa powder 250g":          "NSMP250",
+  // "acacia catechu" intentionally unmapped — founder to confirm SKU
+};
+
+function normalizeAgencyName(s) {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[()]/g, " ")    // tolerate "Moringa Powder (100g)" vs "Moringa Powder 100g"
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectAgencyChannel(tabName) {
+  const lc = String(tabName || "").toLowerCase();
+  if (/amz|amazon|fba/.test(lc))    return "amazon";
+  if (/blink|blnkit|quick/.test(lc)) return "blinkit";
+  if (/flip|^fk|flipkart/.test(lc)) return "flipkart";
+  return null; // "Sale" and others ignored
+}
+
+// Parse Excel/Sheets date cell to JS Date. Accepts:
+//   • Date object  → return as-is
+//   • number       → Excel serial (days since 1899-12-30)
+//   • DD/M/YYYY    → Indian format
+//   • ISO string   → native Date parse
+function parseSheetDate(v) {
+  if (v == null || v === "") return null;
+  if (v instanceof Date) return v;
+  if (typeof v === "number") return new Date((v - 25569) * 86400 * 1000);
+  const s = String(v).trim();
+  if (!s || /^total/i.test(s)) return null;
+  // DD/M/YYYY or D/M/YYYY
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(`${m[3]}-${String(m[2]).padStart(2,"0")}-${String(m[1]).padStart(2,"0")}`);
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// Process a single daily-log channel tab → aggregate sales into byCode[channel].
+function processAgencyDailyLogTab(ws, channel, byCode) {
+  const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: true });
+  if (!grid.length) return false;
+
+  // Find header row — first row where column A is "date" (case-insensitive).
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(grid.length, 10); i++) {
+    const a = normalizeAgencyName(grid[i][0]);
+    if (a === "date") { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return false;
+  const headers = grid[headerIdx];
+
+  // Map each column → canonical code (skip "Total", "Date", and unmapped names)
+  const colToCode = {};
+  for (let c = 1; c < headers.length; c++) {
+    const norm = normalizeAgencyName(headers[c]);
+    if (!norm || norm === "total") continue;
+    const code = AGENCY_NAME_MAP[norm];
+    if (code) colToCode[c] = code;
+  }
+  if (Object.keys(colToCode).length === 0) return false;
+
+  // Determine cutoff = latest row date (snapshot semantics — not literal "today").
+  const dataRows = grid.slice(headerIdx + 1);
+  let latestTs = -Infinity;
+  for (const r of dataRows) {
+    const d = parseSheetDate(r[0]);
+    if (d) latestTs = Math.max(latestTs, d.getTime());
+  }
+  if (!Number.isFinite(latestTs)) return false;
+
+  // Aggregate per-SKU aging buckets.
+  for (const r of dataRows) {
+    const d = parseSheetDate(r[0]);
+    if (!d) continue;
+    const ageDays = (latestTs - d.getTime()) / 86400000;
+    if (ageDays < 0 || ageDays > 90) continue;
+    for (const [col, code] of Object.entries(colToCode)) {
+      const val = num(r[col]);
+      if (!byCode[code])             byCode[code] = {};
+      if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales15d: 0, sales30d: 0, sales60d: 0 };
+      const tgt = byCode[code][channel];
+      if (ageDays <=  7) tgt.sales7d  += val;
+      if (ageDays <= 15) tgt.sales15d += val;
+      if (ageDays <= 30) tgt.sales30d += val;
+      if (ageDays <= 60) tgt.sales60d += val;
+    }
+  }
+
+  // Finalize each SKU for this channel: dailyOut, growth (MoM cur30 vs prior30).
+  for (const code of Object.keys(byCode)) {
+    const t = byCode[code][channel];
+    if (!t) continue;
+    t.dailyOut = t.sales30d / 30;
+    const prior30 = Math.max(0, t.sales60d - t.sales30d);
+    if (prior30 > 0)             t.growth = Math.max(-100, Math.min(200, ((t.sales30d - prior30) / prior30) * 100));
+    else if (t.sales30d > 0)     t.growth = 200;
+    else if (prior30 === 0 && t.sales30d === 0) t.growth = null;
+    else                         t.growth = -100;
+  }
+  return true;
+}
+
 export async function parseAgencyChannelSales(file, _opts = {}) {
   const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+
+  // ── Try DAILY-LOG (founder's actual format) first when it's an xlsx
+  //    workbook with channel-named tabs. Each tab is processed
+  //    independently — Amazon from AMZ Categorywise, Blinkit from
+  //    Blinkit Categorywise, Flipkart from FK Categorywise.
+  if (isExcel) {
+    const wb = await fileToWorkbook(file);
+    const channelTabs = wb.SheetNames
+      .map(name => ({ name, channel: detectAgencyChannel(name) }))
+      .filter(x => x.channel);
+    if (channelTabs.length > 0) {
+      const byCode = {};
+      const processedTabs = [];
+      for (const { name, channel } of channelTabs) {
+        const ok = processAgencyDailyLogTab(wb.Sheets[name], channel, byCode);
+        if (ok) processedTabs.push({ name, channel });
+      }
+      if (processedTabs.length > 0) {
+        return { byCode, shape: "daily-log", processedTabs };
+      }
+      // Fall through to WIDE/LONG on first sheet if no daily-log tabs matched
+    }
+  }
+
   let rows;
   if (isExcel) {
     const wb = await fileToWorkbook(file);
