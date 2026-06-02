@@ -7,6 +7,8 @@ import { useLiveData } from "../contexts/LiveDataContext.jsx";
 import { applyLiveData } from "../lib/liveInventory.js";
 import { computeCascade } from "../lib/runwayCascade.js";
 import { readTargetDays, writeTargetDays, DEFAULT_TARGET_DAYS } from "../lib/skuTargets.js";
+import { readParam } from "../lib/formulaParams.js";
+import FormulasTab from "./sub/FormulasTab.jsx";
 
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
@@ -87,6 +89,7 @@ const PageInventory = ({ subsection }) => {
         <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>SKU catalog</button>
         <button className={tab === "batches" ? "active" : ""} onClick={() => setTab("batches")}>Batches & expiry</button>
         <button className={tab === "returns" ? "active" : ""} onClick={() => setTab("returns")}>Returns restocking</button>
+        <button className={tab === "formulas" ? "active" : ""} onClick={() => setTab("formulas")}>Formulas</button>
       </div>
 
       {tab === "unified" && <UnifiedStockTab inventory={liveInventory}/>}
@@ -99,6 +102,7 @@ const PageInventory = ({ subsection }) => {
       {tab === "catalog" && <CatalogTab inventory={liveInventory}/>}
       {tab === "batches"  && <SubtabPreviewGate label="Batches & expiry"><BatchesTab batches={D.batches}/></SubtabPreviewGate>}
       {tab === "returns"  && <SubtabPreviewGate label="Returns restocking"><ReturnsTab/></SubtabPreviewGate>}
+      {tab === "formulas" && <FormulasTab/>}
     </div>
   );
 };
@@ -136,15 +140,16 @@ function blkPerWhVelocity(feeders, sku, whCode) {
 function blkFeederStats(feeders, sku, threshold) {
   const ever = feeders?.ever?.length || 0;
   const current = feeders?.current || {};
+  const oosSoonDays = readParam("blkOosSoonDays"); // tunable, default 14
   let red = 0, orange = 0;
   for (const code of feeders?.ever || []) {
     const stock = current[code] ?? 0;
     const perWhVel = blkPerWhVelocity(feeders, sku, code);
     if (stock <= 0) red++;
     else if (perWhVel > 0) {
-      // OOS within 14 days at this WH's velocity OR stock ≤ amber threshold
+      // OOS within blkOosSoonDays at this WH's velocity OR stock ≤ amber threshold
       const daysCover = stock / perWhVel;
-      if (daysCover <= 14 || stock <= threshold) orange++;
+      if (daysCover <= oosSoonDays || stock <= threshold) orange++;
     } else if (stock <= threshold) {
       orange++;
     }
@@ -736,10 +741,10 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 // Runway color tier: <14d red, <30d amber, otherwise neutral.
 const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) => {
   const D = NSData;
-  // Threshold of 0.05 (half the 1-dp display precision) — anything that
-  // rounds to "0.0/d" on display must not produce a runway from a
-  // floating-point residual like 5e-16.
-  const hasVel = velocity != null && velocity > 0.05;
+  // Velocity floor — anything below this hides the runway pill. Tunable
+  // from Inventory → Formulas (default 0.05 / matches 1-dp display).
+  const floor = readParam("velocityFloor");
+  const hasVel = velocity != null && velocity > floor;
   const runway = hasVel ? Math.round(units / velocity) : null;
   const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
   return (
@@ -1674,7 +1679,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           </div>
           <div className="wb-channels">
             {channels.map(ch => {
-              const hasVel = ch.vel > 0.05;
+              const hasVel = ch.vel > readParam("velocityFloor");
               const runway = hasVel ? Math.round(ch.units / ch.vel) : null;
               return (
                 <div className="wb-ch-row" key={ch.key} title={ch.hint}>
@@ -2438,7 +2443,7 @@ const CustomGrowthInput = ({ code, initial, isOverride, onCommit }) => {
 // FBA / Flipkart / Blinkit columns.
 const RunwayChannelCell = ({ units, vel, leadTime, growth, splitA, splitB, splitALabel = "amz", splitBLabel = "d2c" }) => {
   const D = NSData;
-  const hasVel = vel != null && vel > 0.05; // see PlatformCell — same floating-point residual guard
+  const hasVel = vel != null && vel > readParam("velocityFloor"); // tunable from Formulas tab
   const runway = hasVel ? Math.round(units / vel) : null;
   // Use the channel's own lead time for severity, not the warehouse one.
   const tier = runway == null
