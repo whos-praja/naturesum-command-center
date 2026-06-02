@@ -113,6 +113,18 @@ Single-tab CSV. One row per (date × SKU × variant), columns:
 Matching is **case-insensitive** and tolerates surrounding whitespace,
 extra spaces, and `(` `)` punctuation differences.
 
+### Multi-pack columns (combos)
+
+The Blinkit / FK tabs (and occasionally AMZ) have combo columns suffixed
+with `*N`, e.g.:
+- `Sea Buckthorn Berries 100g*4` → 4 of NSSBDB100 per cell unit
+- `Jatamansi Oil*4` → 4 of NSJO100 per cell unit
+
+Rule: each unit sold in a multipack column represents **N units of the
+base SKU**. Parser multiplies raw cell value by N when aggregating into
+the base SKU's aging buckets. Regex: `^(.+?)\s*\*\s*(\d+)$` against the
+normalized name.
+
 ### SHOPIFY_SKU_MAP — Shopify variant SKU → canonical
 
 See `CODE_MAP.shp` in `src/lib/uploadParsers.js`. Examples:

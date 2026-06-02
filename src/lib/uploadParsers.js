@@ -294,6 +294,21 @@ function normalizeAgencyName(s) {
     .trim();
 }
 
+// Multi-pack columns: "Jatamansi Oil*4" → { code: NSJO100, multiplier: 4 }.
+// Singles: "Jatamansi Oil" → { code: NSJO100, multiplier: 1 }.
+// Unmapped or "total" → null.
+function mapAgencyColumnToCode(header) {
+  const norm = normalizeAgencyName(header);
+  if (!norm || norm === "total") return null;
+  const m = norm.match(/^(.+?)\s*\*\s*(\d+)$/);
+  if (m) {
+    const code = AGENCY_NAME_MAP[m[1].trim()];
+    return code ? { code, multiplier: parseInt(m[2], 10) || 1 } : null;
+  }
+  const code = AGENCY_NAME_MAP[norm];
+  return code ? { code, multiplier: 1 } : null;
+}
+
 function detectAgencyChannel(tabName) {
   const lc = String(tabName || "").toLowerCase();
   if (/amz|amazon|fba/.test(lc))    return "amazon";
@@ -334,15 +349,15 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
   if (headerIdx === -1) return false;
   const headers = grid[headerIdx];
 
-  // Map each column → canonical code (skip "Total", "Date", and unmapped names)
-  const colToCode = {};
+  // Map each column → { code, multiplier }. Multi-packs ("Jatamansi Oil*4")
+  // get multiplier=4 so the unit count = raw value × 4 (one combo sold =
+  // 4 actual units of stock depleted).
+  const colMap = {};
   for (let c = 1; c < headers.length; c++) {
-    const norm = normalizeAgencyName(headers[c]);
-    if (!norm || norm === "total") continue;
-    const code = AGENCY_NAME_MAP[norm];
-    if (code) colToCode[c] = code;
+    const m = mapAgencyColumnToCode(headers[c]);
+    if (m) colMap[c] = m;
   }
-  if (Object.keys(colToCode).length === 0) return false;
+  if (Object.keys(colMap).length === 0) return false;
 
   // Determine cutoff = latest row date (snapshot semantics — not literal "today").
   const dataRows = grid.slice(headerIdx + 1);
@@ -353,14 +368,16 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
   }
   if (!Number.isFinite(latestTs)) return false;
 
-  // Aggregate per-SKU aging buckets.
+  // Aggregate per-SKU aging buckets. Multi-pack columns contribute
+  // (raw value × multiplier) units to the base SKU's aging buckets.
   for (const r of dataRows) {
     const d = parseSheetDate(r[0]);
     if (!d) continue;
     const ageDays = (latestTs - d.getTime()) / 86400000;
     if (ageDays < 0 || ageDays > 90) continue;
-    for (const [col, code] of Object.entries(colToCode)) {
-      const val = num(r[col]);
+    for (const col of Object.keys(colMap)) {
+      const { code, multiplier } = colMap[col];
+      const val = num(r[col]) * multiplier;
       if (!byCode[code])             byCode[code] = {};
       if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales15d: 0, sales30d: 0, sales60d: 0 };
       const tgt = byCode[code][channel];

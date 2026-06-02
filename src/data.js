@@ -11,6 +11,14 @@ import { REAL_MARKETPLACE_DATA as BUNDLED_MP, REAL_DATA_SNAPSHOT_DATE } from "./
 // physical count) and Amazon daily velocity (72-day avg beats 1-day proxy).
 import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
 
+// Founder's Agency Channel-wise Sales Sheet, pre-parsed at build time and
+// bundled. Per truth table, this is the source-of-truth for Amazon channel
+// velocity + growth (and a fallback for Flipkart/Blinkit when their native
+// exports are missing). Live agency uploads (uploadParsers.js daily-log
+// shape) override this on a per-SKU/per-channel basis.
+import { BUNDLED_AGENCY_DATA } from "./bundledAgencyData.js";
+const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
+
 // User-uploaded multi-file payload (Sprint 12 — upload UI). When a SKU
 // has uploaded data for a given source, it wins over the bundled file;
 // SKUs/channels not present in the upload fall back to the bundled real
@@ -28,7 +36,7 @@ function _mergeBundledAndLive(code) {
     blinkit:  l.blinkit  ?? b.blinkit  ?? null,
     flipkart: l.flipkart ?? b.flipkart ?? null,
     shopify:  l.shopify  ?? b.shopify  ?? null,
-    agency:   l.agency   ?? null,                    // upload-only — no bundled equivalent yet
+    agency:   l.agency   ?? BUNDLED_AGENCY[code] ?? null,
   };
 }
 const REAL_MARKETPLACE_DATA = new Proxy({}, {
