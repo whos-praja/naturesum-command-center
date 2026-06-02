@@ -3054,6 +3054,12 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   flex-direction: column;
   gap: 14px;
 }
+/* Children of modal-body must NOT flex-shrink. Without this, when content
+   exceeds available height the flex container compresses children instead
+   of overflowing — wb-rows and wb-channels (overflow: hidden) silently clip
+   their last rows and no scrollbar appears. Setting flex-shrink: 0 forces
+   the container to overflow, which triggers the scrollbar. */
+.modal-body > * { flex-shrink: 0; }
 .modal-foot {
   padding: 12px 18px;
   border-top: 1px solid var(--border-soft);
