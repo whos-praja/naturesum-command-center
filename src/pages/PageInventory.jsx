@@ -493,8 +493,13 @@ const AmazonFcStats = ({ sku }) => {
   );
 };
 
-// Drill modal — per-FC stock list with daily customer shipments + damaged
-// + velocity decomposition (Amazon orders vs Shopify D2C per AMZ-001).
+// Drill modal — Amazon channel deep-dive.
+// Layout (founder priority order):
+//   1. Hero metrics:        velocity (30d), MoM growth, combined runway
+//   2. Channel split:       Amazon orders (agency sheet) ⊕ Shopify D2C
+//                           (Shopify sheet). Both deplete FBA stock pool.
+//   3. Warehouse breakdown: per-FC stock + damaged + 1-day shipped proxy.
+//                           Health summary (OOS/Low/Healthy) inline above.
 const AmazonFcModal = ({ sku, onClose }) => {
   const D = NSData;
   useEffect(() => {
@@ -504,29 +509,68 @@ const AmazonFcModal = ({ sku, onClose }) => {
   }, [onClose]);
 
   const real = sku.realData?.amazon;
-  const sp   = sku.splits || {};
-  const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
-  const amzVel = sku.velocity * ((sp.amazon  || 0) / revTotal);
-  const shpVel = sku.velocity * ((sp.shopify || 0) / revTotal);
-  const totalAmzCh = amzVel + shpVel;
 
+  // ── Channel split derivation ───────────────────────────────────
+  // sku.channelVelocity.amazon already encodes the AMZ-001 fold
+  // (Amazon orders + Shopify D2C). Decompose so the two parts sum
+  // back to it exactly — no drift between modal and dashboard.
+  const amzChannelDaily = sku?.channelVelocity?.amazon ?? 0;
+  const shopifyD2CDaily = sku?.channelVelocity?.shopify ?? 0;
+  const amazonOnlyDaily = Math.max(0, amzChannelDaily - shopifyD2CDaily);
+
+  // Where did the Amazon number come from? (Used in the channel-split
+  // row's source caption — makes provenance visible to the founder.)
+  const amzSourceLabel =
+    sku.realData?.agency?.amazon?.dailyOut != null
+      ? "Agency Channel-wise Sales Sheet"
+      : real?.orders
+        ? "Amazon Manage Orders feed (FBA only)"
+        : (real?.totalShippedToday != null)
+          ? "Amazon Warehouse-Wise Ledger (1-day proxy)"
+          : "no real Amazon data";
+  const shpSourceLabel =
+    sku.realData?.shopify?.sales30d != null
+      ? "Shopify Website Sales Sheet"
+      : sku.realData?.agency?.shopify?.dailyOut != null
+        ? "Agency Channel-wise Sales Sheet (Shopify row)"
+        : "no real Shopify data";
+
+  // ── Combined runway ────────────────────────────────────────────
+  // FBA stock pool serves both demand streams, so runway = totalFbaStock
+  // ÷ combined velocity.
+  const totalFbaStock = real?.totalSellable || 0;
+  const combinedRunway = amzChannelDaily > 0 ? Math.round(totalFbaStock / amzChannelDaily) : null;
+
+  // ── MoM growth (already computed in data.js with agency precedence)
+  const growthValue = sku.growth ?? null;
+  const growthLabel = growthValue == null
+    ? "—"
+    : `${growthValue > 0 ? "+" : ""}${growthValue.toFixed(1)}%`;
+  const growthColor =
+    growthValue == null ? "var(--ink-4)" :
+    growthValue >=  10  ? "var(--success)" :
+    growthValue <= -10  ? "var(--critical)" :
+                          "var(--ink-3)";
+
+  // ── Per-FC rows (warehouse breakdown) ──────────────────────────
   const rows = real?.byFc
     ? Object.entries(real.byFc)
         .map(([fcCode, d]) => {
           const meta = amzFcMeta(fcCode);
           const stock = d.sellable || 0;
           const vel = amzPerFcDailyVel(sku, fcCode);
-          const days = vel > 0 ? Math.round(stock / vel) : null;
           let severity = "ok";
           if (stock <= 0) severity = "crit";
           else if (vel > 0 && stock / vel <= 14) severity = "warn";
           else if (stock <= 10) severity = "warn";
-          return { fcCode, meta, stock, damaged: d.damaged || 0, shipped: d.shipped || 0, days, severity };
+          return { fcCode, meta, stock, damaged: d.damaged || 0, shipped: d.shipped || 0, severity };
         })
         .sort((a, b) => a.stock - b.stock)
     : [];
 
   const stats = amzFcStats(sku);
+  const amzShare = amzChannelDaily > 0 ? Math.round((amazonOnlyDaily / amzChannelDaily) * 100) : 0;
+  const shpShare = amzChannelDaily > 0 ? Math.round((shopifyD2CDaily / amzChannelDaily) * 100) : 0;
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -546,108 +590,127 @@ const AmazonFcModal = ({ sku, onClose }) => {
         </div>
 
         <div className="modal-body">
-          {/* Summary row */}
+          {/* ── HERO METRICS — three cards: Velocity / MoM Growth / Runway ──
+              Per founder: these are the numbers that should jump out first.
+              Runway uses combined velocity (Amazon orders + Shopify D2C) over
+              total FBA stock, since both demand streams pull from the same
+              pool. Velocity is the 30d average. Growth is MoM (from data.js,
+              with agency-sheet override applied per truth table). */}
+          <div className="blk-modal-summary">
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
+                {amzChannelDaily.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span>
+              </div>
+              <div className="blk-modal-summary-label">velocity · 30d avg</div>
+            </div>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: growthColor }}>{growthLabel}</div>
+              <div className="blk-modal-summary-label">MoM growth</div>
+            </div>
+            <div className="blk-modal-summary-stat">
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
+                {combinedRunway != null ? `${combinedRunway}d` : "—"}
+              </div>
+              <div className="blk-modal-summary-label">runway · combined</div>
+            </div>
+          </div>
+
+          {/* ── CHANNEL SPLIT — Amazon orders + Shopify D2C ──
+              Founder priority #1: see the split + the source for each leg.
+              Bottom row sums both — by construction equals the Velocity hero
+              card (amzChannelVel = realAmazonDaily + realShopifyDaily). */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, padding: "0 2px" }}>
+              <strong style={{ fontSize: 13 }}>Channel split</strong>
+              <span className="muted" style={{ fontSize: 11 }}>
+                both streams deplete the same FBA stock pool per AMZ-001
+              </span>
+            </div>
+            <div className="blk-modal-list">
+              <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                <span>Source</span>
+                <span style={{ textAlign: "right", minWidth: 60 }}>30d units</span>
+                <span style={{ textAlign: "right", minWidth: 56 }}>/d avg</span>
+                <span style={{ textAlign: "right", minWidth: 52 }}>Share</span>
+              </div>
+              <div className="blk-modal-row" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                <div className="blk-modal-row-wh">
+                  <div className="blk-modal-row-name">Amazon orders</div>
+                  <div className="sku" style={{ fontSize: 10.5 }}>from {amzSourceLabel}</div>
+                </div>
+                <div className="blk-modal-row-stock mono" style={{ minWidth: 60 }}>{D.fmtN(Math.round(amazonOnlyDaily * 30))}</div>
+                <div className="mono" style={{ minWidth: 56, textAlign: "right", color: "var(--ink-2)" }}>{amazonOnlyDaily.toFixed(1)}</div>
+                <div className="mono muted" style={{ minWidth: 52, textAlign: "right", fontSize: 11.5 }}>{amzShare}%</div>
+              </div>
+              <div className="blk-modal-row" style={{ gridTemplateColumns: "1fr auto auto auto" }}>
+                <div className="blk-modal-row-wh">
+                  <div className="blk-modal-row-name">Shopify D2C</div>
+                  <div className="sku" style={{ fontSize: 10.5 }}>from {shpSourceLabel}</div>
+                </div>
+                <div className="blk-modal-row-stock mono" style={{ minWidth: 60 }}>{D.fmtN(Math.round(shopifyD2CDaily * 30))}</div>
+                <div className="mono" style={{ minWidth: 56, textAlign: "right", color: "var(--ink-2)" }}>{shopifyD2CDaily.toFixed(1)}</div>
+                <div className="mono muted" style={{ minWidth: 52, textAlign: "right", fontSize: 11.5 }}>{shpShare}%</div>
+              </div>
+              <div className="blk-modal-row" style={{ gridTemplateColumns: "1fr auto auto auto", background: "var(--bg-sunken)", borderTop: "1px solid var(--border)" }}>
+                <div className="blk-modal-row-wh">
+                  <div className="blk-modal-row-name" style={{ fontWeight: 600 }}>Combined Amazon channel</div>
+                  <div className="sku" style={{ fontSize: 10.5 }}>matches the velocity card above</div>
+                </div>
+                <div className="blk-modal-row-stock mono" style={{ minWidth: 60, fontWeight: 700 }}>{D.fmtN(Math.round(amzChannelDaily * 30))}</div>
+                <div className="mono" style={{ minWidth: 56, textAlign: "right", color: "var(--ink)", fontWeight: 700 }}>{amzChannelDaily.toFixed(1)}</div>
+                <div className="mono" style={{ minWidth: 52, textAlign: "right", fontSize: 11.5, color: "var(--ink-3)" }}>100%</div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── WAREHOUSE BREAKDOWN — secondary section ──
+              Founder said "if time allows" — keeping it visible but with a
+              demoted heading. Health summary (OOS/Low/Healthy) folded inline
+              into the section header instead of three separate cards. */}
           {real && (
-            <div className="blk-modal-summary">
-              <div className="blk-modal-summary-stat blk-modal-summary-red">
-                <div className="blk-modal-summary-num mono">{stats.red}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
-                <div className="blk-modal-summary-label">out of stock</div>
+            <div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6, padding: "0 2px" }}>
+                <strong style={{ fontSize: 13 }}>Warehouse breakdown</strong>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  <span style={{ color: "var(--critical)", fontWeight: 600 }}>{stats.red}</span> OOS ·{" "}
+                  <span style={{ color: "var(--warning)", fontWeight: 600 }}>{stats.orange}</span> low ·{" "}
+                  <span style={{ color: "var(--success)", fontWeight: 600 }}>{stats.healthy}</span> healthy{" "}
+                  of {stats.ever} FCs
+                </span>
               </div>
-              <div className="blk-modal-summary-stat blk-modal-summary-amber">
-                <div className="blk-modal-summary-num mono">{stats.orange}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
-                <div className="blk-modal-summary-label">running low</div>
-              </div>
-              <div className="blk-modal-summary-stat blk-modal-summary-ok">
-                <div className="blk-modal-summary-num mono">{stats.healthy}<span className="blk-modal-summary-denom">/{stats.ever}</span></div>
-                <div className="blk-modal-summary-label">healthy</div>
+              <div className="blk-modal-list">
+                <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr auto auto" }}>
+                  <span>Fulfillment center</span>
+                  <span style={{ textAlign: "right" }}>Stock</span>
+                  <span style={{ textAlign: "right" }}>Shipped*</span>
+                </div>
+                {rows.length === 0 && (
+                  <div className="muted" style={{ padding: "20px 12px", textAlign: "center" }}>
+                    Not active on any Amazon FBA fulfillment center.
+                  </div>
+                )}
+                {rows.map(({ fcCode, meta, stock, damaged, shipped, severity }) => (
+                  <div key={fcCode} className={`blk-modal-row blk-modal-row-${severity}`} style={{ gridTemplateColumns: "1fr auto auto" }}>
+                    <div className="blk-modal-row-wh">
+                      <div className="blk-modal-row-name">{meta.name}</div>
+                      <div className="sku" style={{ fontSize: 10.5 }}>
+                        {fcCode} · {meta.city}
+                        {damaged > 0 && <span style={{ marginLeft: 6, color: "var(--critical)" }}>· {damaged} damaged</span>}
+                      </div>
+                    </div>
+                    <div className="blk-modal-row-stock mono">{D.fmtN(stock)}</div>
+                    <div className="blk-modal-row-days mono muted">{shipped > 0 ? `+${shipped}` : "—"}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
-
-          {/* Velocity decomposition — Amazon channel = FBA orders + Shopify D2C.
-              MCF intentionally excluded (founder: MCF report not in scope for
-              this version). Shopify D2C derived as channelVelocity.amazon − FBA
-              so the sum matches the dashboard's headline number exactly. */}
-          {(() => {
-            const orderFba = real?.orders?.dailyFba ?? 0;
-            const amzChannel = sku?.channelVelocity?.amazon ?? orderFba;
-            const shopifyD2C = Math.max(0, amzChannel - orderFba);
-            const hasOrders = !!real?.orders;
-            return (
-              <div className="blk-modal-threshold" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
-                <div className="blk-modal-threshold-label" style={{ width: "100%" }}>
-                  <strong>Velocity decomposition</strong>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                    {hasOrders
-                      ? `FBA = Amazon-channel orders/day (over ${real.orders.days} days). Shopify D2C = direct Shopify orders/day, also depleting FBA stock (per AMZ-001).`
-                      : "Per AMZ-001: Amazon FBA stock fulfills Amazon orders + Shopify D2C. Both deplete the same pool."}
-                  </div>
-                </div>
-                <div className="mono" style={{ fontSize: 12 }}>
-                  {hasOrders ? (
-                    <>
-                      <span style={{ color: "var(--ink-2)" }}>{orderFba.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d FBA</span>
-                      <span className="muted" style={{ margin: "0 6px" }}>+</span>
-                      <span style={{ color: "var(--ink-2)" }}>{shopifyD2C.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d Shopify D2C</span>
-                      <span className="muted" style={{ margin: "0 6px" }}>=</span>
-                      <span style={{ color: "var(--ink)", fontWeight: 600 }}>{amzChannel.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d Amazon channel</span>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ color: "var(--ink-2)" }}>{amzVel.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d Amazon orders</span>
-                      <span className="muted" style={{ margin: "0 6px" }}>+</span>
-                      <span style={{ color: "var(--ink-2)" }}>{shpVel.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d Shopify D2C</span>
-                      <span className="muted" style={{ margin: "0 6px" }}>=</span>
-                      <span style={{ color: "var(--ink)", fontWeight: 600 }}>{totalAmzCh.toFixed(1)}</span>
-                      <span className="muted" style={{ marginLeft: 4 }}>/d Amazon channel</span>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Per-FC list — name | stock | shipped (1-day proxy).
-              Days-of-cover column removed: with only one day of FC-level ledger
-              and no per-FC velocity feed, any days number would be an equal-
-              split estimate, not a measurement. Severity colors on each row
-              still flag risk (red = OOS, amber = low stock / low share). */}
-          <div className="blk-modal-list">
-            <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr auto auto" }}>
-              <span>Fulfillment center</span>
-              <span style={{ textAlign: "right" }}>Stock</span>
-              <span style={{ textAlign: "right" }}>Shipped*</span>
-            </div>
-            {rows.length === 0 && (
-              <div className="muted" style={{ padding: "20px 12px", textAlign: "center" }}>
-                Not active on any Amazon FBA fulfillment center.
-              </div>
-            )}
-            {rows.map(({ fcCode, meta, stock, damaged, shipped, severity }) => (
-              <div key={fcCode} className={`blk-modal-row blk-modal-row-${severity}`} style={{ gridTemplateColumns: "1fr auto auto" }}>
-                <div className="blk-modal-row-wh">
-                  <div className="blk-modal-row-name">{meta.name}</div>
-                  <div className="sku" style={{ fontSize: 10.5 }}>
-                    {fcCode} · {meta.city}
-                    {damaged > 0 && <span style={{ marginLeft: 6, color: "var(--critical)" }}>· {damaged} damaged</span>}
-                  </div>
-                </div>
-                <div className="blk-modal-row-stock mono">{D.fmtN(stock)}</div>
-                <div className="blk-modal-row-days mono muted">{shipped > 0 ? `+${shipped}` : "—"}</div>
-              </div>
-            ))}
-          </div>
         </div>
 
         <div className="modal-foot">
           <span className="muted" style={{ fontSize: 11.5 }}>
             {real
-              ? `Source: Amazon Warehouse-Wise Ledger (per-FC inventory) + Manage Orders 32d feed (FBA only — MCF excluded) + Shopify Website Sales 30d (D2C). FBA + Shopify D2C share the FBA stock pool per AMZ-001. *Shipped column = one day's customer shipments per FC.`
+              ? `Velocity = combined Amazon channel /day. Runway = total FBA stock ÷ combined velocity. MoM growth from data.js (agency-sheet override applied per truth table). Channel split sources cited inline. *Shipped column = one day's customer shipments per FC (multi-day per-FC ledger awaits historical exports).`
               : "No Amazon FBA data — stub fallback in use."}
           </span>
           <button className="btn" onClick={onClose}>Close</button>
