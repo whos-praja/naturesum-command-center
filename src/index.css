@@ -1891,7 +1891,7 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 16px;
-  padding: 9px 14px;
+  padding: 7px 14px;
   background: var(--bg-sunken);
   font-size: 10.5px;
   text-transform: uppercase;
@@ -1904,7 +1904,7 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   display: grid;
   grid-template-columns: 1fr auto auto;
   gap: 16px;
-  padding: 11px 14px;
+  padding: 8px 14px;
   align-items: center;
   border-bottom: 1px solid var(--border-soft);
 }

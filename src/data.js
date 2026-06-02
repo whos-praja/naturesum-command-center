@@ -28,6 +28,7 @@ function _mergeBundledAndLive(code) {
     blinkit:  l.blinkit  ?? b.blinkit  ?? null,
     flipkart: l.flipkart ?? b.flipkart ?? null,
     shopify:  l.shopify  ?? b.shopify  ?? null,
+    agency:   l.agency   ?? null,                    // upload-only — no bundled equivalent yet
   };
 }
 const REAL_MARKETPLACE_DATA = new Proxy({}, {
@@ -664,19 +665,31 @@ const NSData = (function () {
     const nitinOfflineDaily  = nitinCh?.offline?.dailyOut;
     const nitinMarketingDaily= nitinCh?.marketing?.dailyOut;
 
-    // Preference order for Amazon:
-    //   1. Amazon "Manage Orders" 32-day FBA + MCF split (most accurate)
-    //   2. Nitin's 72-day daily-movement avg
-    //   3. 1-day FBA ledger proxy
-    // amazon.orders.dailyFba is units/day FBA, dailyMcf is units/day MCF.
-    // Combined = total Amazon-channel daily (covers both FBA and Easy Ship).
+    // Agency Channel-wise Sales Sheet — founder's truth-table source for
+    // Amazon velocity + growth. Wins over every other Amazon-velocity
+    // source when present. Captured per-channel so other channels can
+    // optionally use it too if the native export is missing.
+    const agencyCh = real.agency || null;
+    const agencyAmazonDaily   = agencyCh?.amazon?.dailyOut;
+    const agencyFlipkartDaily = agencyCh?.flipkart?.dailyOut;
+    const agencyBlinkitDaily  = agencyCh?.blinkit?.dailyOut;
+    const agencyShopifyDaily  = agencyCh?.shopify?.dailyOut;
+
+    // Preference order for Amazon (per founder's truth table):
+    //   1. Agency Channel-wise Sales Sheet (TOP) — `amazon` row dailyOut
+    //   2. Amazon "Manage Orders" 32-day FBA daily (MCF intentionally excluded —
+    //      MCF report is not part of this version's data feed, per founder)
+    //   3. Nitin's 72-day daily-movement avg
+    //   4. 1-day FBA ledger proxy
     const orderDailyAmz = real.amazon?.orders
-      ? (real.amazon.orders.dailyFba || 0) + (real.amazon.orders.dailyMcf || 0)
+      ? (real.amazon.orders.dailyFba || 0)
       : null;
-    const realAmazonDaily   = orderDailyAmz ?? nitinAmazonDaily ?? real.amazon?.totalShippedToday   ?? null;
-    const realShopifyDaily  = nitinWebsiteDaily  ?? (real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null);
-    const realFlipkartDaily = nitinFlipkartDaily ?? (real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null);
-    const realBlinkitDaily  = nitinBlinkitDaily  ?? (real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null);
+    const realAmazonDaily   = agencyAmazonDaily ?? orderDailyAmz ?? nitinAmazonDaily ?? real.amazon?.totalShippedToday ?? null;
+    // For the other channels, the native marketplace exports are the truth.
+    // Agency sheet acts as a fallback ONLY when the native export is missing.
+    const realShopifyDaily  = (real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null) ?? agencyShopifyDaily  ?? nitinWebsiteDaily;
+    const realFlipkartDaily = (real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null) ?? agencyFlipkartDaily ?? nitinFlipkartDaily;
+    const realBlinkitDaily  = (real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null) ?? agencyBlinkitDaily ?? nitinBlinkitDaily;
     // Offline + marketing demand the marketplace ledgers don't capture —
     // gets added to central WH base velocity so total runway accounts for it.
     const extraOffMktDaily  = (nitinOfflineDaily ?? 0) + (nitinMarketingDaily ?? 0);
@@ -753,6 +766,10 @@ const NSData = (function () {
     // Shopify exports give us 91 days of daily sales — split into the
     // current 30 days (sales30d) and the prior 30 days (sales60d - sales30d).
     // Falls back to MOM_GROWTH stub when Shopify data is missing.
+    // Growth precedence (per founder's truth table):
+    //   1. Agency Sheet — Amazon row growth (if present and non-null)
+    //   2. Shopify-derived (cur30 vs prev30, capped at ±200)
+    //   3. Stub MOM_GROWTH
     let derivedGrowth = MOM_GROWTH[s.code] ?? 0;
     if (real.shopify) {
       const cur30  = real.shopify.sales30d || 0;
@@ -763,6 +780,10 @@ const NSData = (function () {
       } else if (cur30 > 0) {
         derivedGrowth = 200; // explicit "zero base → bookable but capped"
       }
+    }
+    // Agency growth (Amazon row) overrides when present — per truth table.
+    if (agencyCh?.amazon?.growth != null) {
+      derivedGrowth = Math.max(-100, Math.min(200, agencyCh.amazon.growth));
     }
     derivedGrowth = r1(derivedGrowth); // 1-decimal cap for display
 

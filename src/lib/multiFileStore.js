@@ -69,18 +69,24 @@ export function clearAll() {
 }
 
 /** Build a REAL_MARKETPLACE_DATA-shaped object from uploaded files.
- *  Returns null when nothing usable has been uploaded. */
+ *  Returns null when nothing usable has been uploaded.
+ *  Per the founder's truth table, the Agency Channel-wise Sales Sheet is
+ *  the source of truth for Amazon velocity + growth. It rides in the
+ *  per-SKU `agency` field so data.js can prefer it over every other
+ *  Amazon-velocity source. */
 export function buildRealMarketplaceOverride(store) {
   if (!store?.files) return null;
   const { files } = store;
   const amazonLedger = files["amazon-ledger"]?.parsed || {};
-  const amazonOrders = files["amazon-orders"]?.parsed || {};
+  const amazonOrders = files["amazon-orders"]?.parsed || {};        // legacy zone (retired from UI)
+  const agency       = files["agency"]?.parsed?.byCode || {};       // NEW — agency channel split
   const blinkit      = files["blinkit"]?.parsed || {};
   const flipkart     = files["flipkart"]?.parsed || {};
   const shopify      = files["shopify"]?.parsed?.byCode || {};
   const codes = new Set([
     ...Object.keys(amazonLedger),
     ...Object.keys(amazonOrders),
+    ...Object.keys(agency),
     ...Object.keys(blinkit),
     ...Object.keys(flipkart),
     ...Object.keys(shopify),
@@ -96,6 +102,7 @@ export function buildRealMarketplaceOverride(store) {
       blinkit:  blinkit[code]  || null,
       flipkart: flipkart[code] || null,
       shopify:  shopify[code]  || null,
+      agency:   agency[code]   || null,
     };
   }
   return out;

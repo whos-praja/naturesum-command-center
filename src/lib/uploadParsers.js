@@ -247,7 +247,113 @@ export async function parseShopify(file, opts = {}) {
   return { byCode, dateRange: { first: dates[0], last: lastDate, days: dates.length } };
 }
 
-// ─── 6. Nitin's live inventory sheet (xlsx) ─────────────────
+// ─── 6. Agency channel-wise sales sheet ─────────────────────
+// Source-of-truth for Amazon velocity + growth per founder's table.
+// Format is flexible — the parser tries both common shapes:
+//   WIDE: one row per SKU, with per-channel columns ("Amazon", "Flipkart",
+//         "Blinkit", "Shopify") + optional growth columns ("Amazon Growth")
+//   LONG: one row per (SKU × channel), columns: SKU · Channel · Sales 30d · Growth
+// Header matching is case-insensitive, substring-tolerant.
+export async function parseAgencyChannelSales(file, _opts = {}) {
+  const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+  let rows;
+  if (isExcel) {
+    const wb = await fileToWorkbook(file);
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  } else {
+    const txt = await fileToText(file);
+    // Auto-detect TSV vs CSV
+    const sep = txt.split("\n", 1)[0].includes("\t") ? "\t" : ",";
+    if (sep === "\t") {
+      const lines = txt.split(/\r?\n/).filter(l => l.length);
+      const headers = lines[0].split("\t");
+      rows = lines.slice(1).map(line => {
+        const cells = line.split("\t");
+        const o = {}; headers.forEach((h, i) => { o[h] = cells[i] ?? ""; });
+        return o;
+      });
+    } else {
+      rows = parseCsv(txt);
+    }
+  }
+  if (!rows.length) return { byCode: {}, shape: "empty" };
+
+  // Detect shape — long format has a "Channel" column; wide has per-channel headers.
+  const headers = Object.keys(rows[0]);
+  const lc = (s) => String(s || "").toLowerCase();
+  const findCol = (matcher) => headers.find(h => matcher(lc(h)));
+
+  // Tolerant SKU column finder — try every plausible name + Amazon MSKU.
+  const skuCol = findCol(h => /^sku$|sku.*code|merchant.*sku|msku|item.*code|product.*sku|^code$/.test(h));
+  if (!skuCol) {
+    throw new Error(`Could not find a SKU column. Expected one of: SKU, MSKU, Item Code, Product SKU. Headers seen: ${headers.join(", ")}`);
+  }
+
+  // Tolerant SKU→canonical mapper — try every cross-reference at once
+  const toCanonical = (raw) => {
+    const s = String(raw || "").trim();
+    return byAmzMsku[s.replace(/_MP$/i, "")]
+        || byFkSku[s]
+        || byShpSku[s]
+        || (CODE_MAP[s] ? s : null);                  // already canonical?
+  };
+
+  const channelCol = findCol(h => /^channel$|marketplace|platform/.test(h));
+  const isLong = !!channelCol;
+  const byCode = {};
+
+  if (isLong) {
+    const salesCol  = findCol(h => /sales.*30|30.*sales|units.*30|qty.*30|net.*items|sales$/.test(h));
+    const growthCol = findCol(h => /growth|mom|m-o-m/.test(h));
+    for (const r of rows) {
+      const code = toCanonical(r[skuCol]); if (!code) continue;
+      const ch   = lc(r[channelCol]);
+      const key  = /amaz|amz|fba/.test(ch)        ? "amazon"
+                 : /flip|fk/.test(ch)             ? "flipkart"
+                 : /blink|quick/.test(ch)         ? "blinkit"
+                 : /shop|website|d2c/.test(ch)    ? "shopify"
+                 : null;
+      if (!key) continue;
+      const sales = num(r[salesCol]);
+      const growth = growthCol != null ? num(r[growthCol]) : null;
+      if (!byCode[code]) byCode[code] = {};
+      byCode[code][key] = {
+        sales30d: sales,
+        dailyOut: sales / 30,
+        growth,
+      };
+    }
+    return { byCode, shape: "long" };
+  }
+
+  // WIDE shape — one row per SKU, channel columns inline
+  const chCols = {
+    amazon:   findCol(h => /^amazon$|^amz$|fba$/.test(h)),
+    flipkart: findCol(h => /^flip|^fk$|flipkart/.test(h)),
+    blinkit:  findCol(h => /^blink|blinkit|quick.*com/.test(h)),
+    shopify:  findCol(h => /^shopify|^d2c$|website/.test(h)),
+  };
+  const growthCols = {
+    amazon:   findCol(h => /amazon.*growth|amz.*growth|growth.*amazon/.test(h)),
+    flipkart: findCol(h => /flip.*growth|fk.*growth|growth.*flip/.test(h)),
+    blinkit:  findCol(h => /blink.*growth|growth.*blink/.test(h)),
+    shopify:  findCol(h => /shopify.*growth|d2c.*growth|growth.*shop/.test(h)),
+  };
+  for (const r of rows) {
+    const code = toCanonical(r[skuCol]); if (!code) continue;
+    if (!byCode[code]) byCode[code] = {};
+    for (const ch of ["amazon", "flipkart", "blinkit", "shopify"]) {
+      if (!chCols[ch]) continue;
+      const sales = num(r[chCols[ch]]);
+      const growth = growthCols[ch] ? num(r[growthCols[ch]]) : null;
+      byCode[code][ch] = { sales30d: sales, dailyOut: sales / 30, growth };
+    }
+  }
+  return { byCode, shape: "wide" };
+}
+
+// ─── 7. Nitin's live inventory sheet (xlsx) ─────────────────
 // Reuses the parseInventoryFile.js Nitin parser. Wrap it here so the
 // dispatcher has a single signature.
 export async function parseNitinSheet(file, _opts = {}) {
@@ -257,13 +363,22 @@ export async function parseNitinSheet(file, _opts = {}) {
 }
 
 // ─── Dispatcher ──────────────────────────────────────────────
+// Every zone accepts every common spreadsheet/text format. The parser
+// for the chosen zone still expects its native shape — if a user drops
+// the wrong file in a zone, the parser surfaces an error (and Claude's
+// format-guard, when wired, suggests the right zone).
+//
+// amazon-orders was retired from the UI per founder request — bundled
+// data still ships the FBA + MCF split, but ongoing uploads come from
+// the Warehouse Wise Ledger alone.
+const ALL_FORMATS = ".csv,.txt,.tsv,.xlsx,.xls";
 export const FILE_TYPES = {
-  "amazon-ledger":  { label: "Amazon FBA inventory ledger", accept: ".csv,.txt", parse: parseAmazonLedger },
-  "amazon-orders":  { label: "Amazon Manage Orders (30-day)", accept: ".txt,.tsv,.csv", parse: parseAmazonOrders },
-  "blinkit":        { label: "Blinkit feeder-WH inventory", accept: ".xlsx,.xls", parse: parseBlinkit },
-  "flipkart":       { label: "Flipkart current inventory", accept: ".csv", parse: parseFlipkart },
-  "shopify":        { label: "Shopify website sales", accept: ".csv", parse: parseShopify },
-  "nitin":          { label: "Nitin's live inventory sheet", accept: ".xlsx,.xls", parse: parseNitinSheet },
+  "amazon-ledger": { label: "Amazon Warehouse Wise Ledger Sheet", accept: ALL_FORMATS, parse: parseAmazonLedger },
+  "agency":        { label: "Agency Channel-wise Sales Sheet",    accept: ALL_FORMATS, parse: parseAgencyChannelSales },
+  "blinkit":       { label: "Blinkit Feeder-WH Inventory Sheet",  accept: ALL_FORMATS, parse: parseBlinkit },
+  "flipkart":      { label: "Flipkart Current Inventory Sheet",   accept: ALL_FORMATS, parse: parseFlipkart },
+  "shopify":       { label: "Shopify Website Sales Sheet",        accept: ALL_FORMATS, parse: parseShopify },
+  "nitin":         { label: "Warehouse Daily Inventory Sheet",    accept: ALL_FORMATS, parse: parseNitinSheet },
 };
 
 export async function parseByType(type, file, opts = {}) {

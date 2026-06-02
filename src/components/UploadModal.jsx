@@ -62,7 +62,7 @@ function bundledBaselineFor(fileType) {
 const ZONES = [
   { key: "nitin",          ...FILE_TYPES["nitin"] },
   { key: "amazon-ledger",  ...FILE_TYPES["amazon-ledger"] },
-  { key: "amazon-orders",  ...FILE_TYPES["amazon-orders"] },
+  { key: "agency",         ...FILE_TYPES["agency"] },
   { key: "blinkit",        ...FILE_TYPES["blinkit"] },
   { key: "flipkart",       ...FILE_TYPES["flipkart"] },
   { key: "shopify",        ...FILE_TYPES["shopify"] },
