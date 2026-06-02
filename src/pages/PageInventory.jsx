@@ -8,6 +8,7 @@ import { applyLiveData } from "../lib/liveInventory.js";
 import { computeCascade } from "../lib/runwayCascade.js";
 import { readTargetDays, writeTargetDays, DEFAULT_TARGET_DAYS } from "../lib/skuTargets.js";
 import { readParam } from "../lib/formulaParams.js";
+import { FormulaIcon } from "../components/FormulaIcon.jsx";
 import FormulasTab from "./sub/FormulasTab.jsx";
 
 // Module 3 — Inventory & Supply Chain
@@ -1706,14 +1707,16 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
 
           <div className="wb-meta">
             <dl className="kv">
-              <dt>FG stock value</dt>
+              <dt>FG stock value <FormulaIcon formulaId="stockValue" currentValue={D.fmtINR(wb.fg * unitCost)} valueLabel="Current (WH only)"/></dt>
               <dd>{D.fmtINR(wb.fg * unitCost)}</dd>
-              <dt>Rolling daily velocity</dt>
+              <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={`${D.fmtN(sku.velocity)} /day`}/></dt>
               <dd>{D.fmtN(sku.velocity)} units/day</dd>
-              <dt>Runway (central warehouse FG)</dt>
+              <dt>Runway (central warehouse FG) <FormulaIcon formulaId="runway" currentValue={`${Math.round(wb.fg / sku.velocity)} days`}/></dt>
               <dd>{Math.round(wb.fg / sku.velocity)} days</dd>
-              <dt>Supplier lead time</dt>
+              <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
               <dd>{sku.leadTime} days</dd>
+              <dt>MoM growth <FormulaIcon formulaId="growth" skuCode={sku.code} skuField="growth" currentValue={`${sku.growth > 0 ? "+" : ""}${sku.growth.toFixed(1)}%`}/></dt>
+              <dd>{sku.growth > 0 ? "+" : ""}{sku.growth.toFixed(1)}%</dd>
             </dl>
           </div>
 
@@ -2072,11 +2075,13 @@ const SimulatorTab = ({ inventory }) => {
             {/* ── VELOCITY section (nested) ── */}
             <SimSection
               title="Daily velocity"
-              hint="Set one overall number, or click 'split by channel' to control each marketplace independently."
+              hint="Set one overall number, or switch to per-channel to control each marketplace independently."
               right={
-                <button className="btn sm ghost" onClick={() => setOne("velMode", sim.velMode === "overall" ? "perChannel" : "overall")}>
-                  {sim.velMode === "overall" ? "Split by channel →" : "← Back to overall"}
-                </button>
+                <SimToggle
+                  value={sim.velMode}
+                  onChange={(v) => setOne("velMode", v)}
+                  options={[{ value: "overall", label: "Overall" }, { value: "perChannel", label: "Per-channel" }]}
+                />
               }>
               {sim.velMode === "overall" ? (
                 <SimRow label="Total velocity (auto-splits proportionally)" unit="/day"
@@ -2090,7 +2095,6 @@ const SimulatorTab = ({ inventory }) => {
                   <SimRow label="Amazon FBA (incl. Shopify D2C)" unit="/day"
                     value={sim.velAmzOwn + sim.velShpOwn}
                     onChange={v => {
-                      // distribute change proportionally between amz + shp
                       const totalOld = sim.velAmzOwn + sim.velShpOwn || 1;
                       setSim(prev => ({
                         ...prev,
@@ -2118,9 +2122,13 @@ const SimulatorTab = ({ inventory }) => {
                     min={0} max={500} step={0.1}
                     base={baseRecord?.velWh} delta={isDelta("velWh")}
                     onReset={() => setOne("velWh", baseRecord.velWh)}/>
-                  <div className="sim-section-foot muted">
-                    Sum: {effVel.overall.toFixed(1)} /day across all channels
-                  </div>
+                  {/* Show the derived overall as a disabled row so the user sees
+                      what their per-channel edits sum to, instead of hiding it. */}
+                  <SimRow label="Total (derived)" unit="/day"
+                    value={effVel.overall} onChange={() => {}}
+                    min={0} max={500} step={0.1}
+                    base={baseRecord?.velOverall}
+                    disabled/>
                 </>
               )}
             </SimSection>
@@ -2130,9 +2138,11 @@ const SimulatorTab = ({ inventory }) => {
               title="MoM % growth"
               hint="Month-over-month growth applied to projected velocity."
               right={
-                <button className="btn sm ghost" onClick={() => setOne("growthMode", sim.growthMode === "overall" ? "perChannel" : "overall")}>
-                  {sim.growthMode === "overall" ? "Split by channel →" : "← Back to overall"}
-                </button>
+                <SimToggle
+                  value={sim.growthMode}
+                  onChange={(v) => setOne("growthMode", v)}
+                  options={[{ value: "overall", label: "Overall" }, { value: "perChannel", label: "Per-channel" }]}
+                />
               }>
               {sim.growthMode === "overall" ? (
                 <SimRow label="Overall MoM %" unit="%"
@@ -2235,32 +2245,43 @@ const SimulatorTab = ({ inventory }) => {
         {/* OUTPUTS panel */}
         <Card title="Live outputs" sub={status === "red" ? "Action needed — runway below lead time" : status === "amber" ? "Watch — under 30 days" : "Healthy — above lead time + 30d buffer"}>
           <div className={"sim-out sim-out-" + status}>
-            <div className="sim-out-hero">
-              <div className="sim-out-hero-label">TOTAL RUNWAY (CASCADE)</div>
-              <div className="sim-out-hero-num mono">{runway}d</div>
-              <div className="sim-out-hero-sub">
-                day Central WH hits zero · channels drain in parallel first
+            {/* Compact hero — same status colour but ~half the height so the
+                output panel doesn't feel front-heavy. */}
+            <div className="sim-out-hero sim-out-hero-compact">
+              <div className="sim-out-hero-meta">
+                <div className="sim-out-hero-label">Total runway (cascade)</div>
+                <div className="sim-out-hero-sub muted">day Central WH hits zero · channels drain in parallel first</div>
               </div>
+              <div className="sim-out-hero-num mono">{runway}d</div>
             </div>
 
             {/* Per-channel runway breakdown — when each channel's own stock
-                runs out before falling back to central WH. */}
+                runs out before falling back to central WH. Inactive channels
+                (velocity ≤ formula floor) show "—" instead of "∞" / "0.0/d"
+                so the row reads as "not in play" not as a glitch. */}
             <div className="sim-out-channels">
-              {cascade.channels.map(c => (
-                <div key={c.key} className="sim-out-channel">
-                  <span className="sim-out-channel-label">{c.label}</span>
-                  <span className="sim-out-channel-runway mono">
-                    {Number.isFinite(c.runway) ? `${Math.round(c.runway)}d` : "∞"}
-                  </span>
-                  <span className="sim-out-channel-vel muted">{c.velocity.toFixed(1)}/d</span>
-                </div>
-              ))}
-              <div className="sim-out-channel">
+              {cascade.channels.map(c => {
+                const inactive = !Number.isFinite(c.runway) || c.velocity <= readParam("velocityFloor");
+                return (
+                  <div key={c.key} className={"sim-out-channel" + (inactive ? " is-inactive" : "")}>
+                    <span className="sim-out-channel-label">{c.label}</span>
+                    <span className="sim-out-channel-runway mono">
+                      {inactive ? "—" : `${Math.round(c.runway)}d`}
+                    </span>
+                    <span className="sim-out-channel-vel muted">
+                      {inactive ? "no demand" : `${c.velocity.toFixed(1)}/d`}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className={"sim-out-channel" + (projVel.wh <= readParam("velocityFloor") ? " is-inactive" : "")}>
                 <span className="sim-out-channel-label"><strong>Central WH (standalone)</strong></span>
                 <span className="sim-out-channel-runway mono">
-                  {Number.isFinite(cascade.wh.runway) ? `${Math.round(cascade.wh.runway)}d` : "∞"}
+                  {(!Number.isFinite(cascade.wh.runway) || projVel.wh <= readParam("velocityFloor")) ? "—" : `${Math.round(cascade.wh.runway)}d`}
                 </span>
-                <span className="sim-out-channel-vel muted">{projVel.wh.toFixed(1)}/d</span>
+                <span className="sim-out-channel-vel muted">
+                  {projVel.wh <= readParam("velocityFloor") ? "no direct demand" : `${projVel.wh.toFixed(1)}/d`}
+                </span>
               </div>
             </div>
 
@@ -2306,12 +2327,12 @@ const SimSection = ({ title, hint, right, children }) => (
   </div>
 );
 
-const SimRow = ({ label, unit, value, onChange, min, max, step, base, delta, onReset, hint }) => {
+const SimRow = ({ label, unit, value, onChange, min, max, step, base, delta, onReset, hint, disabled }) => {
   const absDelta = (value || 0) - (base || 0);
   const pctDelta = base ? (absDelta / Math.abs(base)) * 100 : 0;
   const sign = absDelta > 0 ? "+" : "";
   return (
-    <div className={"sim-input-row" + (delta ? " is-delta" : "")}>
+    <div className={"sim-input-row" + (delta ? " is-delta" : "") + (disabled ? " is-disabled" : "")}>
       <div className="sim-input-label">
         <span>{label}</span>
         <span className="muted">{unit}</span>
@@ -2322,6 +2343,7 @@ const SimRow = ({ label, unit, value, onChange, min, max, step, base, delta, onR
         className="sim-range"
         min={min} max={max} step={step}
         value={value}
+        disabled={disabled}
         onChange={e => onChange(parseFloat(e.target.value) || 0)}
       />
       <div className="sim-input-cluster">
@@ -2330,27 +2352,47 @@ const SimRow = ({ label, unit, value, onChange, min, max, step, base, delta, onR
           className="sim-number"
           min={min} max={max} step={step}
           value={value}
+          disabled={disabled}
           onChange={e => onChange(parseFloat(e.target.value) || 0)}
         />
-        <button
-          type="button"
-          className={"sim-baseline-pill" + (delta ? " is-changed" : "")}
-          onClick={delta ? onReset : undefined}
-          title={delta ? `Reset to baseline (${base})` : "Baseline value from the sheet"}
-          disabled={!delta}
-        >
-          {delta && <span className="sim-baseline-reset">↺</span>}
-          <span className="sim-baseline-num mono">{Number.isFinite(base) ? (typeof base === "number" && base % 1 !== 0 ? base.toFixed(1) : base) : "—"}</span>
-          {delta && (
-            <span className={"sim-baseline-delta " + (absDelta > 0 ? "up" : "down")}>
+        {/* Baseline chip only renders when the value is modified — clean
+            default state is just the input. Click the chip to revert. */}
+        {delta && (
+          <button
+            type="button"
+            className="sim-baseline-chip"
+            onClick={onReset}
+            title={`Reset to ${base}`}
+          >
+            <span className="sim-baseline-chip-reset">↺</span>
+            <span className="sim-baseline-chip-was muted">was</span>
+            <span className="sim-baseline-chip-num mono">{Number.isFinite(base) ? (typeof base === "number" && base % 1 !== 0 ? base.toFixed(1) : base) : "—"}</span>
+            <span className={"sim-baseline-chip-delta " + (absDelta > 0 ? "up" : "down")}>
               {sign}{Math.abs(pctDelta) >= 100 ? Math.round(pctDelta) : pctDelta.toFixed(0)}%
             </span>
-          )}
-        </button>
+          </button>
+        )}
       </div>
     </div>
   );
 };
+
+// SimToggle — segmented two-way switch for "Overall vs per-channel" mode.
+// Used by the velocity + growth sections to replace the small text link.
+const SimToggle = ({ value, onChange, options }) => (
+  <div className="sim-toggle">
+    {options.map(o => (
+      <button
+        key={o.value}
+        type="button"
+        className={"sim-toggle-opt" + (value === o.value ? " is-active" : "")}
+        onClick={() => onChange(o.value)}
+      >
+        {o.label}
+      </button>
+    ))}
+  </div>
+);
 
 // Runway × Lead time infographic — single horizontal bar showing:
 //   • Filled colored segment (0 → runway days) = "we have stock until here"
@@ -3041,7 +3083,10 @@ const ForecastTab = ({ inventory, days, setDays }) => {
           <div className="rw-risk-head">
             <span className="rw-risk-icon"><Icon name="box" size={14}/></span>
             <div>
-              <div className="rw-risk-title">Recommended reorder</div>
+              <div className="rw-risk-title">
+                Recommended reorder
+                <FormulaIcon formulaId="reorder" paramKey="defaultTargetDays" currentValue={`${D.fmtN(totalReorder)} units across all SKUs`}/>
+              </div>
               <div className="rw-risk-sub">to cover {days}d + per-SKU target buffer</div>
             </div>
           </div>

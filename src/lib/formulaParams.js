@@ -153,89 +153,109 @@ export function resetAllParams() {
   }
 }
 
+/** Lookup helper for the inline ⓘ popover. */
+export function getFormula(id) {
+  return FORMULA_REFERENCE.find(f => f.id === id) || null;
+}
+
 // ─── Reference formulas (display-only, not editable) ────────
 // Plain-English + math expression for each derived number. Drives the
-// "Read-only formula reference" section of the Formulas sub-tab.
+// "Read-only formula reference" section of the Formulas sub-tab AND the
+// inline ⓘ popovers on individual numbers — look up by `id`.
 export const FORMULA_REFERENCE = [
   {
+    id: "totalStock",
     name: "Total stock per SKU",
     expression: "totalStock = stock.warehouse + stock.amazonFBA + stock.flipkart + stock.blinkit",
     plain: "Sum of central WH stock and the three marketplace stocks. Used as the numerator of the per-row runway and stock value.",
     where: "src/data.js · per-SKU inventory map",
   },
   {
+    id: "runway",
     name: "Per-row runway",
     expression: "runway = round(totalStock / sku.velocity)",
     plain: "How many days the SKU's combined stock would last at its current daily sell-through. Hidden if velocity ≤ velocityFloor.",
     where: "src/data.js · runway field",
   },
   {
+    id: "runwayStatus",
     name: "Runway status chip",
     expression: "status = vel ≤ 0 → amber | runway ≤ leadTime → red | runway < amberRunwayDays → amber | else green",
     plain: "Tri-state color on every row. Red = will run out before next supply arrives. Amber = below comfort buffer. Green = healthy.",
     where: "src/data.js · runwayStatus",
   },
   {
+    id: "velocity",
     name: "Total velocity",
     expression: "sku.velocity = channelVel.amazon + channelVel.flipkart + channelVel.blinkit + whBaseVel",
     plain: "Sum of per-channel daily sell-through plus offline/marketing leftover. Each channel's velocity walks a real-data precedence chain (see MAPPING.md §5).",
     where: "src/data.js · velocity field",
   },
   {
+    id: "amazonChannelVel",
     name: "Amazon channel velocity (per AMZ-001)",
     expression: "amazonChannelVel = amazonOrdersDaily + shopifyOrdersDaily",
     plain: "Amazon FBA serves both Amazon orders AND Shopify D2C (Shopify ships from FBA). So the channel velocity combines both demand streams.",
     where: "src/data.js · channelVelocity.amazon",
   },
   {
+    id: "growth",
     name: "MoM growth",
     expression: "growth = clamp((cur30 − prev30) / prev30 × 100, −100, +200)",
     plain: "Shopify's last-30-days sales vs the preceding 30 days. Capped at ±200% because some SKUs went from near-zero base → ratio would explode.",
     where: "src/data.js · derivedGrowth",
   },
   {
+    id: "producibleFG",
     name: "Producible FG (BOM cap)",
     expression: "producibleFG = min(inputCapacity, min over k of pkgCapacity[k])",
     plain: "The slowest constraint (input or any packaging component) caps how many additional FG packs we could pack today. Each capacity = floor(component qty / units-per-pack).",
     where: "src/data.js · warehouseBreakdown.producibleFG",
   },
   {
+    id: "maxFg",
     name: "Total (WH) finished goods",
     expression: "maxFg = currentFG + producibleFG",
     plain: "Upper bound of finished goods we could have in the central warehouse today. Used in Materials breakdown + Forecast reorder qty.",
     where: "src/data.js · warehouseBreakdown · MaterialsTab",
   },
   {
+    id: "leadTime",
     name: "SKU supplier lead time",
     expression: "leadTime = max over components of COMPONENT_LEAD_TIMES[refCode]",
     plain: "The slowest input gates the whole pack. Sea Buckthorn powders take 50 days (raw bottleneck); Acacia tea 20 days (filled-sachet SFG); packaging is universally 14 days.",
     where: "src/data.js · maxLeadTimeForSku()",
   },
   {
+    id: "required",
     name: "Required units (Forecast tab)",
     expression: "required = sku.velocity × (forecastDays + targetDays) × trend",
     plain: "Units needed to cover the forecast horizon plus the per-SKU target buffer. targetDays defaults to defaultTargetDays but can be overridden per-SKU.",
     where: "src/pages/PageInventory.jsx · ForecastTab",
   },
   {
+    id: "reorder",
     name: "Recommended reorder qty",
     expression: "reorder = max(0, required − maxFg)",
     plain: "How many MORE units we need to order on top of what we already have or could produce. Goes to zero when we're already covered.",
     where: "src/pages/PageInventory.jsx · ForecastTab",
   },
   {
+    id: "stockValue",
     name: "Stock value",
     expression: "stockValue = totalStock × SKU_PRICING.sp",
     plain: "Total units × selling price. Used for the headline ₹L total at the top of Inventory.",
     where: "src/data.js · stockValue",
   },
   {
+    id: "cascadeRunway",
     name: "Cascade runway (Runway calculator)",
     expression: "Parallel cascade — each channel drains at its own velocity, WH absorbs each channel's demand as it dies, total = day WH itself hits zero.",
     plain: "More realistic than the simple `totalStock / velocity` formula because marketplaces don't drain at the central rate — they drain at their own rate, and only after they empty does WH face the full demand.",
     where: "src/lib/runwayCascade.js · computeCascade()",
   },
   {
+    id: "blkClass",
     name: "Blinkit feeder-WH classification",
     expression: "red = stock ≤ 0 | amber = (vel > 0 AND stock/vel ≤ blkOosSoonDays) OR stock ≤ amberThreshold",
     plain: "Per-feeder-WH status. Amber threshold is per-SKU (set from Blinkit drill modal); the OOS-soon window is global (tunable as blkOosSoonDays).",
