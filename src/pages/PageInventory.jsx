@@ -350,8 +350,8 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
               <span>Feeder warehouse</span>
               <span style={{ textAlign: "right", minWidth: 44 }}>Stock</span>
               <span style={{ textAlign: "right", minWidth: 50 }} title="Units sold over last 30 days at this feeder warehouse">Sold 30d</span>
-              <span style={{ textAlign: "right", minWidth: 44 }} title="Per-WH daily velocity = Sold 30d ÷ 30">/d</span>
-              <span style={{ textAlign: "right", minWidth: 60 }} title="Biweekly growth: last 15d vs prior 15d (sales30d − sales15d). Capped ±200%.">Δ 15d</span>
+              <span style={{ textAlign: "right", minWidth: 44 }}>/d <FormulaIcon formulaId="blkPerWhVelocity" skuCode={sku.code} currentValue="per-WH daily velocity"/></span>
+              <span style={{ textAlign: "right", minWidth: 60 }}>Δ 15d <FormulaIcon formulaId="blkBiweeklyDelta" skuCode={sku.code} currentValue="biweekly Δ (15d vs prior 15d)"/></span>
               <span style={{ textAlign: "right", minWidth: 50 }}>Days</span>
             </div>
             {rows.length === 0 && (
@@ -618,17 +618,17 @@ const AmazonFcModal = ({ sku, onClose }) => {
           <div className="blk-modal-summary" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(totalFbaStock)}</div>
-              <div className="blk-modal-summary-label">stock left · FBA</div>
+              <div className="blk-modal-summary-label">stock left · FBA <FormulaIcon formulaId="amzStockLeft" skuCode={sku.code} currentValue={`${D.fmtN(totalFbaStock)} units across ${Object.keys(real?.byFc||{}).length} FCs`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
                 {amzChannelDaily.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span>
               </div>
-              <div className="blk-modal-summary-label">velocity · 30d avg</div>
+              <div className="blk-modal-summary-label">velocity · 30d avg <FormulaIcon formulaId="amzChannelSplit" skuCode={sku.code} currentValue={`${amzChannelDaily.toFixed(1)}/d  (${amazonOnlyDaily.toFixed(1)} amz orders + ${shopifyD2CDaily.toFixed(1)} shopify D2C)`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: growthColor }}>{growthLabel}</div>
-              <div className="blk-modal-summary-label">MoM growth</div>
+              <div className="blk-modal-summary-label">MoM growth <FormulaIcon formulaId="channelMomGrowth" skuCode={sku.code} currentValue={`${growthLabel}  (Amazon channel · Agency AMZ tab + Shopify CSV)`}/></div>
               {growthCapNote && (
                 <div className="muted" style={{ fontSize: 9.5, marginTop: 2, fontStyle: "italic", lineHeight: 1.25 }}>
                   {growthCapNote}
@@ -639,7 +639,7 @@ const AmazonFcModal = ({ sku, onClose }) => {
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
                 {combinedRunway != null ? `${combinedRunway}d` : "—"}
               </div>
-              <div className="blk-modal-summary-label">runway · combined</div>
+              <div className="blk-modal-summary-label">runway · combined <FormulaIcon formulaId="amzCombinedRunway" skuCode={sku.code} currentValue={`${combinedRunway}d = ${D.fmtN(totalFbaStock)} stock ÷ ${amzChannelDaily.toFixed(1)}/d`}/></div>
             </div>
           </div>
 
@@ -855,15 +855,15 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
           <div className="blk-modal-summary" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{D.fmtN(live)}</div>
-              <div className="blk-modal-summary-label">stock left</div>
+              <div className="blk-modal-summary-label">stock left <FormulaIcon formulaId="fkStockLeft" skuCode={sku.code} currentValue={`${D.fmtN(live)} units (Live on Website)`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{daily30.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span></div>
-              <div className="blk-modal-summary-label">velocity · 30d avg</div>
+              <div className="blk-modal-summary-label">velocity · 30d avg <FormulaIcon formulaId="fkVelocity" skuCode={sku.code} currentValue={`${daily30.toFixed(1)}/d = ${fk.sales30d} sold ÷ 30`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: momColor }}>{momLabel}</div>
-              <div className="blk-modal-summary-label">MoM growth</div>
+              <div className="blk-modal-summary-label">MoM growth <FormulaIcon formulaId="channelMomGrowth" skuCode={sku.code} currentValue={`${momLabel}  (Flipkart · FK Seller Hub sales30d vs sales60d − sales30d)`}/></div>
               {momCapNote && (
                 <div className="muted" style={{ fontSize: 9.5, marginTop: 2, fontStyle: "italic", lineHeight: 1.25 }}>
                   {momCapNote}
@@ -874,7 +874,7 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
                 {days != null ? `${days}d` : "—"}
               </div>
-              <div className="blk-modal-summary-label">days of cover</div>
+              <div className="blk-modal-summary-label">days of cover <FormulaIcon formulaId="fkDaysOfCover" skuCode={sku.code} currentValue={`${days}d = ${D.fmtN(live)} stock ÷ ${daily30.toFixed(1)}/d`}/></div>
             </div>
           </div>
 
