@@ -37,6 +37,19 @@ export default function FormulasTab() {
     }
   };
 
+  // Per-SKU overrides are read by data.js AT MODULE INIT. Editing one
+  // mid-session writes to localStorage but doesn't retroactively rerun
+  // data.js. Show a reload nudge whenever the user edits an override.
+  const handleOverrideChanged = () => {
+    bump();
+    // Defer the prompt so the input has time to commit before the modal.
+    setTimeout(() => {
+      if (window.confirm("Override saved. Reload now so the dashboard picks it up?")) {
+        window.location.reload();
+      }
+    }, 50);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Header strip with reset + reload help */}
@@ -132,7 +145,7 @@ export default function FormulasTab() {
             </thead>
             <tbody>
               {D.inventory.map((s) => (
-                <OverrideRow key={s.code} sku={s} onChange={bump}/>
+                <OverrideRow key={s.code} sku={s} onChange={handleOverrideChanged}/>
               ))}
             </tbody>
           </table>

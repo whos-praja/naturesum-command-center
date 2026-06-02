@@ -19,6 +19,27 @@ import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
 import { BUNDLED_AGENCY_DATA } from "./bundledAgencyData.js";
 const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
 
+// Per-SKU overrides from the Inventory → Formulas sub-tab. Stored in
+// localStorage per-device under `ns.skuOverride.<code>.<field>`. When
+// set, the override wins over derived/uploaded numbers. Applied as the
+// LAST step of per-SKU derivation so it beats every real-data leg in
+// the chain. Editable from FormulasTab.jsx.
+function _readSkuOverrides() {
+  if (typeof window === "undefined") return {};
+  const out = {};
+  for (const k of Object.keys(window.localStorage)) {
+    if (!k.startsWith("ns.skuOverride.")) continue;
+    const [, , code, field] = k.split(".");
+    if (!code || !field) continue;
+    const n = parseFloat(window.localStorage.getItem(k));
+    if (!Number.isFinite(n)) continue;
+    if (!out[code]) out[code] = {};
+    out[code][field] = n;
+  }
+  return out;
+}
+const __overrideMap = _readSkuOverrides();
+
 // User-uploaded multi-file payload (Sprint 12 — upload UI). When a SKU
 // has uploaded data for a given source, it wins over the bundled file;
 // SKUs/channels not present in the upload fall back to the bundled real
@@ -895,6 +916,38 @@ const NSData = (function () {
       // SP is TBD — UI should fall back to MRP for those.
       pricing:     SKU_PRICING[s.code] || { sp: price, mrp: price },
     };
+  }).map((sku) => {
+    // ── FINAL STEP — apply per-SKU overrides from Formulas tab ──
+    // For each override field set in localStorage, replace the derived
+    // value. Recompute downstream values (runway, runwayStatus, totalStock,
+    // stockValue) so the rest of the dashboard stays consistent.
+    const ov = __overrideMap[sku.code];
+    if (!ov) return sku;
+
+    const next = { ...sku, stock: { ...sku.stock } };
+    if (ov.velocity != null)      next.velocity = ov.velocity;
+    if (ov.growth != null)        next.growth   = ov.growth;
+    if (ov.leadTime != null)      next.leadTime = ov.leadTime;
+    if (ov.whStock != null)       next.stock.warehouse = ov.whStock;
+    if (ov.amazonStock != null)   next.stock.amazonFBA = ov.amazonStock;
+    if (ov.flipkartStock != null) next.stock.flipkart  = ov.flipkartStock;
+    if (ov.blinkitStock != null)  next.stock.blinkit   = ov.blinkitStock;
+
+    // Recompute totals + runway if any stock or velocity was overridden.
+    const stockTouched = ["whStock","amazonStock","flipkartStock","blinkitStock"].some(k => ov[k] != null);
+    if (stockTouched || ov.velocity != null) {
+      next.totalStock = (next.stock.warehouse || 0) + (next.stock.amazonFBA || 0)
+                      + (next.stock.flipkart  || 0) + (next.stock.blinkit    || 0);
+      next.runway = next.velocity > 0 ? Math.round(next.totalStock / next.velocity) : 0;
+      next.runwayStatus = next.velocity <= 0 ? "amber"
+        : next.runway <= next.leadTime ? "red"
+        : next.runway < 30 ? "amber" : "green";
+      // stockValue still uses original `price` — pricing object is unchanged.
+      const px = sku.pricing?.sp ?? sku.pricing?.mrp ?? 500;
+      next.stockValue = next.totalStock * px;
+    }
+    next.__hasOverrides = Object.keys(ov);
+    return next;
   });
 
   // Reverse-lookup: for any refCode (e.g. "NSPKGCB100"), which SKUs use it?
