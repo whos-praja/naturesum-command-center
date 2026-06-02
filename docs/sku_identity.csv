@@ -1,0 +1,15 @@
+sku_code,sku_name,sku_variant,amazon_msku,amazon_fnsku,flipkart_sku,shopify_sku,blinkit_title_pattern,blinkit_variant,nitin_mis_aliases,sp_inr,mrp_inr
+NSMP100,Moringa Powder,100 g,NSMP100,X002L3VQ41,NSMP100,NSMP100,,,"Moringa Powder 100 gm Packed; moringa 100",265,315
+NSMP250,Moringa Powder,250 g,NSMP250,X002L3WEBP,NSMP250,NSMP250,,,"Moringa Powder 250 gm Packed; moringa 250",495,625
+NSSB100,Sea Buckthorn Powder,100 g,NSSBP100,X002EFS34H,NSSBP100,NS-SBP-100,Daily Nutrition Supplement Powder,100 g,"SB Powder 100 gm Packed; Sea Buckthorn Berries Powder 100",450,500
+NSSB250,Sea Buckthorn Powder,250 g,NSSBP250,X002EFS2ZR,NSSBP250,NS-SBP-250,Sea Buckthorn Berries Powder,250 g,SB Powder 250 GM Packed,750,880
+NSSB500,Sea Buckthorn Powder,500 g,NSSBP500,X002HTJ1X7,NSSBP500,NS-SBP-500,Daily Nutrition Supplement,500 g,SB Powder 500 gm Packed (excludes the (Old) variant),1350,1550
+NSSBDB100,Sea Buckthorn Dry Berry,100 g,NSSBDB100g,X0029J4T23,NSSBDB100g,NS-SBDR-100,Himalayan Sea Buckthorn Dry Berries,100 g,"SB Berries 100 gm Packed; Sea Buckthorn Dry Berries 100 GM",390,520
+NSSBDB250,Sea Buckthorn Dry Berry,250 g,NSSBDB250g,X0025NUJDB,NSSBDB250g,NS-SBDR-250,Sea Buckthorn Dry Berries,250 g,SB Berries 250 gm Packed,690,920
+NSSBDB500,Sea Buckthorn Dry Berry,500 g,NSSBDB500g,X002E5YNFP,NSSBDB500g,NS-SBDR-500,Himalayan Sea Buckthorn Dry Berries,500 g,SB Berries 500 gm Packed,1150,1550
+NSSBJ300,Sea Buckthorn Juice,300 ml,NSSBJ300ML,X002JC4PQ5,NSSBJ300ML,NS-SBJ-300,Berry Juice Concentrate,300 ml,Pure Sea Buckthorn Berries Juice 300ML,690,920
+NSSBJ500,Sea Buckthorn Juice,500 ml,NSSBJ500ML,X002JBTVHJ,NSSBJ500ML,NS-SBJ-500,,,Pure Sea Buckthorn Berries Juice 500ML,1100,1300
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,,,,,,,SB Face Oil 15 ml Packed,1075,1250
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,,,,NS-SB-030,,,SB Face Oil 30 ml Packed,1580,1920
+NSJO100,Jatamansi Hair Oil,100 ml,NSJ&RHO100ML,X0025NUJDB_HO,NSJ&RHO100ML,NS-HO-JT-100,,,"Jatamansi Hair Oil 100 ml Pack; Jatamansi & Rosemary Hair Oil 100 ML",1350,1500
+NSACDT30,Acacia Catechu Diabetes Care Tea,30 bags,DI-TE-1-A,,DI-TE-1-A,DI-TE-1-A,Diabetes Care Tea,30 pcs,"AC Tea(30 tea bags) Packed; Acacia Catechu - 30 Tea Bags",975,1150

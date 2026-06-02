@@ -1,0 +1,44 @@
+sku_code,sku_name,sku_variant,recipe_kind,role,refcode,component_name,unit,units_per_pack,component_lead_time_days,sku_lead_time_days
+NSMP100,Moringa Powder,100 g,raw,INPUT,NSMLPR,Moringa Leaves Powder,KG,0.10,25,25
+NSMP100,Moringa Powder,100 g,raw,PKG1,NSPKGMP100,Moringa Powder Empty Pouch 100g,Pcs,1,14,25
+NSMP100,Moringa Powder,100 g,raw,PKG2,NSPKGCB100,100g Carton Box,Pcs,1,14,25
+NSMP250,Moringa Powder,250 g,raw,INPUT,NSMLPR,Moringa Leaves Powder,KG,0.25,25,25
+NSMP250,Moringa Powder,250 g,raw,PKG1,NSPKGMP250,Moringa Powder Empty Pouch 250g,Pcs,1,14,25
+NSMP250,Moringa Powder,250 g,raw,PKG2,NSPKGCB250,250g Carton Box,Pcs,1,14,25
+NSSB100,Sea Buckthorn Powder,100 g,raw,INPUT,NSSBPR,SB Powder (Raw),KG,0.10,50,50
+NSSB100,Sea Buckthorn Powder,100 g,raw,PKG1,NSPKGSBP100,SB Powder Empty Pouch 100g,Pcs,1,14,50
+NSSB250,Sea Buckthorn Powder,250 g,raw,INPUT,NSSBPR,SB Powder (Raw),KG,0.25,50,50
+NSSB250,Sea Buckthorn Powder,250 g,raw,PKG1,NSPKGSBP250,SB Powder Empty Pouch 250g,Pcs,1,14,50
+NSSB500,Sea Buckthorn Powder,500 g,raw,INPUT,NSSBPR,SB Powder (Raw),KG,0.50,50,50
+NSSB500,Sea Buckthorn Powder,500 g,raw,PKG1,NSPKGSBP500,SB Powder Empty Pouch 500g,Pcs,1,14,50
+NSSBDB100,Sea Buckthorn Dry Berry,100 g,raw,INPUT,NSSBDBR,SB Dry Berries (Raw),KG,0.10,50,50
+NSSBDB100,Sea Buckthorn Dry Berry,100 g,raw,PKG1,NSPKGDBP100,Dry Berries Empty Pouch 100g,Pcs,1,14,50
+NSSBDB250,Sea Buckthorn Dry Berry,250 g,raw,INPUT,NSSBDBR,SB Dry Berries (Raw),KG,0.25,50,50
+NSSBDB250,Sea Buckthorn Dry Berry,250 g,raw,PKG1,NSPKGDBP250,Dry Berries Empty Pouch 250g,Pcs,1,14,50
+NSSBDB500,Sea Buckthorn Dry Berry,500 g,raw,INPUT,NSSBDBR,SB Dry Berries (Raw),KG,0.50,50,50
+NSSBDB500,Sea Buckthorn Dry Berry,500 g,raw,PKG1,NSPKGDBP500,Dry Berries Empty Pouch 500g,Pcs,1,14,50
+NSSBJ300,Sea Buckthorn Juice,300 ml,raw,INPUT,NSSBJPLP,SB Juice Pulp,Ltr,0.30,50,50
+NSSBJ300,Sea Buckthorn Juice,300 ml,raw,PKG1,NSPKGJBOT300,Juice Bottle 300 ml,Pcs,1,14,50
+NSSBJ300,Sea Buckthorn Juice,300 ml,raw,PKG2,NSPKGJB300,Small Air Pouch 300 ml,Pcs,1,14,50
+NSSBJ300,Sea Buckthorn Juice,300 ml,raw,PKG3,NSPKGJTUB300,Juice Tube 300 ml,Pcs,1,14,50
+NSSBJ300,Sea Buckthorn Juice,300 ml,raw,PKG4,NSPKGJLBL300,Juice Label 300 ml,Pcs,1,14,50
+NSSBJ500,Sea Buckthorn Juice,500 ml,raw,INPUT,NSSBJPLP,SB Juice Pulp,Ltr,0.50,50,50
+NSSBJ500,Sea Buckthorn Juice,500 ml,raw,PKG1,NSPKGJBOT500,Juice Bottle 500 ml,Pcs,1,14,50
+NSSBJ500,Sea Buckthorn Juice,500 ml,raw,PKG2,NSPKGJB500,Large Air Pouch 500 ml,Pcs,1,14,50
+NSSBJ500,Sea Buckthorn Juice,500 ml,raw,PKG3,NSPKGJTUB500,Juice Tube 500 ml,Pcs,1,14,50
+NSSBJ500,Sea Buckthorn Juice,500 ml,raw,PKG4,NSPKGJLBL500,Juice Label 500 ml,Pcs,1,14,50
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,raw,INPUT,NSSBOR,SB Face Oil (Raw),Ltr,0.015,50,50
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,raw,PKG1,NSPKGBOBT15,SB Oil Bottle 15 ml,Pcs,1,14,50
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,raw,PKG2,NSPKGBOB15,SB Faceoil Empty Box 15 ml,Pcs,1,14,50
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,raw,PKG3,NSPKGBOCAP,Bottle Cap,Pcs,1,14,50
+NSSBBO15,Sea Buckthorn Berry Oil,15 ml,raw,PKG4,NSPKGBODROP,Dropper,Pcs,1,14,50
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,raw,INPUT,NSSBOR,SB Face Oil (Raw),Ltr,0.030,50,50
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,raw,PKG1,NSPKGBOBT30,SB Face Oil Empty Bottle 30 ml,Pcs,1,14,50
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,raw,PKG2,NSPKGBOB30,SB Faceoil Empty Box 30 ml,Pcs,1,14,50
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,raw,PKG3,NSPKGBOCAP,Bottle Cap,Pcs,1,14,50
+NSSBBO30,Sea Buckthorn Berry Oil,30 ml,raw,PKG4,NSPKGBODROP,Dropper,Pcs,1,14,50
+NSJO100,Jatamansi Hair Oil,100 ml,semi,INPUT,NSJOF100,Jatamansi Hair Oil Filled Bottle,Pcs,1,20,20
+NSJO100,Jatamansi Hair Oil,100 ml,semi,PKG1,NSPKGJOB100,Jatamansi Empty Box (with print),Pcs,1,14,20
+NSACDT30,Acacia Catechu Tea,30 bags,semi,INPUT,NSACDSF30,AC Tea Dip Sachets (Filled),Pcs,30,20,20
+NSACDT30,Acacia Catechu Tea,30 bags,semi,PKG1,NSPKGACTC30,Acacia Tea Bag Empty Pouch (green),Pcs,30,14,20
+NSACDT30,Acacia Catechu Tea,30 bags,semi,PKG2,NSPKGACTCBOX,Acacia Tea Empty Outer Box,Pcs,1,14,20

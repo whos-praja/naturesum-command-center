@@ -9,7 +9,7 @@ import { computeCascade } from "../lib/runwayCascade.js";
 import { readTargetDays, writeTargetDays, DEFAULT_TARGET_DAYS } from "../lib/skuTargets.js";
 import { readParam } from "../lib/formulaParams.js";
 import { FormulaIcon } from "../components/FormulaIcon.jsx";
-import FormulasTab from "./sub/FormulasTab.jsx";
+import SettingsModal from "../components/SettingsModal.jsx";
 
 // Module 3 — Inventory & Supply Chain
 // Sub-routes: /inventory/{unified|runway|forecast|batches|returns}
@@ -60,6 +60,7 @@ const PageInventory = ({ subsection }) => {
   );
 
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div>
@@ -73,13 +74,24 @@ const PageInventory = ({ subsection }) => {
               clicking it opens the multi-file upload modal. Removed the
               redundant "Upload MIS" button and the stub "Sync central
               warehouse" button (no handler, was reserved for a future
-              Apps Script trigger). Place PO stays as the primary action. */}
+              Apps Script trigger). Place PO stays as the primary action.
+              Gear icon opens the Settings modal (replaces the old Formulas
+              sub-tab — see SettingsModal.jsx). */}
+          <button
+            className="btn ghost icon"
+            onClick={() => setSettingsOpen(true)}
+            title="Inventory settings — tunable formula parameters"
+            style={{ fontSize: 16 }}
+          >
+            ⚙
+          </button>
           <DataAsOfPill onClick={() => setUploadOpen(true)}/>
           <button className="btn primary"><Icon name="plus" size={13}/>Place PO</button>
         </div>
       </div>
 
-      {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)}/>}
+      {uploadOpen   && <UploadModal   onClose={() => setUploadOpen(false)}/>}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)}/>}
 
       <div className="tabs">
         <button className={tab === "unified" ? "active" : ""} onClick={() => setTab("unified")}>Unified stock</button>
@@ -90,7 +102,6 @@ const PageInventory = ({ subsection }) => {
         <button className={tab === "catalog" ? "active" : ""} onClick={() => setTab("catalog")}>SKU catalog</button>
         <button className={tab === "batches" ? "active" : ""} onClick={() => setTab("batches")}>Batches & expiry</button>
         <button className={tab === "returns" ? "active" : ""} onClick={() => setTab("returns")}>Returns restocking</button>
-        <button className={tab === "formulas" ? "active" : ""} onClick={() => setTab("formulas")}>Formulas</button>
       </div>
 
       {tab === "unified" && <UnifiedStockTab inventory={liveInventory}/>}
@@ -103,7 +114,6 @@ const PageInventory = ({ subsection }) => {
       {tab === "catalog" && <CatalogTab inventory={liveInventory}/>}
       {tab === "batches"  && <SubtabPreviewGate label="Batches & expiry"><BatchesTab batches={D.batches}/></SubtabPreviewGate>}
       {tab === "returns"  && <SubtabPreviewGate label="Returns restocking"><ReturnsTab/></SubtabPreviewGate>}
-      {tab === "formulas" && <FormulasTab/>}
     </div>
   );
 };

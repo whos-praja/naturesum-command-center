@@ -19,11 +19,12 @@ import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
 import { BUNDLED_AGENCY_DATA } from "./bundledAgencyData.js";
 const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
 
-// Per-SKU overrides from the Inventory → Formulas sub-tab. Stored in
-// localStorage per-device under `ns.skuOverride.<code>.<field>`. When
-// set, the override wins over derived/uploaded numbers. Applied as the
-// LAST step of per-SKU derivation so it beats every real-data leg in
-// the chain. Editable from FormulasTab.jsx.
+// Per-SKU overrides — stored in localStorage per-device under
+// `ns.skuOverride.<code>.<field>`. Set via the FormulaIcon (ⓘ) popover
+// on any cell that supports override (velocity, growth, leadTime, etc).
+// When set, the override wins over derived/uploaded numbers. Applied as
+// the LAST step of per-SKU derivation so it beats every real-data leg
+// in the precedence chain (agency > Manage Orders > Nitin > stub).
 function _readSkuOverrides() {
   if (typeof window === "undefined") return {};
   const out = {};
