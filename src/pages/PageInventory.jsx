@@ -547,8 +547,10 @@ const AmazonFcModal = ({ sku, onClose }) => {
   const totalFbaStock = real?.totalSellable || 0;
   const combinedRunway = amzChannelDaily > 0 ? Math.round(totalFbaStock / amzChannelDaily) : null;
 
-  // ── MoM growth (already computed in data.js with agency precedence)
-  const growthValue = sku.growth ?? null;
+  // ── MoM growth — per-channel (Amazon channel, AMZ-001 fold: amz orders +
+  // shopify D2C combined). Falls back to overall sku.growth only when
+  // channelGrowth.amazon is missing entirely (no data signal).
+  const growthValue = sku.channelGrowth?.amazon ?? sku.growth ?? null;
   const growthLabel = growthValue == null
     ? "—"
     : `${growthValue > 0 ? "+" : ""}${growthValue.toFixed(1)}%`;
@@ -1299,6 +1301,7 @@ const UnifiedStockTab = ({ inventory }) => {
               // that has nothing to do with Amazon FBA stock.
               const r1 = (n) => Math.round((n || 0) * 10) / 10;
               const channelVel = s.channelVelocity || {};
+              const channelGrowth = s.channelGrowth || {};
               const shopifyD2CDaily =
                 (s.realData?.shopify?.sales30d != null
                   ? s.realData.shopify.sales30d / 30
@@ -1306,19 +1309,19 @@ const UnifiedStockTab = ({ inventory }) => {
               const amazonOnlyDaily = Math.max(0, (channelVel.amazon || 0) - shopifyD2CDaily);
               const amazonOwnVel  = r1(amazonOnlyDaily);
               const shopifyOwnVel = r1(shopifyD2CDaily);
+              // Per founder: Central WH velocity = sum of marketplace velocities
+              // only (option A — exclude WH-direct offline/marketing residual).
+              // Each cell uses its OWN channel's growth, not a shared SKU.growth.
+              const whSumVel = r1((channelVel.amazon ?? 0) + (channelVel.flipkart ?? 0) + (channelVel.blinkit ?? 0));
               const vel = {
                 amazonFBA: r1(channelVel.amazon ?? 0),
                 flipkart:  r1(channelVel.flipkart ?? 0),
                 blinkit:   r1(channelVel.blinkit ?? 0),
-                // WH velocity for the Unified-Stock display = total SKU velocity.
-                // i.e. "if marketplaces emptied and WH had to supply all demand
-                // alone, here's the drain rate". Gives every SKU a meaningful
-                // WH runway pill instead of the near-zero "WH-direct only"
-                // number (which was 0 for any SKU with full marketplace
-                // coverage). The cascade math in data.js / runwayCascade.js
-                // still uses the strict WH-direct velocity — this override is
-                // display-only.
-                warehouse: r1(s.velocity),
+                // WH velocity for the Unified-Stock display = sum of all
+                // marketplace channel velocities (per founder's option A).
+                // Excludes WH-direct offline/marketing residual; that's only
+                // needed by the cascade runway calc, not this display cell.
+                warehouse: whSumVel,
               };
 
               return (
@@ -1340,7 +1343,7 @@ const UnifiedStockTab = ({ inventory }) => {
                       }
                       breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}`}
                       velocity={vel.warehouse}
-                      growth={s.growth}
+                      growth={channelGrowth.warehouse}
                     />
                   </td>
                   {/* AMZ-001 + AMZ-003 + AMZ-004: Amazon cell mirrors the
@@ -1371,7 +1374,7 @@ const UnifiedStockTab = ({ inventory }) => {
                       }
                       breakdownLabel={`Amazon channel = Amazon orders (${amazonOwnVel.toFixed(1)}/d) + Shopify D2C (${shopifyOwnVel.toFixed(1)}/d) — both ship from FBA. Click for per-FC breakdown.`}
                       velocity={vel.amazonFBA}
-                      growth={s.growth}
+                      growth={channelGrowth.amazon}
                     />
                   </td>
                   {/* FK-001: Flipkart cell. Stock hero shows real "listed
@@ -1390,7 +1393,7 @@ const UnifiedStockTab = ({ inventory }) => {
                     <PlatformCell
                       units={s.realData?.flipkart?.live ?? null}
                       velocity={vel.flipkart}
-                      growth={s.growth}
+                      growth={channelGrowth.flipkart}
                     />
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
@@ -3144,7 +3147,7 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                       units={s.stock.amazonFBA}
                       vel={s.chVel.amazonFBA}
                       leadTime={s.chLead.amazonFBA}
-                      growth={s.actualGrowth}
+                      growth={s.channelGrowth?.amazon}
                       splitA={s.chVel._amazonOnly}
                       splitB={s.chVel._shopifyOnly}
                       splitALabel="amz"
@@ -3166,7 +3169,7 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                       units={s.realData?.flipkart?.live ?? null}
                       vel={s.chVel.flipkart}
                       leadTime={s.chLead.flipkart}
-                      growth={s.actualGrowth}
+                      growth={s.channelGrowth?.flipkart}
                     />
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>

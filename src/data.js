@@ -770,30 +770,89 @@ const NSData = (function () {
       blinkit:  realBlinkitDaily  != null ? Math.round(realBlinkitDaily  * 30) : ch.blinkit,
     };
 
-    // ── MoM growth: derived from Shopify 30d vs prior 30d ─────────────
-    // Shopify exports give us 91 days of daily sales — split into the
-    // current 30 days (sales30d) and the prior 30 days (sales60d - sales30d).
-    // Falls back to MOM_GROWTH stub when Shopify data is missing.
-    // Growth precedence (per founder's truth table):
-    //   1. Agency Sheet — Amazon row growth (if present and non-null)
-    //   2. Shopify-derived (cur30 vs prev30, capped at ±200)
-    //   3. Stub MOM_GROWTH
-    let derivedGrowth = MOM_GROWTH[s.code] ?? 0;
-    if (real.shopify) {
-      const cur30  = real.shopify.sales30d || 0;
-      const prev30 = (real.shopify.sales60d || 0) - cur30;
-      if (prev30 > 0) {
-        const g = ((cur30 - prev30) / prev30) * 100;
-        derivedGrowth = Math.max(-100, Math.min(200, g));
-      } else if (cur30 > 0) {
-        derivedGrowth = 200; // explicit "zero base → bookable but capped"
-      }
+    // ── Per-channel MoM growth ────────────────────────────────────────
+    // Per founder's truth table, each channel reads its OWN 30d / 60d
+    // sales from its OWN data source. Single SKU.growth value was wrong
+    // — it was leaking the Amazon-agency number into every cell.
+    //
+    // Sources (matches velocity precedence, but only the sources that
+    // actually expose both 30d AND 60d aging buckets are eligible):
+    //   Amazon channel  → Agency AMZ tab. Falls back to Shopify-derived
+    //                     (since AMZ-001 fold gives us shopify 30d/60d).
+    //   Shopify D2C     → Shopify CSV sales30d / sales60d.
+    //   Flipkart        → Flipkart Seller Hub sales30d / sales60d
+    //                     (or Agency FK tab if Hub missing).
+    //   Blinkit         → ONLY Agency Blinkit tab (native Seller Panel
+    //                     has no sales60d). Returns null if no agency.
+    //   Central WH      → aggregate cumulative: sum all channels'
+    //                     sales30d vs sum of all channels' prior30.
+    //
+    // Returns null when there's no data signal — UI shows "—" instead
+    // of a stale stub (per founder: honest > silent fakery).
+    const clamp = (v) => Math.max(-100, Math.min(200, v));
+    const growthFromBuckets = (cur30, prev30) => {
+      if (cur30 == null && prev30 == null) return null;
+      const c = cur30 || 0, p = prev30 || 0;
+      if (c === 0 && p === 0) return null;
+      if (p === 0 && c > 0)  return 200;   // zero-baseline cap
+      if (c === 0 && p > 0)  return -100;  // stopped
+      if (p > 0)             return clamp(((c - p) / p) * 100);
+      return null; // negative prior (heavy returns) — undefined growth
+    };
+
+    // Pull 30d/60d per channel with precedence.
+    const flipkartCur30 = real.flipkart?.sales30d ?? agencyCh?.flipkart?.sales30d ?? null;
+    const flipkartCur60 = real.flipkart?.sales60d ?? agencyCh?.flipkart?.sales60d ?? null;
+    const flipkartPrev30 = (flipkartCur60 != null && flipkartCur30 != null) ? (flipkartCur60 - flipkartCur30) : null;
+
+    const shopifyCur30 = real.shopify?.sales30d ?? agencyCh?.shopify?.sales30d ?? null;
+    const shopifyCur60 = real.shopify?.sales60d ?? agencyCh?.shopify?.sales60d ?? null;
+    const shopifyPrev30 = (shopifyCur60 != null && shopifyCur30 != null) ? (shopifyCur60 - shopifyCur30) : null;
+
+    // Amazon (orders-only, before AMZ-001 fold). Agency is the only source
+    // with both 30d + 60d for the Amazon channel orders side.
+    const amzOrdersCur30  = agencyCh?.amazon?.sales30d ?? null;
+    const amzOrdersCur60  = agencyCh?.amazon?.sales60d ?? null;
+    const amzOrdersPrev30 = (amzOrdersCur60 != null && amzOrdersCur30 != null) ? (amzOrdersCur60 - amzOrdersCur30) : null;
+
+    // Blinkit — agency tab only (native lacks sales60d).
+    const blkCur30  = agencyCh?.blinkit?.sales30d ?? null;
+    const blkCur60  = agencyCh?.blinkit?.sales60d ?? null;
+    const blkPrev30 = (blkCur60 != null && blkCur30 != null) ? (blkCur60 - blkCur30) : null;
+
+    // Channel-level growths.
+    // Amazon channel = AMZ-001 fold: amz orders + shopify D2C. Combine the
+    // 30d / 60d from each side, then derive growth from the combined totals.
+    const amzChannelCur30 = (amzOrdersCur30 != null || shopifyCur30 != null)
+      ? (amzOrdersCur30 ?? 0) + (shopifyCur30 ?? 0)
+      : null;
+    const amzChannelPrev30 = (amzOrdersPrev30 != null || shopifyPrev30 != null)
+      ? (amzOrdersPrev30 ?? 0) + (shopifyPrev30 ?? 0)
+      : null;
+
+    const channelGrowth = {
+      amazon:   growthFromBuckets(amzChannelCur30,  amzChannelPrev30),
+      flipkart: growthFromBuckets(flipkartCur30,    flipkartPrev30),
+      blinkit:  growthFromBuckets(blkCur30,         blkPrev30),
+      shopify:  growthFromBuckets(shopifyCur30,     shopifyPrev30),
+    };
+
+    // Central WH growth = cumulative across ALL channels (per founder).
+    const allCur30 = (amzOrdersCur30 ?? 0) + (shopifyCur30 ?? 0) + (flipkartCur30 ?? 0) + (blkCur30 ?? 0);
+    const allPrev30 = (amzOrdersPrev30 ?? 0) + (shopifyPrev30 ?? 0) + (flipkartPrev30 ?? 0) + (blkPrev30 ?? 0);
+    const anyData = [amzOrdersCur30, shopifyCur30, flipkartCur30, blkCur30].some(x => x != null);
+    channelGrowth.warehouse = anyData ? growthFromBuckets(allCur30, allPrev30) : null;
+
+    // Round each to 1 decimal for display.
+    for (const k of Object.keys(channelGrowth)) {
+      if (channelGrowth[k] != null) channelGrowth[k] = r1(channelGrowth[k]);
     }
-    // Agency growth (Amazon row) overrides when present — per truth table.
-    if (agencyCh?.amazon?.growth != null) {
-      derivedGrowth = Math.max(-100, Math.min(200, agencyCh.amazon.growth));
-    }
-    derivedGrowth = r1(derivedGrowth); // 1-decimal cap for display
+
+    // sku.growth (the legacy single value) = central-WH aggregate. This
+    // is what Simulator/Forecast/cascade still read. Falls back to the
+    // old Shopify-derived → stub chain when no aggregate signal.
+    let derivedGrowth = channelGrowth.warehouse ?? channelGrowth.amazon ?? channelGrowth.shopify ?? MOM_GROWTH[s.code] ?? 0;
+    derivedGrowth = r1(derivedGrowth);
 
     return {
       ...s,
@@ -803,6 +862,10 @@ const NSData = (function () {
       // Per-channel velocities and a pre-built cascade input set.
       // channelVelocity.amazon already includes Shopify (folded per AMZ-001).
       channelVelocity,
+      // Per-channel MoM growth — derived from each channel's own 30d/60d
+      // aging buckets. `.warehouse` is the cumulative aggregate. null
+      // means "no data signal" — UI must show "—" not a stale stub.
+      channelGrowth,
       // Per-channel "real | stub" marker — set when we substituted real
       // export data into the velocity. UI uses this to show provenance.
       velocitySource,
