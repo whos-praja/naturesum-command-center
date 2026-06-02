@@ -1109,9 +1109,13 @@ const UnifiedStockTab = ({ inventory }) => {
                       growth={s.growth}
                     />
                   </td>
-                  {/* AMZ-003: stock + per-FC OOS counts. AMZ-004: drill modal
-                      includes velocity decomposition (amz + d2c per AMZ-001).
-                      Whole cell clickable when real FBA data is present. */}
+                  {/* AMZ-001 + AMZ-003 + AMZ-004: Amazon cell mirrors the
+                      Warehouse template (stock hero + runway/vel/growth row)
+                      with the velocity split as `a + b` — `a` = Amazon-direct
+                      orders/day, `b` = Shopify D2C orders/day. Both demand
+                      streams pull from the same FBA stock pool, so the stock
+                      number is single (not split). Per-FC OOS detail lives in
+                      the drill modal (click anywhere on the cell). */}
                   <td
                     className={"num mat-cell" + (s.realData?.amazon ? " blk-cell" : "")}
                     onClick={(e) => {
@@ -1120,16 +1124,26 @@ const UnifiedStockTab = ({ inventory }) => {
                       setAmazonDrillSku(s);
                     }}
                   >
-                    <div className="pf-cell">
-                      <div className="pf-cell-units-row">
-                        <div className="pf-cell-units mono">{D.fmtN(s.stock.amazonFBA)}</div>
-                      </div>
-                      <AmazonFcStats sku={s}/>
-                    </div>
+                    <PlatformCell
+                      units={s.stock.amazonFBA}
+                      breakdown={
+                        <>
+                          <span className="pf-cell-bd-num mono">{amazonOwnVel.toFixed(1)}</span>
+                          <span className="pf-cell-bd-tag">amz</span>
+                          <span className="pf-cell-bd-op">+</span>
+                          <span className="pf-cell-bd-num mono">{shopifyOwnVel.toFixed(1)}</span>
+                          <span className="pf-cell-bd-tag">d2c</span>
+                        </>
+                      }
+                      breakdownLabel={`Amazon channel = Amazon orders (${amazonOwnVel.toFixed(1)}/d) + Shopify D2C (${shopifyOwnVel.toFixed(1)}/d) — both ship from FBA. Click for per-FC breakdown.`}
+                      velocity={vel.amazonFBA}
+                      growth={s.growth}
+                    />
                   </td>
-                  {/* FK-001: clickable cell w/ Flipkart health pill +
-                      F-Assured badge. Drill modal shows trend, reserved,
-                      F-Assured, real price. */}
+                  {/* FK-001: Flipkart cell mirrors the Warehouse template —
+                      single value (Flipkart is one channel, no a+b split).
+                      F-Assured badge + 90-day trend live in the drill modal
+                      (click the cell). */}
                   <td
                     className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
                     onClick={(e) => {
@@ -1138,12 +1152,11 @@ const UnifiedStockTab = ({ inventory }) => {
                       setFlipkartDrillSku(s);
                     }}
                   >
-                    <div className="pf-cell">
-                      <div className="pf-cell-units-row">
-                        <div className="pf-cell-units mono">{D.fmtN(s.stock.flipkart)}</div>
-                      </div>
-                      <FlipkartHealthPill sku={s}/>
-                    </div>
+                    <PlatformCell
+                      units={s.stock.flipkart}
+                      velocity={vel.flipkart}
+                      growth={s.growth}
+                    />
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
                     {/* BLK-001 + BLK-002: stock headline + a/b feeder-WH counts
@@ -2839,6 +2852,9 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                   {/* AMZ-003 (Runway tab): stock + per-FC OOS counts when real
                       FBA data is present; falls back to the existing velocity
                       breakdown cell otherwise. */}
+                  {/* Runway tab — Amazon: always show stock + runway + a+b
+                      velocity + growth (matches Unified Stock pattern).
+                      Per-FC drill stays one click away. */}
                   <td
                     className={"num mat-cell" + (s.realData?.amazon ? " blk-cell" : "")}
                     onClick={(e) => {
@@ -2847,24 +2863,19 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                       setAmazonDrillSku(s);
                     }}
                   >
-                    {s.realData?.amazon ? (
-                      <div className="rw-ch-cell">
-                        <div className="rw-ch-cell-stock mono">{D.fmtN(s.stock.amazonFBA)}</div>
-                        <AmazonFcStats sku={s}/>
-                      </div>
-                    ) : (
-                      <RunwayChannelCell
-                        units={s.stock.amazonFBA}
-                        vel={s.chVel.amazonFBA}
-                        leadTime={s.chLead.amazonFBA}
-                        growth={s.actualGrowth}
-                        splitA={s.chVel._amazonOnly}
-                        splitB={s.chVel._shopifyOnly}
-                        splitALabel="amz"
-                        splitBLabel="d2c"
-                      />
-                    )}
+                    <RunwayChannelCell
+                      units={s.stock.amazonFBA}
+                      vel={s.chVel.amazonFBA}
+                      leadTime={s.chLead.amazonFBA}
+                      growth={s.actualGrowth}
+                      splitA={s.chVel._amazonOnly}
+                      splitB={s.chVel._shopifyOnly}
+                      splitALabel="amz"
+                      splitBLabel="d2c"
+                    />
                   </td>
+                  {/* Runway tab — Flipkart: single value, matches WH template.
+                      90-day trend + F-Assured live in the drill modal. */}
                   <td
                     className={"num mat-cell" + (s.realData?.flipkart ? " blk-cell" : "")}
                     onClick={(e) => {
@@ -2873,14 +2884,12 @@ const RunwayTab = ({ inventory: rawInventory }) => {
                       setFlipkartDrillSku(s);
                     }}
                   >
-                    {s.realData?.flipkart ? (
-                      <div className="rw-ch-cell">
-                        <div className="rw-ch-cell-stock mono">{D.fmtN(s.stock.flipkart)}</div>
-                        <FlipkartHealthPill sku={s}/>
-                      </div>
-                    ) : (
-                      <RunwayChannelCell units={s.stock.flipkart} vel={s.chVel.flipkart} leadTime={s.chLead.flipkart} growth={s.actualGrowth}/>
-                    )}
+                    <RunwayChannelCell
+                      units={s.stock.flipkart}
+                      vel={s.chVel.flipkart}
+                      leadTime={s.chLead.flipkart}
+                      growth={s.actualGrowth}
+                    />
                   </td>
                   <td className="num mat-cell blk-cell" onClick={(e) => { e.stopPropagation(); setBlinkitDrillSku(s); }}>
                     {/* BLK-003: Runway tab Blinkit cell mirrors Unified Stock.
