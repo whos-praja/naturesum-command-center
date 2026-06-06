@@ -61,6 +61,9 @@ const __overrideMap = _readSkuOverrides();
 // data, which themselves fall back to stub. Reads localStorage at
 // init time so refreshes pick up the latest upload without code change.
 import { loadMultiFile, buildRealMarketplaceOverride, buildNitinOverride } from "./lib/multiFileStore.js";
+// readParam → the amber-runway threshold (and other tunables) so the default
+// render path honors the ⚙ Settings value instead of a hardcoded 30 (R21).
+import { readParam } from "./lib/formulaParams.js";
 const __liveStore = (typeof window !== "undefined") ? loadMultiFile() : null;
 const __liveMp    = buildRealMarketplaceOverride(__liveStore) || {};
 const __liveNitin = buildNitinOverride(__liveStore);
@@ -952,6 +955,11 @@ const NSData = (function () {
     // r1 is local to the previous .map() callback scope — redeclare here.
     // (The crash this caused turned the whole Inventory page white.)
     const r1 = (n) => Math.round((n || 0) * 10) / 10;
+    // Total company SALES velocity = sum of per-channel sales velocities
+    // (channelVelocity.amazon already folds website D2C per R-FBA). This is
+    // what the WH buffer actually drains at — NOT warehouse movement.
+    const cv = sku.channelVelocity || {};
+    const totalSalesVel = (cv.amazon || 0) + (cv.flipkart || 0) + (cv.blinkit || 0);
 
     const next = {
       ...sku,
@@ -972,37 +980,56 @@ const NSData = (function () {
       centralWhOldStock: cwh.oldStock || 0,
       // Central WH-specific fields the cell + drill modal read directly
       // (kept separate from per-channel velocity/growth so each cell
-      // displays its own source). depletion includes all 6 movement
-      // channels — Amazon/FK/Blinkit/Website/Offline/Marketing.
-      // Round velocity to 1dp for display parity with channelVelocity (Bug
-      // #10 — engine emits raw floats like 7.067).
-      centralWhVelocity: r1(cwh.depletion30),
-      centralWhSalesVel: r1(cwh.sales30),       // excludes Marketing channel
-      centralWhGrowth:   cwh.momGrowth != null ? r1(cwh.momGrowth) : null,
-      centralWhRunway:   cwh.runwayDays,
+      // displays its own source).
+      //
+      // ── CORRECTED METRIC MODEL (founder, 2026-06) ──────────────
+      // Consumption = SALES, not warehouse movement. The engine's
+      // depletion30 (FG movement out of the WH) is dominated by bulk
+      // replenishment shipments to marketplace WHs and MISREPRESENTS
+      // consumption — so it is NO LONGER used for velocity / runway /
+      // reorder anywhere. The engine roll-forward is kept ONLY for the
+      // physical FG count (cwh.fgStock), producible, and components.
+      //
+      // Central-WH velocity = TOTAL company SALES velocity = the sum of
+      // the per-channel sales velocities (channelVelocity is already
+      // sales-derived; amazon leg already folds website D2C per R-FBA).
+      // The WH ultimately supplies all channels, so its buffer drains at
+      // total demand.
+      centralWhVelocity: r1(totalSalesVel),
+      centralWhSalesVel: r1(totalSalesVel),
+      centralWhGrowth:   sku.channelGrowth?.warehouse ?? null,   // sales-based aggregate MoM
       centralWhBinding:  cwh.binding,
       centralWhWorstCover: cwh.worstCoverDays,
       // Lead time from the spec = max component lead in BOM.
       leadTime: cwh.leadDays ?? sku.leadTime,
-      // FG stock value per spec: FG_WH_stock × price.
+      // FG-only stock value (WH finished goods × SP). The HEADLINE total
+      // value is summed at the UI from each location's units × SP.
       stockValue: cwh.stockValue,
-      // Reorder flag from the spec.
-      reorder: cwh.reorder,
     };
-    // Recompute totalStock + status using the new WH stock.
+    // Recompute totalStock using the new WH stock.
     next.totalStock = (next.stock.warehouse || 0) + (next.stock.amazonFBA || 0)
                     + (next.stock.flipkart  || 0) + (next.stock.blinkit    || 0);
-    // Bug #4 — sku.runway was set in the main derive (line 919 ish) using
-    // the pre-overlay totalStock + velocity. Now we have the engine's
-    // proper FG-runway, use it; fall back to total/vel for SKUs with no
-    // engine signal.
-    next.runway = next.centralWhRunway != null
-      ? next.centralWhRunway
-      : (next.velocity > 0 ? Math.round(next.totalStock / next.velocity) : 0);
-    next.runwayStatus = next.velocity <= 0 ? "amber"
-      : (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime) ? "red"
-      : (next.centralWhRunway != null && next.centralWhRunway < 30) ? "amber"
+    // Central-WH runway = WH FG ÷ total SALES velocity (NOT depletion).
+    // Sellable cover = FG + producible (what we can ship/pack now).
+    const cwhSellable = (cwh.fgStock || 0) + (cwh.producible || 0);
+    next.centralWhRunway = cwhSellable <= 0
+      ? 0
+      : (totalSalesVel > 0 ? Math.round((cwh.fgStock || 0) / totalSalesVel) : null);
+    next.runway = next.centralWhRunway;
+    // Status — HARD zero-sellable guard first (fixes the green-stockout
+    // bug R7), then thresholds against the displayed runway, amber from
+    // the tunable param (R21).
+    const amberDays = readParam("amberRunwayDays") || 30;
+    next.runwayStatus =
+        cwhSellable <= 0 ? "red"
+      : next.centralWhRunway == null ? "amber"          // stock but no sales signal
+      : next.centralWhRunway <= next.leadTime ? "red"
+      : next.centralWhRunway < amberDays ? "amber"
       : "green";
+    // Reorder = sales-based: out of cover, or runway shorter than the
+    // replenishment lead time. (Fixes engine reorder=false on stockout, R12.)
+    next.reorder = cwhSellable <= 0
+      || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime);
     return next;
   }).map((sku) => {
     // ── FINAL STEP — apply per-SKU overrides from Formulas tab ──

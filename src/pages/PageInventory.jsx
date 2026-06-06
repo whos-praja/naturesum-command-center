@@ -1032,7 +1032,10 @@ const UnifiedStockTab = ({ inventory }) => {
     : "sample data";
   // Warehouse-only scope.
   const warehouseUnits = inventory.reduce((a, b) => a + b.stock.warehouse, 0);
-  const unitCost = (s) => (s.totalStock ? s.stockValue / s.totalStock : 0);
+  // unitCost = selling price per unit (R16). NEVER stockValue/totalStock —
+  // stockValue is FG-only now, so that ratio collapsed the per-unit price
+  // (₹0 for sold-out-FG SKUs) and understated the headline value ~44%.
+  const unitCost = (s) => (s.pricing?.sp ?? s.pricing?.mrp ?? 0);
   const warehouseStockValue = inventory.reduce((a, b) => a + b.stock.warehouse * unitCost(b), 0);
   const activeSkus = inventory.filter(s => s.active !== false).length;
 
@@ -1846,7 +1849,7 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
     ? `Source: ${live.fileName || "uploaded MIS sheet"} · data as of ${live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN")}`
     : "Source: sample data · upload the MIS sheet to see live numbers";
   const wb = sku.warehouseBreakdown;
-  const unitCost = sku.totalStock ? sku.stockValue / sku.totalStock : 0;
+  const unitCost = sku.pricing?.sp ?? sku.pricing?.mrp ?? 0;   // SP per unit (R16)
 
   // Esc to close
   useEffect(() => {
@@ -3017,7 +3020,6 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   //   - Reorder units needed: rough sum of (lead time × velocity) − stock for red items
   const allSorted = [...inventory].sort((a, b) => a.adjRunway - b.adjRunway);
   const firstToStockout = allSorted[0];
-  const stockValueAtRisk = reds.reduce((sum, s) => sum + (s.stockValue || 0), 0);
   const suppliersToContact = new Set(
     reds.flatMap(s => D.suppliers.filter(sup => sup.skus.includes(s.code)).map(sup => sup.id))
   ).size;
@@ -3096,25 +3098,7 @@ const RunwayTab = ({ inventory: rawInventory }) => {
           );
         })()}
 
-        {/* 3. Stock value at risk — what's the financial exposure */}
-        {(() => {
-          const sev = stockValueAtRisk > 0 ? "crit" : "ok";
-          return (
-            <div className={"rw-risk-card " + sev}>
-              <div className="rw-risk-head">
-                <span className="rw-risk-icon"><Icon name="finance" size={14}/></span>
-                <div>
-                  <div className="rw-risk-title">Stock value at risk</div>
-                  <div className="rw-risk-sub">overdue items only</div>
-                </div>
-              </div>
-              <div className="rw-risk-num">{D.fmtINR(stockValueAtRisk)}</div>
-              <div className="rw-risk-detail">
-                across {reds.length} overdue item{reds.length === 1 ? "" : "s"}
-              </div>
-            </div>
-          );
-        })()}
+        {/* "Stock value at risk" card removed per founder — low signal. */}
 
         {/* 4. Reorder volume needed — how much to actually order */}
         {(() => {

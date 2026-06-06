@@ -41,7 +41,12 @@
  *     ],
  *   }
  */
-export function computeCascade({ whStock, whVelocity = 0, channels = [] }) {
+// NOTE: the input param is `whBaseVelocity` — ALL three call sites (data.js,
+// RunwayTab, Simulator) pass it under that name. It was previously destructured
+// as `whVelocity`, so the value was silently dropped and the WH lane never
+// drained (R11 — inflated runway on ~86% of SKUs). The per-phase OUTPUT field
+// stays named `whVelocity` (charting contract) — only the input + its reads change.
+export function computeCascade({ whStock, whBaseVelocity = 0, channels = [] }) {
   // Per-channel "own stock" runway — what the channel can sustain
   // independently before it dips into the warehouse.
   const enriched = channels.map(ch => {
@@ -63,7 +68,7 @@ export function computeCascade({ whStock, whVelocity = 0, channels = [] }) {
 
   const phases = [];
   let lastDay = 0;
-  let whVelNow = whVelocity;          // grows as channels die
+  let whVelNow = whBaseVelocity;      // grows as channels die
   let whRemaining = whStock;
 
   for (const ev of events) {
@@ -95,11 +100,11 @@ export function computeCascade({ whStock, whVelocity = 0, channels = [] }) {
     lastDay = lastDay + finalSpan;
   }
 
-  const totalRunway = whVelNow > 0 || whVelocity > 0 ? lastDay : Infinity;
+  const totalRunway = whVelNow > 0 || whBaseVelocity > 0 ? lastDay : Infinity;
 
   // Standalone WH runway (the central-warehouse-only number) — useful for
   // the "what if marketplaces vanished" view in Materials breakdown.
-  const standaloneWhRunway = whVelocity > 0 ? whStock / whVelocity : Infinity;
+  const standaloneWhRunway = whBaseVelocity > 0 ? whStock / whBaseVelocity : Infinity;
 
   return {
     channels: enriched.map(c => ({
@@ -112,7 +117,7 @@ export function computeCascade({ whStock, whVelocity = 0, channels = [] }) {
     })),
     wh: {
       stock:        whStock,
-      baseVelocity: whVelocity,
+      baseVelocity: whBaseVelocity,
       runway:       standaloneWhRunway,
     },
     totalRunway,

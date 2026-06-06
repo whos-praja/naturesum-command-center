@@ -44,8 +44,8 @@ const FIXED_ASSET_NAMES = new Set([
 
 // ─── §2a — Finished-good SKUs ───────────────────────────────────
 const SKUS = [
-  { code: "NSMP100",  name: "Moringa Powder",                       variant: "100 g",     price: 265,  leadDays: 30 },
-  { code: "NSMP250",  name: "Moringa Powder",                       variant: "250 g",     price: 495,  leadDays: 30 },
+  { code: "NSMP100",  name: "Moringa Powder",                       variant: "100 g",     price: 265,  leadDays: 25 },
+  { code: "NSMP250",  name: "Moringa Powder",                       variant: "250 g",     price: 495,  leadDays: 25 },
   { code: "NSSB100",  name: "Sea Buckthorn Powder",                 variant: "100 g",     price: 450,  leadDays: 50 },
   { code: "NSSB250",  name: "Sea Buckthorn Powder",                 variant: "250 g",     price: 750,  leadDays: 50 },
   { code: "NSSB500",  name: "Sea Buckthorn Powder",                 variant: "500 g",     price: 1350, leadDays: 50 },
@@ -64,7 +64,7 @@ const SKU_BY_CODE = Object.fromEntries(SKUS.map(s => [s.code, s]));
 
 // ─── §2b — Components ───────────────────────────────────────────
 const COMPONENTS = [
-  { ref: "NSMLPR",        name: "Moringa Leaves Powder",             type: "RM",  leadDays: 30, unit: "KG"  },
+  { ref: "NSMLPR",        name: "Moringa Leaves Powder",             type: "RM",  leadDays: 25, unit: "KG"  },
   { ref: "NSSBPR",        name: "SB Powder (Raw)",                   type: "RM",  leadDays: 50, unit: "KG"  },
   { ref: "NSSBDBR",       name: "SB Dry Berries (Raw)",              type: "RM",  leadDays: 50, unit: "KG"  },
   { ref: "NSSBJPLP",      name: "SB Juice Pulp",                     type: "RM",  leadDays: 50, unit: "Ltr" },
@@ -562,7 +562,9 @@ function computeMetrics(balance, asOf) {
     }
     const worstCoverDays = Number.isFinite(worstCover) ? Math.round(worstCover) : null;
 
-    const reorder = runwayDays != null && runwayDays < sku.leadDays;
+    // Reorder when out of sellable cover OR runway shorter than lead time.
+    // (Was false when runwayDays===null, hiding stocked-out SKUs — R12.)
+    const reorder = totalAvail <= 0 || (runwayDays != null && runwayDays < sku.leadDays);
     const stockValue = fgStock * sku.price;
 
     // Old stock — static side field (NOT in fgStock/sellable/runway). Per
