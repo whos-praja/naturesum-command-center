@@ -108,7 +108,23 @@ export function buildRealMarketplaceOverride(store) {
   return out;
 }
 
-/** Build a NITIN_DATA-shaped object from the Nitin upload. */
+/** Build a central-WH override from the 7th upload zone ('central-wh').
+ *  Returns the full parsed engine payload ({ fg, components, fixedAssets,
+ *  consumables, anchorDate, asOf, flags, ... }) so data.js can overlay WH FG +
+ *  producible + components, or null when nothing usable is uploaded.
+ *  NOTE: this supersedes the legacy 'nitin' Warehouse Daily Inventory path
+ *  (buildNitinOverride) — both claim to set warehouse stock, but per founder
+ *  decision §8.1 the in-browser central-WH engine is the durable source of
+ *  truth. SAFE FALLBACK: guard on `p.fg` so a malformed parse → null, never a
+ *  half-baked override. */
+export function buildCentralWhOverride(store) {
+  const p = store?.files?.["central-wh"]?.parsed;
+  return (p && p.fg) ? p : null;
+}
+
+/** Build a NITIN_DATA-shaped object from the Nitin upload.
+ *  LEGACY: superseded by buildCentralWhOverride ('central-wh' zone). Kept for
+ *  back-compat with existing uploads; the central-WH engine wins when present. */
 export function buildNitinOverride(store) {
   const parsed = store?.files?.["nitin"]?.parsed;
   if (!parsed) return null;

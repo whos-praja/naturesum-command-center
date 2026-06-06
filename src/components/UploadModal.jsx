@@ -1,11 +1,11 @@
 /**
  * UploadModal — multi-file upload flow.
  *
- * Six independent zones, one per file type (Amazon ledger / Amazon orders /
- * Blinkit / Flipkart / Shopify / Nitin). Each zone has its own file picker,
- * date-cutoff picker, parse status, and remove button. On "Apply", the
- * uploaded files are persisted via multiFileStore; the page reloads so
- * data.js picks up the new payload at module-init time.
+ * Six independent zones, one per file type (Central Warehouse workbook /
+ * Amazon ledger / Agency / Blinkit / Flipkart / Shopify). Each zone has its
+ * own file picker, date-cutoff picker, parse status, and remove button. On
+ * "Apply", the uploaded files are persisted via multiFileStore; the page
+ * reloads so data.js picks up the new payload at module-init time.
  *
  * The DataAsOfPill in the topbar shows when the latest upload happened
  * and how many file slots are populated.
@@ -23,20 +23,16 @@ import {
 } from "../lib/multiFileStore.js";
 import { detectFileType, checkAnomalies } from "../lib/claudeHelper.js";
 import { REAL_MARKETPLACE_DATA } from "../realMarketplaceData.js";
-import { NITIN_DATA } from "../realNitinData.js";
+import { CENTRAL_WH_DATA } from "../bundledCentralWHData.js";
 
 // Extract the slice of bundled real-data that matches a given file type —
 // used as the "before" baseline when Claude is asked to spot anomalies in
 // a freshly-parsed upload.
 function bundledBaselineFor(fileType) {
-  if (fileType === "nitin") {
-    return {
-      fg: NITIN_DATA?.warehouseInventory?.fg || {},
-      dailyMovement: Object.fromEntries(
-        Object.entries(NITIN_DATA?.dailyMovement?.byCode || {})
-          .map(([code, d]) => [code, d.channels])
-      ),
-    };
+  if (fileType === "central-wh") {
+    // Warehouse ground truth: baseline = bundled central-WH engine FG map.
+    // SAFE FALLBACK: guard the import so a missing/empty artifact → {} not crash.
+    return { fg: CENTRAL_WH_DATA?.fg || {} };
   }
   const sliceKey = {
     "amazon-ledger": "amazon",
@@ -60,13 +56,15 @@ function bundledBaselineFor(fileType) {
 }
 
 const ZONES = [
-  { key: "nitin",          ...FILE_TYPES["nitin"] },
+  // Central Warehouse workbook is the warehouse ground truth — listed first.
+  // Supersedes the retired 'nitin' (Warehouse Daily Inventory Sheet) zone.
+  { key: "central-wh",     ...FILE_TYPES["central-wh"] },
   { key: "amazon-ledger",  ...FILE_TYPES["amazon-ledger"] },
   { key: "agency",         ...FILE_TYPES["agency"] },
   { key: "blinkit",        ...FILE_TYPES["blinkit"] },
   { key: "flipkart",       ...FILE_TYPES["flipkart"] },
   { key: "shopify",        ...FILE_TYPES["shopify"] },
-];
+].filter((z) => z.label); // SAFE FALLBACK: drop any zone whose FILE_TYPES entry is missing
 
 const fmtDate = (iso) => {
   if (!iso) return "—";
@@ -127,7 +125,7 @@ export function UploadModal({ onClose }) {
         <div className="modal-foot">
           <span className="muted" style={{ fontSize: 11.5 }}>
             {filesCount > 0
-              ? `${filesCount} of 6 sources uploaded · last updated ${store.uploadedAt ? new Date(store.uploadedAt).toLocaleString("en-IN") : "—"}`
+              ? `${filesCount} of ${ZONES.length} sources uploaded · last updated ${store.uploadedAt ? new Date(store.uploadedAt).toLocaleString("en-IN") : "—"}`
               : "Nothing uploaded yet — dashboard is showing bundled real-data."}
           </span>
           <div style={{ display: "flex", gap: 8 }}>
@@ -224,10 +222,11 @@ function UploadZone({ zone, entry, onUpdate }) {
     if (!entry?.parsed) return null;
     const p = entry.parsed;
     if (zone.key === "shopify" && p.byCode) return `${Object.keys(p.byCode).length} SKUs · ${p.dateRange?.days || 0} days`;
-    if (zone.key === "nitin") {
+    if (zone.key === "central-wh") {
       const fgN = Object.keys(p.fg || {}).length;
-      const days = p.dailyMovement?.days ?? 0;
-      return `${fgN} FG SKUs · ${days} days movement`;
+      const compN = Object.keys(p.components || {}).length;
+      const anchor = p.anchorDate ? ` · audit ${fmtDate(p.anchorDate)}` : "";
+      return `${fgN} FG SKUs · ${compN} components${anchor}`;
     }
     return `${Object.keys(p || {}).length} SKUs`;
   })();
@@ -390,7 +389,7 @@ export function DataAsOfPill({ onClick }) {
         background: isLive ? "var(--success)" : "var(--ink-4)",
         display: "inline-block",
       }}/>
-      {isLive ? `Live data · ${summary.count}/6` : "Upload data"}
+      {isLive ? `Live data · ${summary.count}/${ZONES.length}` : "Upload data"}
     </button>
   );
 }

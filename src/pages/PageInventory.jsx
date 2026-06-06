@@ -1036,7 +1036,12 @@ const UnifiedStockTab = ({ inventory }) => {
   // stockValue is FG-only now, so that ratio collapsed the per-unit price
   // (₹0 for sold-out-FG SKUs) and understated the headline value ~44%.
   const unitCost = (s) => (s.pricing?.sp ?? s.pricing?.mrp ?? 0);
-  const warehouseStockValue = inventory.reduce((a, b) => a + b.stock.warehouse * unitCost(b), 0);
+  // WH value INCLUDES old stock (founder decision §8.4: old stock counts toward
+  // total value, only excluded from runway). New FG + old stock, each × SP.
+  const warehouseStockValue = inventory.reduce(
+    (a, b) => a + ((b.stock.warehouse || 0) + (b.centralWhOldStock || 0)) * unitCost(b), 0);
+  const oldStockValue = inventory.reduce(
+    (a, b) => a + (b.centralWhOldStock || 0) * unitCost(b), 0);
   const activeSkus = inventory.filter(s => s.active !== false).length;
 
   // Stock-runway alerts:
@@ -1138,10 +1143,15 @@ const UnifiedStockTab = ({ inventory }) => {
             <span className="rw-risk-icon"><Icon name="finance" size={14}/></span>
             <div>
               <div className="rw-risk-title">Total stock value</div>
-              <div className="rw-risk-sub">central warehouse FG, valued at unit cost</div>
+              <div className="rw-risk-sub">central warehouse FG (new + old) at selling price</div>
             </div>
           </div>
           <div className="rw-risk-num" style={{ color: "var(--ink)" }}>{D.fmtINR(warehouseStockValue)}</div>
+          {oldStockValue > 0 && (
+            <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>
+              incl. {D.fmtINR(oldStockValue)} old stock (excluded from runway)
+            </div>
+          )}
           <div className="stock-meta">
             <div className="stock-meta-item">
               <div className="stock-meta-num mono">{D.fmtN(warehouseUnits)}</div>
@@ -1877,18 +1887,20 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   const minCap = allRows.length ? Math.min(...allRows.map(r => r.obj.capacity)) : 0;
   const bottleneckRefCode = allRows.find(r => r.obj.capacity === minCap)?.obj.refCode;
 
-  // Per-channel velocity split — same logic as the Unified Stock table.
-  // Channel velocity = total velocity × that channel's revenue share, with
-  // shopify mapped to warehouse (D2C ships from warehouse).
-  const sp = sku.splits || {};
-  const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
+  // Per-channel velocity + growth — SALES-based, same authority as the Unified
+  // Stock table (NOT a revenue-share split of the SKU total). Each row carries
+  // its OWN channel velocity (channelVelocity.*, warehouse → centralWhVelocity)
+  // and its OWN MoM growth (channelGrowth.*, warehouse → centralWhGrowth) so
+  // every row reflects its real channel, not one shared sku.growth.
+  const cv = sku.channelVelocity || {};
+  const cg = sku.channelGrowth || {};
   const maxFg = wb.fg + wb.producibleFG;
   const channels = [
-    { key: "warehouse", name: "Central warehouse", hint: "Total (WH) · D2C + B2B direct",  color: "#2F5E47", units: maxFg,                vel: sku.velocity * ((sp.shopify  || 0) / revTotal) },
-    { key: "amazon",    name: "Amazon FBA", hint: "fulfilled by Amazon",        color: "#FF9900", units: sku.stock.amazonFBA,  vel: sku.velocity * ((sp.amazon   || 0) / revTotal) },
-    { key: "flipkart",  name: "Flipkart",   hint: "FK warehouse",               color: "#2874F0", units: sku.stock.flipkart,   vel: sku.velocity * ((sp.flipkart || 0) / revTotal) },
-    { key: "blinkit",   name: "Blinkit",    hint: "10-min delivery",            color: "#F8CB46", units: sku.stock.blinkit,    vel: sku.velocity * ((sp.blinkit  || 0) / revTotal) },
-    { key: "transit",   name: "In Transit", hint: "arriving · 7 days",          color: "#9CA098", units: sku.stock.transit,    vel: 0 },
+    { key: "warehouse", name: "Central warehouse", hint: "Total (WH) · D2C + B2B direct",  color: "#2F5E47", units: maxFg,                vel: sku.centralWhVelocity ?? 0,        growth: sku.centralWhGrowth ?? cg.warehouse ?? null },
+    { key: "amazon",    name: "Amazon FBA", hint: "fulfilled by Amazon",        color: "#FF9900", units: sku.stock.amazonFBA,  vel: cv.amazon   ?? 0,                  growth: cg.amazon   ?? null },
+    { key: "flipkart",  name: "Flipkart",   hint: "FK warehouse",               color: "#2874F0", units: sku.stock.flipkart,   vel: cv.flipkart ?? 0,                  growth: cg.flipkart ?? null },
+    { key: "blinkit",   name: "Blinkit",    hint: "10-min delivery",            color: "#F8CB46", units: sku.stock.blinkit,    vel: cv.blinkit  ?? 0,                  growth: cg.blinkit  ?? null },
+    { key: "transit",   name: "In Transit", hint: "arriving · 7 days",          color: "#9CA098", units: sku.stock.transit,    vel: 0,                                 growth: null },
   ];
   const runwayTier = (days) => days < 14 ? " crit" : days < 30 ? " warn" : "";
 
@@ -2029,8 +2041,12 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           </div>
           <div className="wb-channels">
             {channels.map(ch => {
-              const hasVel = ch.vel > readParam("velocityFloor");
-              const runway = hasVel ? Math.round(ch.units / ch.vel) : null;
+              const v = Number.isFinite(ch.vel) ? ch.vel : 0;
+              const hasVel = v > readParam("velocityFloor");
+              // Net returns: a real channel whose velocity is negative (returns
+              // > shipments). Mirror PlatformCell — never show a bare negative.
+              const isReturns = ch.key !== "transit" && v < 0;
+              const runway = hasVel && ch.units > 0 ? Math.round(ch.units / v) : null;
               return (
                 <div className="wb-ch-row" key={ch.key} title={ch.hint}>
                   <div className="wb-ch-label">
@@ -2041,10 +2057,12 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                     <div className="wb-ch-units mono">{D.fmtN(ch.units)}</div>
                     {hasVel ? (
                       <div className="wb-ch-meta">
-                        <span className={"pf-cell-runway" + runwayTier(runway)}>{runway}d</span>
-                        <span className="wb-ch-vel mono">{ch.vel.toFixed(1)}/d</span>
-                        <Delta value={sku.growth} hideArrow/>
+                        {runway != null && <span className={"pf-cell-runway" + runwayTier(runway)}>{runway}d</span>}
+                        <span className="wb-ch-vel mono">{v.toFixed(1)}/d</span>
+                        {ch.growth != null && <Delta value={ch.growth} hideArrow/>}
                       </div>
+                    ) : isReturns ? (
+                      <span className="wb-ch-vel muted" style={{ fontSize: 10.5 }} title="More units returned than shipped over the last 30 days">net returns</span>
                     ) : (
                       <span className="wb-ch-vel muted" style={{ fontSize: 10.5 }}>transit only</span>
                     )}
@@ -2061,6 +2079,11 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           {(() => {
             const fgValue = wb.fg * (sku.pricing?.sp ?? sku.pricing?.mrp ?? unitCost);
             const vel = sku.centralWhVelocity ?? sku.velocity ?? 0;
+            // Negative velocity = net returns (returns > shipments over 30d).
+            // Mirror PlatformCell — never render a bare "-1.3 units/day".
+            const velStr = vel < 0
+              ? `Net returns · ${D.fmtN(Math.abs(vel))}/day`
+              : `${D.fmtN(vel)} units/day`;
             const runwayDays = sku.centralWhRunway != null
               ? sku.centralWhRunway
               : (vel > 0 ? Math.round(wb.fg / vel) : null);
@@ -2076,8 +2099,8 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                 <dl className="kv">
                   <dt>FG stock value <FormulaIcon formulaId="stockValue" currentValue={D.fmtINR(fgValue)} valueLabel="Current (WH only)"/></dt>
                   <dd>{D.fmtINR(fgValue)}</dd>
-                  <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={`${D.fmtN(vel)} /day`}/></dt>
-                  <dd>{D.fmtN(vel)} units/day</dd>
+                  <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={velStr}/></dt>
+                  <dd>{velStr}</dd>
                   <dt>Runway (central warehouse FG) <FormulaIcon formulaId="runway" currentValue={runwayStr}/></dt>
                   <dd>{runwayStr}</dd>
                   <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
@@ -2224,14 +2247,30 @@ const SimulatorTab = ({ inventory }) => {
   function baselineState(s) {
     if (!s) return null;
     const wb = s.warehouseBreakdown || {};
+    // Seed velocities from the SALES-based numbers (same authority as the
+    // Unified tab) — NOT a revenue-share residual of the stub total. The
+    // Amazon lane (channelVelocity.amazon) folds Shopify D2C per AMZ-001; we
+    // decompose the D2C leg so amazonOnly + shopifyOnly == the combined Amazon
+    // channel velocity exactly (mirror the Amazon modal split).
     const cv = s.channelVelocity || { amazon: 0, flipkart: 0, blinkit: 0 };
-    const sp = s.splits || {};
-    const revTotal = (sp.amazon || 0) + (sp.shopify || 0) + (sp.flipkart || 0) + (sp.blinkit || 0) || 1;
-    const amazonOnly  = s.velocity * ((sp.amazon  || 0) / revTotal);
-    const shopifyOnly = s.velocity * ((sp.shopify || 0) / revTotal);
-    const flipkartVel = s.velocity * ((sp.flipkart || 0) / revTotal);
-    const blinkitVel  = s.velocity * ((sp.blinkit  || 0) / revTotal);
-    const whVel = Math.max(0, s.velocity - (amazonOnly + shopifyOnly + flipkartVel + blinkitVel));
+    const amzChannelVel = Math.max(0, cv.amazon ?? 0);
+    const shopifyOnly =
+      Math.max(0, Math.min(amzChannelVel,
+        (s.realData?.shopify?.sales30d != null
+          ? s.realData.shopify.sales30d / 30
+          : s.realData?.agency?.shopify?.dailyOut) ?? 0));
+    const amazonOnly  = Math.max(0, amzChannelVel - shopifyOnly);
+    const flipkartVel = Math.max(0, cv.flipkart ?? 0);
+    const blinkitVel  = Math.max(0, cv.blinkit  ?? 0);
+    // WH lane = the MINOR direct-WH sales lane, derived from the sales-based
+    // s.centralWhVelocity. Per spec §3.5 centralWhVelocity == sum(channels)
+    // (the WH supplies all channels), so the WH's *own* direct demand on top
+    // of the channel lanes is the residual (≈0 unless an isolable direct lane
+    // exists). Seeding the residual (not the full total) keeps the cascade from
+    // double-counting channel demand onto the WH lane, while still sourcing the
+    // sales-based number and making the WH lane live (Pass-1 key fix).
+    const channelSalesVel = amazonOnly + shopifyOnly + flipkartVel + blinkitVel;
+    const whVel = Math.max(0, (s.centralWhVelocity ?? 0) - channelSalesVel);
     return {
       // Stock per channel
       fg:        wb.fg ?? s.stock?.warehouse ?? 0,
@@ -2242,7 +2281,9 @@ const SimulatorTab = ({ inventory }) => {
       // separately so AMZ-001 split display stays accurate even if user
       // edits the combined Amazon channel velocity)
       velMode:      "overall",   // "overall" | "perChannel"
-      velOverall:   s.velocity || 0,
+      // Overall = sum of the sales-based lanes so "overall" and "perChannel"
+      // modes start from the same total (was the marketplace-sum s.velocity).
+      velOverall:   amazonOnly + shopifyOnly + flipkartVel + blinkitVel + whVel,
       velAmzOwn:    amazonOnly,
       velShpOwn:    shopifyOnly,
       velFk:        flipkartVel,
@@ -2920,37 +2961,57 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   //   • Custom mode   → defaults to actual MoM; user can override per row
   // Toggling without overriding = identical numbers (no surprise jumps).
   const inventory = rawInventory.map(s => {
-    const actualGrowth = s.growth ?? 0;
+    // Growth source = central-WH sales-based aggregate MoM (mirror the display
+    // precedence used on the Unified tab); fall back to legacy single growth.
+    const actualGrowth = s.centralWhGrowth ?? s.growth ?? 0;
     const customGrowth = perRowGrowth[s.code] ?? actualGrowth;
     const effectiveGrowth = mode === "custom" ? customGrowth : actualGrowth;
-    const baseVel = s.velocity;
-    const vel = baseVel * (1 + effectiveGrowth / 100);
+    const growthFactor = 1 + (Number.isFinite(effectiveGrowth) ? effectiveGrowth : 0) / 100;
     const whFg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = whFg + producibleFg;
 
-    // Per-channel velocity split (with MoM growth applied) — Amazon
-    // channel velocity now COMBINES Amazon orders + Shopify (D2C)
-    // orders per AMZ-001, because Shopify ships from Amazon FBA.
-    const sp = s.splits || {};
-    const revTotal = (sp.amazon||0) + (sp.shopify||0) + (sp.flipkart||0) + (sp.blinkit||0) || 1;
-    const amazonOwnVel  = vel * ((sp.amazon  || 0) / revTotal);
-    const shopifyOwnVel = vel * ((sp.shopify || 0) / revTotal);
+    // Per-channel velocity = SALES-based channelVelocity (data.js), then the
+    // MoM growth factor is applied to project next-month demand. Amazon lane
+    // already folds Shopify D2C per AMZ-001 (channelVelocity.amazon). The
+    // Shopify D2C leg is decomposed for the split display so amz + d2c == the
+    // combined Amazon channel velocity exactly (mirror the Amazon modal).
+    const cv = s.channelVelocity || {};
+    const amzChannelBase = Math.max(0, cv.amazon ?? 0);
+    const shopifyD2CBase =
+      (s.realData?.shopify?.sales30d != null
+        ? s.realData.shopify.sales30d / 30
+        : s.realData?.agency?.shopify?.dailyOut) ?? 0;
+    const amazonOnlyBase = Math.max(0, amzChannelBase - shopifyD2CBase);
+    const amazonOwnVel  = amazonOnlyBase * growthFactor;
+    const shopifyOwnVel = Math.max(0, amzChannelBase - amazonOnlyBase) * growthFactor;
     const chVel = {
       amazonFBA: amazonOwnVel + shopifyOwnVel,
-      flipkart:  vel * ((sp.flipkart || 0) / revTotal),
-      blinkit:   vel * ((sp.blinkit  || 0) / revTotal),
+      flipkart:  Math.max(0, cv.flipkart ?? 0) * growthFactor,
+      blinkit:   Math.max(0, cv.blinkit  ?? 0) * growthFactor,
       _amazonOnly: amazonOwnVel,    // sub-component for split display
       _shopifyOnly: shopifyOwnVel,  // sub-component for split display
     };
 
     // ── Parallel cascade runway (RUN-001) ──────────────────────────
-    // Each marketplace drains at its own velocity. As channels die,
-    // their demand falls back to the central warehouse. Total runway
-    // = the day the central warehouse itself hits zero.
-    // whBaseVelocity = total velocity minus what's claimed by channels.
-    const channelClaimed = chVel.amazonFBA + chVel.flipkart + chVel.blinkit;
-    const whBaseVelocity = Math.max(0, vel - channelClaimed);
+    // Each marketplace drains its OWN buffer at its sales velocity first; as
+    // channels die, their demand falls back to the central WH. Total runway =
+    // the day the WH itself hits zero.
+    //
+    // whBaseVelocity = the WH's MINOR direct-sales lane = the part of
+    // centralWhVelocity not already represented by the per-channel lanes.
+    // Per spec §3.5, centralWhVelocity == sum(channelVelocity) (the WH supplies
+    // all channels), so this residual is ≈0 unless a real isolable direct lane
+    // exists — deriving it this way (a) sources off s.centralWhVelocity and
+    // (b) never double-counts channel demand onto the WH lane. Pairs with the
+    // Pass-1 cascade whBaseVelocity key fix so the lane is actually read.
+    const channelSalesVel = chVel.amazonFBA + chVel.flipkart + chVel.blinkit;
+    const whSalesVel = Math.max(0, (s.centralWhVelocity ?? 0)) * growthFactor;
+    const whBaseVelocity = Math.max(0, whSalesVel - channelSalesVel);
+    // Displayed projected total velocity = the WH's total sales velocity
+    // (== sum of channel lanes when no isolable direct lane), floored at the
+    // channel sum so it never reads below visible channel demand.
+    const vel = Math.max(whSalesVel, channelSalesVel);
     const cascade = computeCascade({
       whStock:       maxFg,
       whBaseVelocity,
@@ -3367,12 +3428,18 @@ const ForecastTab = ({ inventory, days, setDays }) => {
     const fg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = fg + producibleFg;
-    const forecast = Math.round(s.velocity * days * trend);
+    // Forecast off the SALES-based central-WH velocity (founder-approved larger
+    // POs); fall back to the marketplace-sum velocity only when the engine
+    // value is absent or non-positive (negative returns artifact).
+    const fvel = (s.centralWhVelocity != null && s.centralWhVelocity > 0)
+      ? s.centralWhVelocity
+      : s.velocity;
+    const forecast = Math.round((fvel || 0) * days * trend);
     // Required-cover formula now uses the per-SKU target days set in the
     // SkuBreakdownModal (defaults to 30 — matches the previous hardcoded
     // buffer, so SKUs whose target the user hasn't touched see no change).
     const targetDays = readTargetDays(s.code);
-    const required = Math.round(s.velocity * (days + targetDays) * trend);
+    const required = Math.round((fvel || 0) * (days + targetDays) * trend);
     const reorder = Math.max(0, required - maxFg);
     return { ...s, trend, forecast, required, reorder, maxFg, targetDays, trendPct: (trend - 1) * 100 };
   });

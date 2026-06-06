@@ -25,13 +25,22 @@ const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
 // SKU lead time (max over BOM), per-component stock + days-of-cover.
 // Spec: docs/central-wh-spec.md.
 import { CENTRAL_WH_DATA } from "./bundledCentralWHData.js";
-const CWH_FG   = CENTRAL_WH_DATA?.fg || {};
-const CWH_COMP = CENTRAL_WH_DATA?.components || {};
+// O6 durability: an uploaded Central-WH workbook (7th upload zone 'central-wh',
+// parsed in-browser by the ported engine) must auto-override the bundled
+// artifact with ZERO code change. We read the live store at module-init time
+// and prefer it whenever it parsed cleanly. SAFE FALLBACK: buildCentralWhOverride
+// already guards on `parsed.fg`, so a malformed/absent upload → null → bundled.
+// __liveStore is initialised a little further down (the loadMultiFile() call);
+// to keep this above that line we read the store directly here via loadMultiFile.
+const __liveCwh = (typeof window !== "undefined") ? buildCentralWhOverride(loadMultiFile()) : null;
+const CWH_SRC = __liveCwh || CENTRAL_WH_DATA;
+const CWH_FG   = CWH_SRC?.fg || {};
+const CWH_COMP = CWH_SRC?.components || {};
 // Warehouse-level (non-SKU) buckets — surfaced at the bottom of the
 // Materials breakdown tab per founder. Equipment + furniture (fixed assets)
 // and cartons/stickers/tape/etc (consumables & shipping).
-const CWH_FIXED_ASSETS = CENTRAL_WH_DATA?.fixedAssets || [];
-const CWH_CONSUMABLES  = CENTRAL_WH_DATA?.consumables || [];
+const CWH_FIXED_ASSETS = CWH_SRC?.fixedAssets || [];
+const CWH_CONSUMABLES  = CWH_SRC?.consumables || [];
 
 // Per-SKU overrides — stored in localStorage per-device under
 // `ns.skuOverride.<code>.<field>`. Set via the FormulaIcon (ⓘ) popover
@@ -60,7 +69,7 @@ const __overrideMap = _readSkuOverrides();
 // SKUs/channels not present in the upload fall back to the bundled real
 // data, which themselves fall back to stub. Reads localStorage at
 // init time so refreshes pick up the latest upload without code change.
-import { loadMultiFile, buildRealMarketplaceOverride, buildNitinOverride } from "./lib/multiFileStore.js";
+import { loadMultiFile, buildRealMarketplaceOverride, buildNitinOverride, buildCentralWhOverride } from "./lib/multiFileStore.js";
 // readParam → the amber-runway threshold (and other tunables) so the default
 // render path honors the ⚙ Settings value instead of a hardcoded 30 (R21).
 import { readParam } from "./lib/formulaParams.js";
@@ -85,6 +94,32 @@ const REAL_MARKETPLACE_DATA = new Proxy({}, {
   getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
 });
 const NITIN_DATA = __liveNitin || BUNDLED_NITIN;
+
+// ── MAX-MoM growth (founder rule, 2026-06) ───────────────────────────────
+// From a monthly sales array [m0,m1,m2,m3] (MOST-RECENT FIRST), compute the
+// consecutive month-over-month growth rate ((m[i]-m[i+1])/m[i+1]*100) for each
+// adjacent pair whose PRIOR month (m[i+1]) is > 0, and return the MAX of those
+// rates (plan for the highest growth seen → don't under-stock). Clamped to
+// [-100, +200]. Returns null when fewer than 2 usable months exist, so callers
+// can fall back to the existing single-MoM number.
+// SAFE FALLBACK: tolerates null/undefined/non-array/NaN entries → null, never
+// throws and never emits NaN/Infinity.
+function maxMoMGrowth(monthly) {
+  if (!Array.isArray(monthly) || monthly.length < 2) return null;
+  const m = monthly.map((x) => (Number.isFinite(x) ? x : null));
+  let best = null;
+  for (let i = 0; i < m.length - 1; i++) {
+    const cur = m[i];
+    const prior = m[i + 1];
+    if (cur == null || prior == null) continue;
+    if (!(prior > 0)) continue; // need a positive base to define a MoM rate
+    const rate = ((cur - prior) / prior) * 100;
+    if (!Number.isFinite(rate)) continue;
+    if (best == null || rate > best) best = rate;
+  }
+  if (best == null) return null;
+  return Math.max(-100, Math.min(200, best));
+}
 
 const NSData = (function () {
   const fmtINR = (n) => {
@@ -879,18 +914,63 @@ const NSData = (function () {
       ? (amzOrdersPrev30 ?? 0) + (shopifyPrev30 ?? 0)
       : null;
 
+    // ── MAX-MoM monthly ladders (founder rule, 2026-06) ───────────────
+    // Prefer each channel's own monthly sales array (trailing-30d sums,
+    // MOST-RECENT FIRST) emitted by the parsers:
+    //   - agency daily-log → real.agency.<channel>.monthly (up to 4 months)
+    //   - shopify CSV      → real.shopify.monthly (3 months)
+    // maxMoMGrowth() returns the MAX consecutive MoM rate (plan for peak
+    // growth → don't under-stock); null when <2 usable months, in which case
+    // we fall back to the existing single-MoM (growthFromBuckets) so nothing
+    // breaks when monthly data is absent. The Amazon channel folds Shopify
+    // D2C (AMZ-001): we sum the two monthly ladders element-wise when present.
+    const amzMonthly = (agencyCh?.amazon?.monthly && Array.isArray(agencyCh.amazon.monthly))
+      ? agencyCh.amazon.monthly : null;
+    const shopifyMonthly = (real.shopify?.monthly && Array.isArray(real.shopify.monthly))
+      ? real.shopify.monthly
+      : (agencyCh?.shopify?.monthly && Array.isArray(agencyCh.shopify.monthly) ? agencyCh.shopify.monthly : null);
+    const flipkartMonthly = (agencyCh?.flipkart?.monthly && Array.isArray(agencyCh.flipkart.monthly))
+      ? agencyCh.flipkart.monthly : null;
+    const blinkitMonthly = (agencyCh?.blinkit?.monthly && Array.isArray(agencyCh.blinkit.monthly))
+      ? agencyCh.blinkit.monthly : null;
+    // Element-wise sum of monthly ladders (most-recent-first aligned). Used for
+    // the Amazon=amz+shopify fold and the warehouse=Σ-channels aggregate. SAFE
+    // FALLBACK: ignores non-arrays; returns null when no usable array given.
+    const sumMonthly = (...arrs) => {
+      const valid = arrs.filter(a => Array.isArray(a) && a.length);
+      if (!valid.length) return null;
+      const len = Math.max(...valid.map(a => a.length));
+      const out = [];
+      for (let i = 0; i < len; i++) {
+        let acc = 0, seen = false;
+        for (const a of valid) {
+          const v = a[i];
+          if (Number.isFinite(v)) { acc += v; seen = true; }
+        }
+        out.push(seen ? acc : null);
+      }
+      return out;
+    };
+    const amzChannelMonthly = sumMonthly(amzMonthly, shopifyMonthly);
+
     const channelGrowth = {
-      amazon:   growthFromBuckets(amzChannelCur30,  amzChannelPrev30),
-      flipkart: growthFromBuckets(flipkartCur30,    flipkartPrev30),
-      blinkit:  growthFromBuckets(blkCur30,         blkPrev30),
-      shopify:  growthFromBuckets(shopifyCur30,     shopifyPrev30),
+      // Prefer MAX-MoM from the channel's monthly ladder; fall back to the
+      // existing single-MoM number when <2 usable months are available.
+      amazon:   maxMoMGrowth(amzChannelMonthly) ?? growthFromBuckets(amzChannelCur30,  amzChannelPrev30),
+      flipkart: maxMoMGrowth(flipkartMonthly)   ?? growthFromBuckets(flipkartCur30,    flipkartPrev30),
+      blinkit:  maxMoMGrowth(blinkitMonthly)    ?? growthFromBuckets(blkCur30,         blkPrev30),
+      shopify:  maxMoMGrowth(shopifyMonthly)    ?? growthFromBuckets(shopifyCur30,     shopifyPrev30),
     };
 
-    // Central WH growth = cumulative across ALL channels (per founder).
+    // Central WH growth = MAX-MoM of the SUMMED monthly demand across channels
+    // (per founder). Falls back to the cumulative single-MoM when monthly
+    // ladders are absent, then to null when there's no signal at all.
+    const whMonthly = sumMonthly(amzMonthly, shopifyMonthly, flipkartMonthly, blinkitMonthly);
     const allCur30 = (amzOrdersCur30 ?? 0) + (shopifyCur30 ?? 0) + (flipkartCur30 ?? 0) + (blkCur30 ?? 0);
     const allPrev30 = (amzOrdersPrev30 ?? 0) + (shopifyPrev30 ?? 0) + (flipkartPrev30 ?? 0) + (blkPrev30 ?? 0);
     const anyData = [amzOrdersCur30, shopifyCur30, flipkartCur30, blkCur30].some(x => x != null);
-    channelGrowth.warehouse = anyData ? growthFromBuckets(allCur30, allPrev30) : null;
+    channelGrowth.warehouse = maxMoMGrowth(whMonthly)
+      ?? (anyData ? growthFromBuckets(allCur30, allPrev30) : null);
 
     // Round each to 1 decimal for display.
     for (const k of Object.keys(channelGrowth)) {
@@ -1258,11 +1338,16 @@ const NSData = (function () {
     // Central WH engine snapshot + the two non-SKU buckets (fixed assets,
     // consumables/shipping) for the Materials breakdown tab footer.
     centralWh: {
-      anchorDate:  CENTRAL_WH_DATA?.anchorDate ?? null,
-      anchorSheet: CENTRAL_WH_DATA?.anchorSheet ?? null,
-      asOf:        CENTRAL_WH_DATA?.asOf ?? null,
+      anchorDate:  CWH_SRC?.anchorDate ?? null,
+      anchorSheet: CWH_SRC?.anchorSheet ?? null,
+      asOf:        CWH_SRC?.asOf ?? null,
       fixedAssets: CWH_FIXED_ASSETS,
       consumables: CWH_CONSUMABLES,
+      // Data-quality flags (unmapped SKUs/components, garbage rows, BOM gaps,
+      // negative stock) so the UI can SURFACE them instead of silently dropping
+      // (smaller-requirement #13). Comes from whichever source won (uploaded
+      // workbook over bundled). SAFE FALLBACK: null when absent.
+      flags: CWH_SRC?.flags || null,
     },
     nitinSheetSnapshot: {
       warehouseAsOf: NITIN_DATA?.warehouseInventory?.asOf ?? null,

@@ -1,33 +1,39 @@
-#!/usr/bin/env node
 /**
- * build-central-wh.cjs — implements docs/central-wh-spec.md exactly.
+ * centralWhEngine.js — BROWSER TWIN of scripts/build-central-wh.cjs.
  *
- * Pipeline:
- *   1. Read Audit 050525 → opening balances (FG + SFG + RM + PKG)
- *   2. Read Production matrix → +FG (and +SFG for Acacia Tea Pouches)
- *      → emit component consumption per BOM
- *   3. Read Daily Movement of FG (73 blocks × 16 rows) → ship_out + return_in
- *   4. Roll forward STRICTLY AFTER anchor date
- *   5. Compute velocity / runway / producible / reorder / value / MoM per spec
- *   6. Emit src/bundledCentralWHData.js + data-quality summary
+ * This module is the in-browser, async port of the Node build script. It reads
+ * an uploaded Central Warehouse workbook (xlsx) and returns the SAME object
+ * shape as CENTRAL_WH_DATA in src/bundledCentralWHData.js:
+ *   { anchorDate, anchorSheet, asOf, config, fg:{}, components:{},
+ *     fixedAssets:[], consumables:[], flags:{} }
  *
- * Re-run: `node scripts/build-central-wh.cjs <path-to-xlsx>`
+ * ⚠️  KEEP IN SYNC with scripts/build-central-wh.cjs. The two implementations
+ *     MUST stay identical in their parsing/metric logic. The reference tables
+ *     (SKUS / COMPONENTS / BOM / aliases / FIXED_ASSET_NAMES) below are copied
+ *     VERBATIM from build-central-wh.cjs — when you change one, change both.
+ *
+ * Differences from the Node twin (intentional, behaviour-preserving):
+ *   - Input is an uploaded `File` read via XLSX.read(await file.arrayBuffer()),
+ *     not a path read via XLSX.readFile().
+ *   - Module-level mutable state in the CJS script (ledger, newFG, flags, …) is
+ *     made FUNCTION-LOCAL here so the engine is safe to call repeatedly.
+ *   - No filesystem write / console summary. The data object is RETURNED.
+ *   - R-FAILLOUD: this throws a clear Error when the workbook is structurally
+ *     wrong (no Audit tab, audit tab missing FINISHED/SEMI/RAW/PACKAG sections,
+ *     or zero FG rows parse) instead of silently returning all-zero data.
+ *
+ * Lead times match Pass-1: Moringa (NSMP100/NSMP250) = 25, NSMLPR = 25.
  */
-const XLSX = require("xlsx");
-const fs = require("fs");
-const path = require("path");
+import * as XLSX from "xlsx";
 
 // ─── Config ─────────────────────────────────────────────────────
-// ANCHOR_DATE is now AUTO-DETECTED — the latest "Audit DDMMYY" sheet in the
-// workbook (parsed from the sheet name; cross-checked against the "As of"
-// text). See detectLatestAudit() below. `let` because it's assigned at runtime.
-let ANCHOR_DATE = new Date("2026-05-05T00:00:00Z");
-let ANCHOR_SHEET = "Audit 050525";
+// ANCHOR_DATE / ANCHOR_SHEET are AUTO-DETECTED per-call (latest "Audit DDMMYY"
+// sheet). The constants here are only fallback seeds (mirrors the CJS twin).
+const ANCHOR_DATE_DEFAULT = new Date("2026-05-05T00:00:00Z");
+const ANCHOR_SHEET_DEFAULT = "Audit 050525";
 const MERGE_OLD_SB500 = true;
 const RANGE_RULE = "first"; // first | sum | min | max
 const W30 = 30, W60 = 60;
-const INPUT = process.argv[2] || "/Users/shivamprajapati/Downloads/Naturesum Live Inventory (2).xlsx";
-const OUT_JS = path.join(__dirname, "..", "src", "bundledCentralWHData.js");
 
 // ─── Fixed-asset + consumable classification ────────────────────
 // Per founder: equipment + furniture = FIXED ASSETS (own section below the
@@ -262,37 +268,11 @@ function xlDate(v) {
 function dateKey(d) { return d.toISOString().slice(0, 10); }
 function daysBetween(a, b) { return Math.round((b.getTime() - a.getTime()) / 86400000); }
 
-// ─── Parse helpers ──────────────────────────────────────────────
-const wb = XLSX.readFile(INPUT);
-const flags = {
-  unmapped_names: [],
-  unmapped_components: [],
-  manual_review: [],
-  unparsed_quantities: [],
-  negative_stock: [],
-  bom_gaps: [],
-  notes: [],
-};
-const ledger = [];
-// FG: separate new (sellable) vs old (excluded from runway per founder).
-const newFG = {};    // code → qty (fresh, sellable)
-const oldFG = {};     // code → qty ('(old)' stock — shown, NOT counted in runway)
-// Components: new + old both usable for producing → summed for stock,
-// but old tracked separately for the modal.
-const newComp = {};  // ref → qty
-const oldComp = {};   // ref → qty
-// Non-BOM audit lines, split into the two display buckets.
-const fixedAssets   = [];  // { name, qty, unit }
-const consumables   = [];  // { name, qty, unit } — cartons, stickers, tape...
-// Back-compat aliases the rest of the script reads from.
-const openingFG = newFG;
-const openingComp = newComp;
-
 // ─── Detect the latest audit sheet ──────────────────────────────
 // Sheet names look like "Audit DDMMYY" (e.g. Audit 050626 = 5 Jun 2026).
 // Parse the name; cross-check with the "As of <date>" text in row 1; pick
 // the sheet with the max date. Falls back to name-date when text is unclear.
-function detectLatestAudit() {
+function detectLatestAudit(wb) {
   const candidates = [];
   for (const name of wb.SheetNames) {
     const m = name.match(/audit\s+(\d{2})(\d{2})(\d{2})/i);
@@ -312,7 +292,9 @@ function detectLatestAudit() {
     // WITHOUT a "V-" suffix unless it's strictly newer (handled by sort).
     candidates.push({ name, date, isVariant: /v-?\d/i.test(name) });
   }
-  if (!candidates.length) return { name: ANCHOR_SHEET, date: ANCHOR_DATE };
+  // R-FAILLOUD: no audit tab at all → throw (handled by caller too, but keep
+  // a null return as the structural signal so detectLatestAudit stays pure).
+  if (!candidates.length) return null;
   candidates.sort((a, b) => {
     if (b.date.getTime() !== a.date.getTime()) return b.date.getTime() - a.date.getTime();
     return (a.isVariant ? 1 : 0) - (b.isVariant ? 1 : 0); // non-variant first on tie
@@ -333,11 +315,45 @@ function splitAuditTags(name) {
 }
 
 // ─── §3b — Parse Audit (latest sheet, old/new + 3-bucket) ───────
-function parseAudit() {
-  const detected = detectLatestAudit();
-  ANCHOR_SHEET = detected.name;
-  ANCHOR_DATE  = detected.date;
-  const grid = XLSX.utils.sheet_to_json(wb.Sheets[ANCHOR_SHEET], { header: 1, defval: "", raw: true });
+// Mutates the passed-in `state`. Returns the detected audit descriptor and
+// throws (R-FAILLOUD) when the audit tab is structurally invalid.
+function parseAudit(wb, state) {
+  const detected = detectLatestAudit(wb);
+  // R-FAILLOUD: no sheet matching /audit \d{6}/.
+  if (!detected) {
+    throw new Error(
+      'Central Warehouse Workbook: no Audit tab found — expected a sheet named like "Audit 050626" (Audit DDMMYY). ' +
+      `Sheets present: ${wb.SheetNames.join(", ") || "(none)"}.`
+    );
+  }
+  state.anchorSheet = detected.name;
+  state.anchorDate  = detected.date;
+  const ANCHOR_DATE = detected.date;
+  const { flags, ledger, newFG, oldFG, newComp, oldComp, fixedAssets, consumables } = state;
+
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[detected.name], { header: 1, defval: "", raw: true });
+
+  // R-FAILLOUD: the chosen audit tab must contain the section headers. We scan
+  // first and bail loudly if none of FINISHED/SEMI/RAW/PACKAG are present.
+  let sawFinished = false, sawSemi = false, sawRaw = false, sawPackag = false;
+  for (const r of grid) {
+    const a = String(r[0] || "");
+    if (/SEMI/i.test(a))   sawSemi = true;
+    if (/FINISH/i.test(a)) sawFinished = true;
+    if (/RAW/i.test(a))    sawRaw = true;
+    if (/PACKAG/i.test(a)) sawPackag = true;
+  }
+  if (!sawFinished || !sawSemi || !sawRaw || !sawPackag) {
+    const missing = [
+      !sawFinished && "FINISHED", !sawSemi && "SEMI",
+      !sawRaw && "RAW", !sawPackag && "PACKAGING",
+    ].filter(Boolean);
+    throw new Error(
+      `Central Warehouse Workbook: audit tab "${detected.name}" is missing required section(s): ${missing.join(", ")}. ` +
+      'Expected FINISHED / SEMI / RAW / PACKAGING section headers in column A.'
+    );
+  }
+
   let section = null;
   for (const r of grid) {
     const a = String(r[0] || "");
@@ -385,6 +401,15 @@ function parseAudit() {
     }
   }
 
+  // R-FAILLOUD: zero FG rows parsed → the workbook is unusable for the
+  // dashboard. Never proceed to emit all-zero FG silently.
+  if (Object.keys(newFG).length === 0 && Object.keys(oldFG).length === 0) {
+    throw new Error(
+      `Central Warehouse Workbook: audit tab "${detected.name}" produced ZERO finished-good rows. ` +
+      'Check that the FINISHED section has "#"-prefixed item rows with names matching the SKU alias table.'
+    );
+  }
+
   // Opening-balance ledger entries.
   // FG audit_open = NEW only (sellable). Old stock is a static side field —
   // it does not roll forward and is excluded from sellable/runway.
@@ -398,12 +423,20 @@ function parseAudit() {
     const qty = (newComp[ref] || 0) + (oldComp[ref] || 0);
     ledger.push({ date: ANCHOR_DATE, code: ref, type: meta?.type || "PKG", txn: "audit_open", qty });
   }
+
+  return detected;
 }
 
 // ─── §3c — Parse Production ─────────────────────────────────────
-function parseProduction() {
-  const grid = XLSX.utils.sheet_to_json(wb.Sheets["Production"], { header: 1, defval: "", raw: true });
+// Production is OPTIONAL — a Central WH workbook may legitimately ship with
+// only an audit tab. Missing/empty → no-op (the audit opening balances stand).
+function parseProduction(wb, state) {
+  const sheet = wb.Sheets["Production"];
+  if (!sheet) { state.flags.notes.push({ source: "production", note: "no Production sheet — skipped" }); return; }
+  const { flags, ledger } = state;
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
   const header = grid[0];
+  if (!header) return;
   const dateCols = [];
   for (let c = 1; c < header.length; c++) {
     const d = xlDate(header[c]);
@@ -443,8 +476,12 @@ function parseProduction() {
 }
 
 // ─── §3d — Parse Daily Movement ─────────────────────────────────
-function parseDailyMovement() {
-  const grid = XLSX.utils.sheet_to_json(wb.Sheets["Daily Movement of FG"], { header: 1, defval: "", raw: true });
+// Daily Movement is OPTIONAL (same rationale as Production). Missing → no-op.
+function parseDailyMovement(wb, state) {
+  const sheet = wb.Sheets["Daily Movement of FG"];
+  if (!sheet) { state.flags.notes.push({ source: "daily-mvmt", note: "no Daily Movement of FG sheet — skipped" }); return; }
+  const { flags, ledger } = state;
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true });
   for (let i = 0; i < grid.length; i++) {
     const a = grid[i][0];
     if (typeof a !== "string" || !/^on /i.test(a)) continue;
@@ -476,7 +513,9 @@ function parseDailyMovement() {
 }
 
 // ─── §5 — Compute balances (roll forward strictly after anchor) ─
-function computeBalances() {
+function computeBalances(state) {
+  const { ledger, flags } = state;
+  const ANCHOR_DATE = state.anchorDate;
   const balance = {};
   // Seed with audit_open at anchor (these are dated == ANCHOR_DATE)
   for (const e of ledger) {
@@ -496,7 +535,8 @@ function computeBalances() {
 }
 
 // ─── §6 — Metrics per SKU ───────────────────────────────────────
-function computeMetrics(balance, asOf) {
+function computeMetrics(state, balance, asOf) {
+  const { ledger, oldFG, oldComp, openingComp } = state;
   const window30Start = new Date(asOf); window30Start.setUTCDate(window30Start.getUTCDate() - W30 + 1);
   const window60Start = new Date(asOf); window60Start.setUTCDate(window60Start.getUTCDate() - W60 + 1);
   const priorStart    = new Date(asOf); priorStart.setUTCDate(priorStart.getUTCDate() - W60 + 1);
@@ -551,48 +591,6 @@ function computeMetrics(balance, asOf) {
     // clamp ±200
     if (mom != null) mom = Math.max(-100, Math.min(200, mom));
 
-    // ─── Monthly sales buckets (ADDITIVE — raw data only) ───────────
-    // Up to 4 trailing 30-day windows back from asOf. Per window, SALES =
-    // ship_out total − return_in total − marketing ship_out (central-WH
-    // movement). NOTE: founder says this central-WH movement is NOT a good
-    // consumption signal, so NOTHING here feeds velocity/runway/growth —
-    // it is emitted purely as `monthly` for downstream inspection. Channel
-    // max-MoM is computed elsewhere (data.js) from real sales sources.
-    // Most-recent first; only windows with movement data are included.
-    let monthly = [];
-    try {
-      const buckets = [0, 0, 0, 0];           // m0..m3 net sales units
-      const hasData = [false, false, false, false];
-      const asOfT = asOf.getTime();
-      const DAY = 86400000;
-      for (const e of ledger) {
-        if (e.code !== code) continue;
-        if (e.txn !== "ship_out" && e.txn !== "return_in") continue;
-        // Days back from asOf: 0 == asOf itself. Bucket b covers
-        // [asOf-(30b+29) .. asOf-30b] → b = floor(daysBack / 30).
-        const daysBack = Math.round((asOfT - e.date.getTime()) / DAY);
-        if (daysBack < 0) continue;            // future-dated guard
-        const b = Math.floor(daysBack / W30);
-        if (b < 0 || b > 3) continue;          // only the 4 trailing months
-        hasData[b] = true;
-        if (e.txn === "ship_out") {
-          buckets[b] += (e.qty - (e.by?.marketing || 0));
-        } else {
-          buckets[b] -= e.qty;
-        }
-      }
-      // Most-recent first; include only windows that actually had movement.
-      monthly = buckets
-        .map((v, b) => ({ v, b }))
-        .filter(x => hasData[x.b])
-        .map(x => {
-          const n = Math.round(x.v);
-          return Number.isFinite(n) ? n : 0;
-        });
-    } catch (_e) {
-      monthly = [];                            // SAFE FALLBACK — never throw
-    }
-
     // Worst component cover (across BOM) — uses consumption velocity per component
     let worstComp = null, worstCover = Infinity;
     for (const [ref, perPack] of (BOM[code] || [])) {
@@ -618,9 +616,6 @@ function computeMetrics(balance, asOf) {
       fgStock, oldStock, producible, totalAvail, binding,
       sales30: +sales30.toFixed(3), depletion30: +depletion30.toFixed(3),
       runwayDays, momGrowth: mom, stockValue,
-      // ADDITIVE raw data: up to 4 trailing 30-day central-WH sales buckets,
-      // most-recent first. Not consumed by velocity/runway/growth (see above).
-      monthly: Array.isArray(monthly) ? monthly : [],
       worstComp, worstCoverDays, reorder,
     });
   }
@@ -661,90 +656,107 @@ function computeMetrics(balance, asOf) {
   return { fgRows, compRows };
 }
 
-// ─── Main ───────────────────────────────────────────────────────
-console.log("Reading:", INPUT);
-parseAudit();
-parseProduction();
-parseDailyMovement();
-
-// AS_OF = max date across Production + Daily Movement
-let asOf = ANCHOR_DATE;
-for (const e of ledger) {
-  if (e.txn === "audit_open") continue;
-  if (e.date.getTime() > asOf.getTime()) asOf = e.date;
-}
-console.log("ANCHOR_DATE:", dateKey(ANCHOR_DATE), "  AS_OF:", dateKey(asOf));
-
-const balance = computeBalances();
-const { fgRows, compRows } = computeMetrics(balance, asOf);
-
-// Known BOM gaps per spec
-const knownGaps = ["NSPKGJB300","NSPKGJTUB300","NSPKGJLBL300","NSPKGJTUB500","NSPKGJLBL500"];
-for (const ref of knownGaps) {
-  if (!(ref in openingComp)) flags.bom_gaps.push({ ref, note: "no clean audit line — set to 0, founder must confirm juice packaging map" });
-}
-
-// Emit bundled JS file
-const out = `/**
- * bundledCentralWHData.js — auto-generated by scripts/build-central-wh.cjs
- * Source: Naturesum_Live_Inventory workbook.
- * Spec: docs/central-wh-spec.md.
+/**
+ * parseCentralWhWorkbook — read an uploaded Central Warehouse xlsx File and
+ * return the CENTRAL_WH_DATA shape.
  *
- * DO NOT hand-edit. Regenerate via:
- *   node scripts/build-central-wh.cjs <path-to-xlsx>
- *
- * Anchor: ${dateKey(ANCHOR_DATE)} (audit sheet "${ANCHOR_SHEET}"). As-of: ${dateKey(asOf)}.
+ * @param {File|Blob} file  uploaded workbook (browser File/Blob with arrayBuffer())
+ * @param {object} [opts]   reserved for future options (currently unused)
+ * @returns {Promise<object>} { anchorDate, anchorSheet, asOf, config, fg,
+ *                              components, fixedAssets, consumables, flags }
+ * @throws {Error} R-FAILLOUD: no Audit tab / missing sections / zero FG rows.
  */
-export const CENTRAL_WH_DATA = ${JSON.stringify({
-  anchorDate: dateKey(ANCHOR_DATE),
-  anchorSheet: ANCHOR_SHEET,
-  asOf: dateKey(asOf),
-  config: { MERGE_OLD_SB500, RANGE_RULE, W30, W60 },
-  fg: Object.fromEntries(fgRows.map(r => [r.code, r])),
-  components: Object.fromEntries(compRows.map(r => [r.ref, r])),
-  // Non-BOM audit lines, split per founder's request:
-  //   fixedAssets = equipment + furniture (own section below materials)
-  //   consumables = cartons, stickers, tape, rolls, caps (shown separately)
-  fixedAssets,
-  consumables,
-  flags: {
-    unmappedNames: flags.unmapped_names.length,
-    unmappedComponents: flags.unmapped_components.length,
-    unparsedQuantities: flags.unparsed_quantities.length,
-    manualReview: flags.manual_review.length,
-    negativeStock: flags.negative_stock.length,
-    bomGaps: flags.bom_gaps.length,
-    detail: flags,
-  },
-}, null, 2)};
-`;
-fs.writeFileSync(OUT_JS, out);
-console.log("Wrote:", OUT_JS);
+export async function parseCentralWhWorkbook(file, opts = {}) {
+  if (!file || typeof file.arrayBuffer !== "function") {
+    throw new Error("Central Warehouse Workbook: no file provided (expected an uploaded .xlsx File).");
+  }
 
-// ─── Summary printout ───────────────────────────────────────────
-console.log();
-console.log("=== FG dashboard (per spec §6) ===");
-console.log("code      | fg+prod = total | binding       | dep/d  | run d | MoM%   | val (₹)");
-for (const r of fgRows) {
-  console.log(
-    r.code.padEnd(10) + "| " +
-    String(r.fgStock).padStart(4) + " + " + String(r.producible).padStart(5) + " = " + String(r.totalAvail).padStart(5) + " | " +
-    (r.binding || "—").padEnd(13) + " | " +
-    String(r.depletion30.toFixed(2)).padStart(5) + " | " +
-    (r.runwayDays == null ? "  ∞ " : String(r.runwayDays).padStart(4)) + " | " +
-    (r.momGrowth == null ? "  — " : (r.momGrowth > 0 ? "+" : "") + r.momGrowth.toFixed(1) + "%").padStart(6) + " | " +
-    r.stockValue.toLocaleString("en-IN")
-  );
+  // Read the workbook from the uploaded bytes (browser path).
+  let wb;
+  try {
+    const buf = await file.arrayBuffer();
+    wb = XLSX.read(buf, { type: "array" });
+  } catch (err) {
+    throw new Error(`Central Warehouse Workbook: failed to read the xlsx file — ${err?.message || err}`);
+  }
+  if (!wb || !Array.isArray(wb.SheetNames) || wb.SheetNames.length === 0) {
+    throw new Error("Central Warehouse Workbook: the file has no sheets — is it a valid .xlsx?");
+  }
+
+  // Per-call state (function-local — safe to call repeatedly).
+  const newFG = {};    // code → qty (fresh, sellable)
+  const oldFG = {};     // code → qty ('(old)' stock — shown, NOT counted in runway)
+  const newComp = {};  // ref → qty
+  const oldComp = {};   // ref → qty
+  const state = {
+    anchorDate: ANCHOR_DATE_DEFAULT,
+    anchorSheet: ANCHOR_SHEET_DEFAULT,
+    flags: {
+      unmapped_names: [],
+      unmapped_components: [],
+      manual_review: [],
+      unparsed_quantities: [],
+      negative_stock: [],
+      bom_gaps: [],
+      notes: [],
+    },
+    ledger: [],
+    newFG, oldFG, newComp, oldComp,
+    fixedAssets: [],
+    consumables: [],
+    // Back-compat aliases the metric code reads from (mirror the CJS twin).
+    openingFG: newFG,
+    openingComp: newComp,
+  };
+
+  // ── Pipeline (mirrors build-central-wh.cjs main) ──
+  parseAudit(wb, state);          // throws on structural failure (R-FAILLOUD)
+  parseProduction(wb, state);     // optional
+  parseDailyMovement(wb, state);  // optional
+
+  // AS_OF = max date across Production + Daily Movement (≥ anchor).
+  let asOf = state.anchorDate;
+  for (const e of state.ledger) {
+    if (e.txn === "audit_open") continue;
+    if (e.date.getTime() > asOf.getTime()) asOf = e.date;
+  }
+
+  const balance = computeBalances(state);
+  const { fgRows, compRows } = computeMetrics(state, balance, asOf);
+
+  // Known BOM gaps per spec.
+  const knownGaps = ["NSPKGJB300","NSPKGJTUB300","NSPKGJLBL300","NSPKGJTUB500","NSPKGJLBL500"];
+  for (const ref of knownGaps) {
+    if (!(ref in state.openingComp)) state.flags.bom_gaps.push({ ref, note: "no clean audit line — set to 0, founder must confirm juice packaging map" });
+  }
+
+  // SAFE FALLBACK: even though parseAudit guarantees ≥1 FG row, double-guard
+  // the emitted FG map so the consumer never gets an empty object silently.
+  const fgOut = Object.fromEntries((fgRows || []).map(r => [r.code, r]));
+  const compOut = Object.fromEntries((compRows || []).map(r => [r.ref, r]));
+
+  return {
+    anchorDate: dateKey(state.anchorDate),
+    anchorSheet: state.anchorSheet,
+    asOf: dateKey(asOf),
+    config: { MERGE_OLD_SB500, RANGE_RULE, W30, W60 },
+    fg: fgOut,
+    components: compOut,
+    // Non-BOM audit lines, split per founder's request:
+    //   fixedAssets = equipment + furniture (own section below materials)
+    //   consumables = cartons, stickers, tape, rolls, caps (shown separately)
+    fixedAssets: state.fixedAssets,
+    consumables: state.consumables,
+    flags: {
+      unmappedNames: state.flags.unmapped_names.length,
+      unmappedComponents: state.flags.unmapped_components.length,
+      unparsedQuantities: state.flags.unparsed_quantities.length,
+      manualReview: state.flags.manual_review.length,
+      negativeStock: state.flags.negative_stock.length,
+      bomGaps: state.flags.bom_gaps.length,
+      detail: state.flags,
+    },
+  };
 }
-console.log();
-console.log("=== Data-quality flags ===");
-console.log("  unmapped_names:", flags.unmapped_names.length);
-console.log("  unmapped_components:", flags.unmapped_components.length);
-console.log("  unparsed_quantities:", flags.unparsed_quantities.length);
-console.log("  manual_review:", flags.manual_review.length, flags.manual_review.length ? "(" + flags.manual_review.map(m => `${m.name}=${m.raw}→${m.picked}`).join("; ") + ")" : "");
-console.log("  negative_stock:", flags.negative_stock.length, flags.negative_stock.length ? JSON.stringify(flags.negative_stock) : "");
-console.log("  bom_gaps:", flags.bom_gaps.length);
-if (flags.unmapped_names.length) {
-  const unique = [...new Set(flags.unmapped_names.map(u => u.name))];
-  console.log("  unique unmapped names (first 10):", unique.slice(0, 10));
-}
+
+export default parseCentralWhWorkbook;

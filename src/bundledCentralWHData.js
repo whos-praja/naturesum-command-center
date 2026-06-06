@@ -35,6 +35,9 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 13,
       "momGrowth": 200,
       "stockValue": 24115,
+      "monthly": [
+        216
+      ],
       "worstComp": "NSPKGCB100",
       "worstCoverDays": 0,
       "reorder": true
@@ -55,6 +58,9 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 9,
       "momGrowth": 200,
       "stockValue": 32175,
+      "monthly": [
+        207
+      ],
       "worstComp": "NSPKGCB250",
       "worstCoverDays": 0,
       "reorder": true
@@ -75,6 +81,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 28,
       "momGrowth": 76.3,
       "stockValue": 292500,
+      "monthly": [
+        705,
+        400,
+        411
+      ],
       "worstComp": "NSPKGSBP100",
       "worstCoverDays": 28,
       "reorder": true
@@ -95,6 +106,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 15,
       "momGrowth": 200,
       "stockValue": 496500,
+      "monthly": [
+        1340,
+        402,
+        533
+      ],
       "worstComp": "NSPKGSBP250",
       "worstCoverDays": 15,
       "reorder": true
@@ -115,6 +131,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 4,
       "momGrowth": 200,
       "stockValue": 149850,
+      "monthly": [
+        821,
+        95,
+        220
+      ],
       "worstComp": "NSPKGSBP500",
       "worstCoverDays": 4,
       "reorder": true
@@ -135,6 +156,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 0,
       "momGrowth": -80,
       "stockValue": 0,
+      "monthly": [
+        132,
+        660,
+        320
+      ],
       "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
       "reorder": true
@@ -155,6 +181,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 0,
       "momGrowth": -66.3,
       "stockValue": 0,
+      "monthly": [
+        135,
+        400,
+        308
+      ],
       "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
       "reorder": true
@@ -175,6 +206,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": null,
       "momGrowth": -100,
       "stockValue": 0,
+      "monthly": [
+        -31,
+        1659,
+        281
+      ],
       "worstComp": null,
       "worstCoverDays": null,
       "reorder": true
@@ -195,6 +231,10 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 59,
       "momGrowth": -19.2,
       "stockValue": 404340,
+      "monthly": [
+        298,
+        369
+      ],
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
       "reorder": false
@@ -215,6 +255,10 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 0,
       "momGrowth": 121.6,
       "stockValue": 0,
+      "monthly": [
+        749,
+        338
+      ],
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
       "reorder": true
@@ -235,6 +279,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 630,
       "momGrowth": 66.7,
       "stockValue": 112875,
+      "monthly": [
+        5,
+        3,
+        1
+      ],
       "worstComp": "NSPKGBOB15",
       "worstCoverDays": 0,
       "reorder": false
@@ -255,6 +304,10 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": null,
       "momGrowth": -100,
       "stockValue": 47400,
+      "monthly": [
+        1,
+        16
+      ],
       "worstComp": null,
       "worstCoverDays": null,
       "reorder": false
@@ -275,6 +328,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 214,
       "momGrowth": 100,
       "stockValue": 770850,
+      "monthly": [
+        80,
+        10,
+        248
+      ],
       "worstComp": "NSJOF100",
       "worstCoverDays": 36,
       "reorder": false
@@ -295,6 +353,11 @@ export const CENTRAL_WH_DATA = {
       "runwayDays": 14,
       "momGrowth": 100,
       "stockValue": 24375,
+      "monthly": [
+        52,
+        26,
+        99
+      ],
       "worstComp": "NSACDSF30",
       "worstCoverDays": 0,
       "reorder": true

@@ -13,6 +13,7 @@
  * overlay an uploaded payload directly.
  */
 import * as XLSX from "xlsx";
+import { parseCentralWhWorkbook } from "./centralWhEngine.js";
 
 // ─── Canonical SKU map (same as scripts/) ────────────────────
 const CODE_MAP = {
@@ -244,6 +245,17 @@ export async function parseShopify(file, opts = {}) {
     if (ageDays <= 60) byCode[code].sales60d += units;
     if (ageDays <= 90) byCode[code].sales90d += units;
   }
+  // Derive a `monthly` ladder (trailing 30-day sums, MOST-RECENT FIRST) from the
+  // existing 30/60/90 aging so data.js can compute MAX-MoM growth. Shopify gives
+  // us 3 months → 2 usable MoMs. R-NEGATIVES: month diffs are NOT clamped (net
+  // returns reduce a month's total). SAFE FALLBACK: missing buckets → 0.
+  for (const code of Object.keys(byCode)) {
+    const c = byCode[code];
+    const s30 = Number.isFinite(c.sales30d) ? c.sales30d : 0;
+    const s60 = Number.isFinite(c.sales60d) ? c.sales60d : 0;
+    const s90 = Number.isFinite(c.sales90d) ? c.sales90d : 0;
+    c.monthly = [s30, s60 - s30, s90 - s60];
+  }
   return { byCode, dateRange: { first: dates[0], last: lastDate, days: dates.length } };
 }
 
@@ -374,21 +386,26 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
     const d = parseSheetDate(r[0]);
     if (!d) continue;
     const ageDays = (latestTs - d.getTime()) / 86400000;
-    if (ageDays < 0 || ageDays > 90) continue;
+    // Extended to 120d so we can build a 4-month MoM ladder (monthly[]) for
+    // data.js's MAX-MoM growth model. sales7/15/30/60 stay byte-identical.
+    if (ageDays < 0 || ageDays > 120) continue;
     for (const col of Object.keys(colMap)) {
       const { code, multiplier } = colMap[col];
       const val = num(r[col]) * multiplier;
       if (!byCode[code])             byCode[code] = {};
-      if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales15d: 0, sales30d: 0, sales60d: 0 };
+      if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales15d: 0, sales30d: 0, sales60d: 0, sales90d: 0, sales120d: 0 };
       const tgt = byCode[code][channel];
       if (ageDays <=  7) tgt.sales7d  += val;
       if (ageDays <= 15) tgt.sales15d += val;
       if (ageDays <= 30) tgt.sales30d += val;
       if (ageDays <= 60) tgt.sales60d += val;
+      if (ageDays <= 90)  tgt.sales90d  += val;
+      if (ageDays <= 120) tgt.sales120d += val;
     }
   }
 
-  // Finalize each SKU for this channel: dailyOut, growth (MoM cur30 vs prior30).
+  // Finalize each SKU for this channel: dailyOut, growth (MoM cur30 vs prior30),
+  // and a `monthly` ladder for the MAX-MoM growth model in data.js.
   for (const code of Object.keys(byCode)) {
     const t = byCode[code][channel];
     if (!t) continue;
@@ -398,6 +415,19 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
     else if (t.sales30d > 0)     t.growth = 200;
     else if (prior30 === 0 && t.sales30d === 0) t.growth = null;
     else                         t.growth = -100;
+    // monthly = trailing 30-day sales sums, MOST-RECENT FIRST (m0..m3), derived
+    // from the cumulative aging buckets. R-NEGATIVES: differences are NOT
+    // clamped — net returns legitimately reduce a month's total. SAFE FALLBACK:
+    // any missing bucket falls back to 0 so this can never throw / emit NaN.
+    const s30  = Number.isFinite(t.sales30d)  ? t.sales30d  : 0;
+    const s60  = Number.isFinite(t.sales60d)  ? t.sales60d  : 0;
+    const s90  = Number.isFinite(t.sales90d)  ? t.sales90d  : 0;
+    const s120 = Number.isFinite(t.sales120d) ? t.sales120d : 0;
+    t.monthly = [s30, s60 - s30, s90 - s60, s120 - s90];
+    // Scratch accumulators for the >60d buckets — keep the emitted shape lean
+    // and identical to before aside from the new `monthly` field.
+    delete t.sales90d;
+    delete t.sales120d;
   }
   return true;
 }
@@ -551,6 +581,10 @@ export const FILE_TYPES = {
   "flipkart":      { label: "Flipkart Current Inventory Sheet",   accept: ALL_FORMATS, parse: parseFlipkart },
   "shopify":       { label: "Shopify Website Sales Sheet",        accept: ALL_FORMATS, parse: parseShopify },
   "nitin":         { label: "Warehouse Daily Inventory Sheet",    accept: ALL_FORMATS, parse: parseNitinSheet },
+  // 7th zone — ports the offline build-central-wh.cjs engine into the browser
+  // (audit baseline + post-audit production/movement roll-forward) so WH numbers
+  // are durable per founder decision §8.1. Supersedes the legacy 'nitin' path.
+  "central-wh":    { label: "Central Warehouse Workbook (Audit + Production + Daily Movement)", accept: ALL_FORMATS, parse: (file, opts) => parseCentralWhWorkbook(file, opts) },
 };
 
 export async function parseByType(type, file, opts = {}) {
