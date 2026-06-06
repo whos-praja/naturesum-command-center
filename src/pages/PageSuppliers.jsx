@@ -315,6 +315,19 @@ function QualityFlagsModal({ D, onClose }) {
         </div>
       ),
     },
+    {
+      key: "offline_marketing_spike",
+      label: "Offline / marketing spike",
+      hint: "Offline + marketing outflow is excluded from runway velocity but still depletes WH stock. These SKUs had an unusual spike (last 30d ≫ prior 30d) — verify it isn't masking real demand.",
+      rows: arr(detail.offline_marketing_spike),
+      render: (r, i) => (
+        <div key={i} style={FLAG_ROW_STYLE}>
+          <span className="mono">{r?.code ?? "—"}</span>
+          <span className="badge amber dot">{Number.isFinite(r?.recent) ? r.recent : "?"}u last 30d</span>
+          <span className="muted" style={{ fontSize: 10.5 }}>vs {Number.isFinite(r?.prior) ? r.prior : "?"}u prior</span>
+        </div>
+      ),
+    },
   ];
 
   const activeSections = sections.filter(s => s.rows.length > 0);

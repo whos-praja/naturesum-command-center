@@ -698,6 +698,7 @@ export async function parseCentralWhWorkbook(file, opts = {}) {
       unparsed_quantities: [],
       negative_stock: [],
       bom_gaps: [],
+      offline_marketing_spike: [],   // founder: flag unusual offline/marketing outflow
       notes: [],
     },
     ledger: [],
@@ -730,6 +731,14 @@ export async function parseCentralWhWorkbook(file, opts = {}) {
     if (!(ref in state.openingComp)) state.flags.bom_gaps.push({ ref, note: "no clean audit line — set to 0, founder must confirm juice packaging map" });
   }
 
+  // Offline / Marketing spike flag (founder): offline + marketing outflow is
+  // deliberately EXCLUDED from velocity/runway, but the WH FG count still
+  // deducts it — so a big offline/marketing month silently eats stock. Flag a
+  // SKU when its last-30d offline+marketing units are both ≥ FLOOR and >
+  // RATIO× the prior-30d offline+marketing, so an unusual spike surfaces in
+  // the Data-Quality panel. Tunable constants below.
+  detectOfflineMarketingSpikes(state, asOf);
+
   // SAFE FALLBACK: even though parseAudit guarantees ≥1 FG row, double-guard
   // the emitted FG map so the consumer never gets an empty object silently.
   const fgOut = Object.fromEntries((fgRows || []).map(r => [r.code, r]));
@@ -754,9 +763,37 @@ export async function parseCentralWhWorkbook(file, opts = {}) {
       manualReview: state.flags.manual_review.length,
       negativeStock: state.flags.negative_stock.length,
       bomGaps: state.flags.bom_gaps.length,
+      offlineMarketingSpike: state.flags.offline_marketing_spike.length,
       detail: state.flags,
     },
   };
+}
+
+// Detect unusual offline+marketing outflow per SKU (last 30d vs prior 30d).
+// Excluded from velocity by design, but it depletes WH stock — so flag spikes.
+const OFFMKT_SPIKE_FLOOR = 20;  // ignore noise below this many units in 30d
+const OFFMKT_SPIKE_RATIO = 2;   // recent > ratio × prior → spike
+function detectOfflineMarketingSpikes(state, asOf) {
+  const cur0 = asOf.getTime() - 29 * 86400000, curEnd = asOf.getTime();
+  const pri0 = asOf.getTime() - 59 * 86400000, priEnd = asOf.getTime() - 30 * 86400000;
+  const acc = {}; // code → { recent, prior }
+  for (const e of state.ledger) {
+    if (e.txn !== "ship_out" || !e.by) continue;
+    const om = (e.by.offline || 0) + (e.by.marketing || 0);
+    if (om <= 0) continue;
+    const t = e.date.getTime();
+    if (!acc[e.code]) acc[e.code] = { recent: 0, prior: 0 };
+    if (t >= cur0 && t <= curEnd) acc[e.code].recent += om;
+    else if (t >= pri0 && t <= priEnd) acc[e.code].prior += om;
+  }
+  for (const [code, { recent, prior }] of Object.entries(acc)) {
+    if (recent >= OFFMKT_SPIKE_FLOOR && recent > OFFMKT_SPIKE_RATIO * Math.max(prior, 1)) {
+      state.flags.offline_marketing_spike.push({
+        code, recent, prior,
+        note: `offline+marketing outflow ${recent}u last 30d vs ${prior}u prior 30d — excluded from runway velocity; verify it isn't masking real demand`,
+      });
+    }
+  }
 }
 
 export default parseCentralWhWorkbook;

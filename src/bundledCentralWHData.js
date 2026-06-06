@@ -1100,6 +1100,7 @@ export const CENTRAL_WH_DATA = {
     "manualReview": 0,
     "negativeStock": 4,
     "bomGaps": 5,
+    "offlineMarketingSpike": 0,
     "detail": {
       "unmapped_names": [],
       "unmapped_components": [
@@ -1308,6 +1309,7 @@ export const CENTRAL_WH_DATA = {
           "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
         }
       ],
+      "offline_marketing_spike": [],
       "notes": []
     }
   }
