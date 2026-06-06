@@ -27,6 +27,11 @@ const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
 import { CENTRAL_WH_DATA } from "./bundledCentralWHData.js";
 const CWH_FG   = CENTRAL_WH_DATA?.fg || {};
 const CWH_COMP = CENTRAL_WH_DATA?.components || {};
+// Warehouse-level (non-SKU) buckets — surfaced at the bottom of the
+// Materials breakdown tab per founder. Equipment + furniture (fixed assets)
+// and cartons/stickers/tape/etc (consumables & shipping).
+const CWH_FIXED_ASSETS = CENTRAL_WH_DATA?.fixedAssets || [];
+const CWH_CONSUMABLES  = CENTRAL_WH_DATA?.consumables || [];
 
 // Per-SKU overrides — stored in localStorage per-device under
 // `ns.skuOverride.<code>.<field>`. Set via the FormulaIcon (ⓘ) popover
@@ -958,10 +963,13 @@ const NSData = (function () {
       warehouseBreakdown: {
         ...sku.warehouseBreakdown,
         fg: cwh.fgStock,
+        oldStock: cwh.oldStock || 0,   // shown in modal, excluded from runway
         producibleFG: cwh.producible,
         bindingComponent: cwh.binding,
         bindingMissing: cwh.binding && CWH_COMP[cwh.binding]?.stock === 0,
       },
+      // Old (non-fresh) FG — surfaced in the material-breakdown modal.
+      centralWhOldStock: cwh.oldStock || 0,
       // Central WH-specific fields the cell + drill modal read directly
       // (kept separate from per-channel velocity/growth so each cell
       // displays its own source). depletion includes all 6 movement
@@ -1220,6 +1228,15 @@ const NSData = (function () {
     trend30, alerts, skuSales, inventory, itemUsedBy, batches, suppliers, poLog,
     blinkitFeederWhs: BLINKIT_FEEDER_WHS,
     realDataSnapshotDate: REAL_DATA_SNAPSHOT_DATE,
+    // Central WH engine snapshot + the two non-SKU buckets (fixed assets,
+    // consumables/shipping) for the Materials breakdown tab footer.
+    centralWh: {
+      anchorDate:  CENTRAL_WH_DATA?.anchorDate ?? null,
+      anchorSheet: CENTRAL_WH_DATA?.anchorSheet ?? null,
+      asOf:        CENTRAL_WH_DATA?.asOf ?? null,
+      fixedAssets: CWH_FIXED_ASSETS,
+      consumables: CWH_CONSUMABLES,
+    },
     nitinSheetSnapshot: {
       warehouseAsOf: NITIN_DATA?.warehouseInventory?.asOf ?? null,
       movementDays:  NITIN_DATA?.dailyMovement?.days ?? 0,

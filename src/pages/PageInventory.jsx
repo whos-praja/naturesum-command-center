@@ -1713,10 +1713,69 @@ const MaterialsTab = ({ inventory }) => {
         </table>
       </Card>
 
+      {/* ── Fixed assets + Consumables — non-BOM warehouse lines, kept
+          BELOW the material breakdown per founder. Sourced from the central
+          WH engine (audit lines that aren't finished goods or BOM
+          components). Equipment/furniture = fixed assets; cartons / stickers
+          / tape / rolls = consumables & shipping. */}
+      <WarehouseExtrasSection
+        fixedAssets={D.centralWh?.fixedAssets || []}
+        consumables={D.centralWh?.consumables || []}
+        asOf={D.centralWh?.asOf}
+      />
+
       {popoverSku && (
         <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
       )}
     </>
+  );
+};
+
+// ── Fixed assets + consumables/shipping — two simple tables shown below
+// the material breakdown. Warehouse-level (not per-SKU). Excluded from all
+// runway / producible math; here purely for a complete physical-count view.
+const WarehouseExtrasSection = ({ fixedAssets, consumables, asOf }) => {
+  const D = NSData;
+  if ((!fixedAssets || !fixedAssets.length) && (!consumables || !consumables.length)) return null;
+  const Table = ({ title, hint, rows }) => (
+    <Card title={title} sub={hint}>
+      {rows.length === 0 ? (
+        <div className="empty" style={{ padding: "16px" }}>None recorded in the latest audit.</div>
+      ) : (
+        <table className="table mat-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th className="num">Qty</th>
+              <th>Unit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.name + i}>
+                <td className="mat-cell">{r.name}</td>
+                <td className="num mat-cell mono">{D.fmtN(r.qty)}</td>
+                <td className="mat-cell muted">{r.unit || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16 }}>
+      <Table
+        title="Fixed assets"
+        hint={`Equipment + furniture · physical count from the ${asOf || "latest"} audit · not part of inventory runway`}
+        rows={fixedAssets}
+      />
+      <Table
+        title="Consumables & shipping"
+        hint="Cartons, stickers, tape, rolls, caps and other non-BOM packaging — tracked, but not consumed by any SKU's bill of materials"
+        rows={consumables}
+      />
+    </div>
   );
 };
 
@@ -1866,12 +1925,28 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                   <span style={{ fontWeight: 500 }}>{isFG ? "Produced FG (ready to ship)" : data.name}</span>
                   {code && <span className="wb-row-code sku">{code}</span>}
                   {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
+                  {/* Old stock chip — only on the FG row, only when there IS
+                      old stock. Per founder: old stock is shown but EXCLUDED
+                      from runway/sellable. */}
+                  {isFG && wb.oldStock > 0 && (
+                    <span
+                      className="wb-row-old-chip"
+                      title="Old / non-fresh stock — counted in the warehouse but excluded from sellable runway"
+                    >
+                      +{D.fmtN(wb.oldStock)} old · excl. runway
+                    </span>
+                  )}
                 </>
               )}
           </div>
         </div>
         <div className="wb-row-value mono">
           {isNA ? <span className="muted">N/A</span> : <>{D.fmtN(value)} <span className="wb-row-unit muted">{isFG ? "Pcs" : data.unit}</span></>}
+          {isFG && wb.oldStock > 0 && (
+            <div className="muted" style={{ fontSize: 10, fontWeight: 400, marginTop: 1 }}>
+              {D.fmtN(wb.fg)} new + {D.fmtN(wb.oldStock)} old
+            </div>
+          )}
         </div>
         {isExpanded && data && (
           <div className="wb-row-expand" onClick={(e) => e.stopPropagation()}>

@@ -3217,6 +3217,20 @@ input.txt:focus, select.sel:focus { outline: 2px solid var(--brand-line); outlin
   color: var(--warning);
   border: 1px solid #DBC487;
 }
+/* Old-stock chip on the FG row in the breakdown modal — muted, non-alarming;
+   communicates "counted but not sellable". */
+.wb-row-old-chip {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-sunken);
+  color: var(--ink-3);
+  border: 1px solid var(--border-soft);
+  white-space: nowrap;
+}
 .wb-row-code {
   font-family: var(--mono);
   font-size: 10.5px;

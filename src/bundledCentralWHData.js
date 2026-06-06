@@ -6,11 +6,12 @@
  * DO NOT hand-edit. Regenerate via:
  *   node scripts/build-central-wh.cjs <path-to-xlsx>
  *
- * Anchor: 2026-05-05 (physical audit). As-of: 2026-06-01.
+ * Anchor: 2026-06-05 (audit sheet "Audit 050626"). As-of: 2026-06-05.
  */
 export const CENTRAL_WH_DATA = {
-  "anchorDate": "2026-05-05",
-  "asOf": "2026-06-01",
+  "anchorDate": "2026-06-05",
+  "anchorSheet": "Audit 050626",
+  "asOf": "2026-06-05",
   "config": {
     "MERGE_OLD_SB500": true,
     "RANGE_RULE": "first",
@@ -24,15 +25,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 265,
       "leadDays": 30,
-      "fgStock": 88,
+      "fgStock": 92,
+      "oldStock": 0,
       "producible": 0,
-      "totalAvail": 88,
+      "totalAvail": 92,
       "binding": "NSPKGCB100",
-      "sales30": 7.067,
-      "depletion30": 7.067,
-      "runwayDays": 12,
+      "sales30": 7.167,
+      "depletion30": 7.167,
+      "runwayDays": 13,
       "momGrowth": 200,
-      "stockValue": 23320,
+      "stockValue": 24380,
       "worstComp": "NSPKGCB100",
       "worstCoverDays": 0,
       "reorder": true
@@ -43,15 +45,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "250 g",
       "price": 495,
       "leadDays": 30,
-      "fgStock": 71,
+      "fgStock": 65,
+      "oldStock": 0,
       "producible": 0,
-      "totalAvail": 71,
+      "totalAvail": 65,
       "binding": "NSPKGCB250",
-      "sales30": 6.867,
-      "depletion30": 6.867,
-      "runwayDays": 10,
+      "sales30": 6.9,
+      "depletion30": 6.9,
+      "runwayDays": 9,
       "momGrowth": 200,
-      "stockValue": 35145,
+      "stockValue": 32175,
       "worstComp": "NSPKGCB250",
       "worstCoverDays": 0,
       "reorder": true
@@ -62,17 +65,18 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 450,
       "leadDays": 50,
-      "fgStock": 372,
-      "producible": 87,
-      "totalAvail": 459,
+      "fgStock": 651,
+      "oldStock": 124,
+      "producible": 651,
+      "totalAvail": 1302,
       "binding": "NSPKGSBP100",
-      "sales30": 22.767,
-      "depletion30": 22.767,
-      "runwayDays": 16,
-      "momGrowth": 62.2,
-      "stockValue": 167400,
+      "sales30": 23.7,
+      "depletion30": 23.7,
+      "runwayDays": 27,
+      "momGrowth": 80.9,
+      "stockValue": 292950,
       "worstComp": "NSPKGSBP100",
-      "worstCoverDays": 4,
+      "worstCoverDays": 27,
       "reorder": true
     },
     "NSSB250": {
@@ -81,17 +85,18 @@ export const CENTRAL_WH_DATA = {
       "variant": "250 g",
       "price": 750,
       "leadDays": 50,
-      "fgStock": 327,
-      "producible": 1164,
-      "totalAvail": 1491,
+      "fgStock": 670,
+      "oldStock": 218,
+      "producible": 670,
+      "totalAvail": 1340,
       "binding": "NSPKGSBP250",
-      "sales30": 41.333,
-      "depletion30": 41.333,
-      "runwayDays": 8,
-      "momGrowth": 124.2,
-      "stockValue": 245250,
+      "sales30": 44.4,
+      "depletion30": 44.4,
+      "runwayDays": 15,
+      "momGrowth": 200,
+      "stockValue": 502500,
       "worstComp": "NSPKGSBP250",
-      "worstCoverDays": 28,
+      "worstCoverDays": 15,
       "reorder": true
     },
     "NSSB500": {
@@ -100,17 +105,18 @@ export const CENTRAL_WH_DATA = {
       "variant": "500 g",
       "price": 1350,
       "leadDays": 50,
-      "fgStock": 333,
-      "producible": 1885,
-      "totalAvail": 2218,
+      "fgStock": 113,
+      "oldStock": 17,
+      "producible": 113,
+      "totalAvail": 226,
       "binding": "NSPKGSBP500",
-      "sales30": 23.633,
-      "depletion30": 23.633,
-      "runwayDays": 14,
+      "sales30": 27.333,
+      "depletion30": 27.333,
+      "runwayDays": 4,
       "momGrowth": 200,
-      "stockValue": 449550,
+      "stockValue": 152550,
       "worstComp": "NSPKGSBP500",
-      "worstCoverDays": 80,
+      "worstCoverDays": 4,
       "reorder": true
     },
     "NSSBDB100": {
@@ -119,18 +125,19 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 390,
       "leadDays": 50,
-      "fgStock": 226,
+      "fgStock": 0,
+      "oldStock": 247,
       "producible": 0,
-      "totalAvail": 226,
-      "binding": "NSPKGDBP100",
-      "sales30": 4.067,
-      "depletion30": 4.067,
-      "runwayDays": 56,
-      "momGrowth": -83.9,
-      "stockValue": 88140,
-      "worstComp": "NSPKGDBP100",
+      "totalAvail": 0,
+      "binding": "NSSBDBR",
+      "sales30": 3.467,
+      "depletion30": 3.467,
+      "runwayDays": 0,
+      "momGrowth": -84.9,
+      "stockValue": 0,
+      "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
-      "reorder": false
+      "reorder": true
     },
     "NSSBDB250": {
       "code": "NSSBDB250",
@@ -138,18 +145,19 @@ export const CENTRAL_WH_DATA = {
       "variant": "250 g",
       "price": 690,
       "leadDays": 50,
-      "fgStock": 914,
-      "producible": 8,
-      "totalAvail": 922,
-      "binding": "NSPKGDBP250",
-      "sales30": 4.3,
-      "depletion30": 4.3,
-      "runwayDays": 213,
-      "momGrowth": -75,
-      "stockValue": 630660,
-      "worstComp": "NSPKGDBP250",
-      "worstCoverDays": 2,
-      "reorder": false
+      "fgStock": 0,
+      "oldStock": 441,
+      "producible": 0,
+      "totalAvail": 0,
+      "binding": "NSSBDBR",
+      "sales30": 4.4,
+      "depletion30": 4.4,
+      "runwayDays": 0,
+      "momGrowth": -67,
+      "stockValue": 0,
+      "worstComp": "NSSBDBR",
+      "worstCoverDays": 0,
+      "reorder": true
     },
     "NSSBDB500": {
       "code": "NSSBDB500",
@@ -157,15 +165,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "500 g",
       "price": 1150,
       "leadDays": 50,
-      "fgStock": 683,
-      "producible": 1045,
-      "totalAvail": 1728,
+      "fgStock": 0,
+      "oldStock": 664,
+      "producible": 0,
+      "totalAvail": 0,
       "binding": "NSSBDBR",
-      "sales30": -1.367,
-      "depletion30": -1.367,
+      "sales30": -1.333,
+      "depletion30": -1.333,
       "runwayDays": null,
       "momGrowth": -100,
-      "stockValue": 785450,
+      "stockValue": 0,
       "worstComp": null,
       "worstCoverDays": null,
       "reorder": false
@@ -176,18 +185,19 @@ export const CENTRAL_WH_DATA = {
       "variant": "300 ml",
       "price": 690,
       "leadDays": 50,
-      "fgStock": 189,
+      "fgStock": 611,
+      "oldStock": 0,
       "producible": 0,
-      "totalAvail": 189,
+      "totalAvail": 611,
       "binding": "NSSBJPLP",
-      "sales30": 7.533,
-      "depletion30": 7.533,
-      "runwayDays": 25,
-      "momGrowth": -38.8,
-      "stockValue": 130410,
+      "sales30": 9.1,
+      "depletion30": 9.1,
+      "runwayDays": 67,
+      "momGrowth": -26,
+      "stockValue": 421590,
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
-      "reorder": true
+      "reorder": false
     },
     "NSSBJ500": {
       "code": "NSSBJ500",
@@ -196,13 +206,14 @@ export const CENTRAL_WH_DATA = {
       "price": 1100,
       "leadDays": 50,
       "fgStock": 0,
+      "oldStock": 0,
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBJPLP",
-      "sales30": 24.8,
-      "depletion30": 24.8,
+      "sales30": 24.967,
+      "depletion30": 24.967,
       "runwayDays": 0,
-      "momGrowth": 120.8,
+      "momGrowth": 122.3,
       "stockValue": 0,
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
@@ -214,17 +225,18 @@ export const CENTRAL_WH_DATA = {
       "variant": "15 ml",
       "price": 1075,
       "leadDays": 50,
-      "fgStock": 45,
-      "producible": 283,
-      "totalAvail": 328,
-      "binding": "NSSBOR",
+      "fgStock": 105,
+      "oldStock": 0,
+      "producible": 0,
+      "totalAvail": 105,
+      "binding": "NSPKGBOB15",
       "sales30": 0.167,
       "depletion30": 0.167,
-      "runwayDays": 270,
+      "runwayDays": 630,
       "momGrowth": 66.7,
-      "stockValue": 48375,
-      "worstComp": "NSSBOR",
-      "worstCoverDays": 1700,
+      "stockValue": 112875,
+      "worstComp": "NSPKGBOB15",
+      "worstCoverDays": 0,
       "reorder": false
     },
     "NSSBBO30": {
@@ -233,15 +245,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "30 ml",
       "price": 1580,
       "leadDays": 50,
-      "fgStock": 0,
-      "producible": 32,
-      "totalAvail": 32,
+      "fgStock": 30,
+      "oldStock": 0,
+      "producible": 0,
+      "totalAvail": 30,
       "binding": "NSPKGBOBT30",
       "sales30": 0,
       "depletion30": 0,
       "runwayDays": null,
       "momGrowth": -100,
-      "stockValue": 0,
+      "stockValue": 47400,
       "worstComp": null,
       "worstCoverDays": null,
       "reorder": false
@@ -252,15 +265,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 ml",
       "price": 1350,
       "leadDays": 20,
-      "fgStock": 560,
+      "fgStock": 571,
+      "oldStock": 0,
       "producible": 96,
-      "totalAvail": 656,
+      "totalAvail": 667,
       "binding": "NSJOF100",
       "sales30": 2.667,
       "depletion30": 2.667,
-      "runwayDays": 210,
-      "momGrowth": 81.8,
-      "stockValue": 756000,
+      "runwayDays": 214,
+      "momGrowth": 100,
+      "stockValue": 770850,
       "worstComp": "NSJOF100",
       "worstCoverDays": 36,
       "reorder": false
@@ -271,15 +285,16 @@ export const CENTRAL_WH_DATA = {
       "variant": "30 sachets",
       "price": 975,
       "leadDays": 20,
-      "fgStock": 44,
+      "fgStock": 25,
+      "oldStock": 0,
       "producible": 0,
-      "totalAvail": 44,
+      "totalAvail": 25,
       "binding": "NSACDSF30",
-      "sales30": 1.2,
-      "depletion30": 1.2,
-      "runwayDays": 37,
-      "momGrowth": -14.3,
-      "stockValue": 42900,
+      "sales30": 1.233,
+      "depletion30": 1.233,
+      "runwayDays": 20,
+      "momGrowth": -9.8,
+      "stockValue": 24375,
       "worstComp": "NSACDSF30",
       "worstCoverDays": 0,
       "reorder": false
@@ -292,9 +307,10 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "KG",
       "leadDays": 30,
-      "stock": 103.4,
-      "consumption": 2.423,
-      "daysCover": 43,
+      "stock": 100,
+      "oldStock": 0,
+      "consumption": 2.442,
+      "daysCover": 41,
       "reorder": false,
       "blocks": []
     },
@@ -304,9 +320,10 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "KG",
       "leadDays": 50,
-      "stock": 1107.7,
-      "consumption": 24.426,
-      "daysCover": 45,
+      "stock": 910.7,
+      "oldStock": 0,
+      "consumption": 27.136,
+      "daysCover": 34,
       "reorder": true,
       "blocks": [
         "NSSB100",
@@ -320,11 +337,14 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "KG",
       "leadDays": 50,
-      "stock": 522.5,
-      "consumption": 0.798,
-      "daysCover": 655,
-      "reorder": false,
+      "stock": 0,
+      "oldStock": 0,
+      "consumption": 0.78,
+      "daysCover": 0,
+      "reorder": true,
       "blocks": [
+        "NSSBDB100",
+        "NSSBDB250",
         "NSSBDB500"
       ]
     },
@@ -335,7 +355,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Ltr",
       "leadDays": 50,
       "stock": 0,
-      "consumption": 14.66,
+      "oldStock": 0,
+      "consumption": 15.213,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -349,13 +370,12 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "Ltr",
       "leadDays": 50,
-      "stock": 4.25,
+      "stock": 5.6,
+      "oldStock": 0,
       "consumption": 0.003,
-      "daysCover": 1697,
+      "daysCover": 2236,
       "reorder": false,
-      "blocks": [
-        "NSSBBO15"
-      ]
+      "blocks": []
     },
     "NSJOF100": {
       "ref": "NSJOF100",
@@ -364,6 +384,7 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 20,
       "stock": 96,
+      "oldStock": 0,
       "consumption": 2.667,
       "daysCover": 36,
       "reorder": false,
@@ -378,7 +399,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 20,
       "stock": 0,
-      "consumption": 36,
+      "oldStock": 0,
+      "consumption": 36.99,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -391,9 +413,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 2934,
-      "consumption": 7.067,
-      "daysCover": 415,
+      "stock": 2935,
+      "oldStock": 0,
+      "consumption": 7.167,
+      "daysCover": 410,
       "reorder": false,
       "blocks": []
     },
@@ -403,9 +426,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 2998,
-      "consumption": 6.867,
-      "daysCover": 437,
+      "stock": 2934,
+      "oldStock": 0,
+      "consumption": 6.9,
+      "daysCover": 425,
       "reorder": false,
       "blocks": []
     },
@@ -416,7 +440,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 7.067,
+      "oldStock": 0,
+      "consumption": 7.167,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -430,7 +455,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 6.867,
+      "oldStock": 0,
+      "consumption": 6.9,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -443,10 +469,11 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 87,
-      "consumption": 22.767,
-      "daysCover": 4,
-      "reorder": true,
+      "stock": 651,
+      "oldStock": 0,
+      "consumption": 23.7,
+      "daysCover": 27,
+      "reorder": false,
       "blocks": [
         "NSSB100"
       ]
@@ -457,9 +484,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 1164,
-      "consumption": 41.333,
-      "daysCover": 28,
+      "stock": 670,
+      "oldStock": 0,
+      "consumption": 44.4,
+      "daysCover": 15,
       "reorder": false,
       "blocks": [
         "NSSB250"
@@ -471,10 +499,11 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 1885,
-      "consumption": 23.633,
-      "daysCover": 80,
-      "reorder": false,
+      "stock": 113,
+      "oldStock": 0,
+      "consumption": 27.333,
+      "daysCover": 4,
+      "reorder": true,
       "blocks": [
         "NSSB500"
       ]
@@ -486,7 +515,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 4.067,
+      "oldStock": 0,
+      "consumption": 3.467,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -499,9 +529,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 8,
-      "consumption": 4.3,
-      "daysCover": 2,
+      "stock": 0,
+      "oldStock": 0,
+      "consumption": 4.4,
+      "daysCover": 0,
       "reorder": true,
       "blocks": [
         "NSSBDB250"
@@ -513,8 +544,9 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 2868,
-      "consumption": -1.367,
+      "stock": 1200,
+      "oldStock": 0,
+      "consumption": -1.333,
       "daysCover": null,
       "reorder": false,
       "blocks": []
@@ -525,9 +557,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 2300,
-      "consumption": 7.533,
-      "daysCover": 305,
+      "stock": 1826,
+      "oldStock": 0,
+      "consumption": 9.1,
+      "daysCover": 201,
       "reorder": false,
       "blocks": []
     },
@@ -538,7 +571,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 7.533,
+      "oldStock": 0,
+      "consumption": 9.1,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -552,7 +586,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 7.533,
+      "oldStock": 0,
+      "consumption": 9.1,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -566,7 +601,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 7.533,
+      "oldStock": 0,
+      "consumption": 9.1,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -580,8 +616,9 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 2022,
-      "consumption": 24.8,
-      "daysCover": 82,
+      "oldStock": 0,
+      "consumption": 24.967,
+      "daysCover": 81,
       "reorder": false,
       "blocks": []
     },
@@ -592,7 +629,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 24.8,
+      "oldStock": 0,
+      "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -606,7 +644,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 24.8,
+      "oldStock": 0,
+      "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -620,7 +659,8 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 0,
-      "consumption": 24.8,
+      "oldStock": 0,
+      "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
       "blocks": [
@@ -633,9 +673,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 454,
+      "stock": 375,
+      "oldStock": 0,
       "consumption": 0.167,
-      "daysCover": 2719,
+      "daysCover": 2246,
       "reorder": false,
       "blocks": []
     },
@@ -645,11 +686,14 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 950,
+      "stock": 0,
+      "oldStock": 0,
       "consumption": 0.167,
-      "daysCover": 5689,
-      "reorder": false,
-      "blocks": []
+      "daysCover": 0,
+      "reorder": true,
+      "blocks": [
+        "NSSBBO15"
+      ]
     },
     "NSPKGBOBT30": {
       "ref": "NSPKGBOBT30",
@@ -657,7 +701,8 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 32,
+      "stock": 0,
+      "oldStock": 0,
       "consumption": 0,
       "daysCover": null,
       "reorder": false,
@@ -671,7 +716,8 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 127,
+      "stock": 86,
+      "oldStock": 0,
       "consumption": 0,
       "daysCover": null,
       "reorder": false,
@@ -683,9 +729,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 1614,
+      "stock": 1503,
+      "oldStock": 0,
       "consumption": 0.167,
-      "daysCover": 9665,
+      "daysCover": 9000,
       "reorder": false,
       "blocks": []
     },
@@ -695,9 +742,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 987,
+      "stock": 876,
+      "oldStock": 0,
       "consumption": 0.167,
-      "daysCover": 5910,
+      "daysCover": 5246,
       "reorder": false,
       "blocks": []
     },
@@ -707,9 +755,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 677,
+      "stock": 177,
+      "oldStock": 0,
       "consumption": 2.667,
-      "daysCover": 254,
+      "daysCover": 66,
       "reorder": false,
       "blocks": []
     },
@@ -720,8 +769,9 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 37550,
-      "consumption": 36,
-      "daysCover": 1043,
+      "oldStock": 0,
+      "consumption": 36.99,
+      "daysCover": 1015,
       "reorder": false,
       "blocks": []
     },
@@ -732,18 +782,260 @@ export const CENTRAL_WH_DATA = {
       "unit": "Pcs",
       "leadDays": 14,
       "stock": 2507,
-      "consumption": 1.2,
-      "daysCover": 2089,
+      "oldStock": 0,
+      "consumption": 1.233,
+      "daysCover": 2033,
       "reorder": false,
       "blocks": []
     }
   },
+  "fixedAssets": [
+    {
+      "name": "Sealing Machine",
+      "qty": 4,
+      "unit": "pc"
+    },
+    {
+      "name": "Heat Gun Machine",
+      "qty": 1,
+      "unit": "pc"
+    },
+    {
+      "name": "Tape Machine",
+      "qty": 1,
+      "unit": "pc"
+    },
+    {
+      "name": "Tape Bundle",
+      "qty": 0,
+      "unit": "pc"
+    },
+    {
+      "name": "Picking Equipment",
+      "qty": 0,
+      "unit": "pcs"
+    },
+    {
+      "name": "Empty Drums",
+      "qty": 72,
+      "unit": "pcs"
+    },
+    {
+      "name": "AC Unit",
+      "qty": 4,
+      "unit": "pcs"
+    },
+    {
+      "name": "Laptop",
+      "qty": 1,
+      "unit": "pcs"
+    },
+    {
+      "name": "TSC Label Printer",
+      "qty": 1,
+      "unit": "pcs"
+    },
+    {
+      "name": "2d wireless barcode scanner",
+      "qty": 1,
+      "unit": "pcs"
+    },
+    {
+      "name": "Tables",
+      "qty": 3,
+      "unit": "pcs"
+    },
+    {
+      "name": "Benches",
+      "qty": 6,
+      "unit": "pcs"
+    },
+    {
+      "name": "Office chairs",
+      "qty": 3,
+      "unit": "pcs"
+    },
+    {
+      "name": "Thermal inkjet printer",
+      "qty": 1,
+      "unit": "pcs"
+    },
+    {
+      "name": "Steel racks",
+      "qty": 4,
+      "unit": "pcs"
+    }
+  ],
+  "consumables": [
+    {
+      "name": "AC Tea Pouches(Green, Filled)",
+      "qty": 0,
+      "unit": "Pcs",
+      "section": "SFG"
+    },
+    {
+      "name": "SB Juice Glass Bottle 300 ml (Without wrap)",
+      "qty": 69,
+      "unit": "pcs",
+      "section": "SFG"
+    },
+    {
+      "name": "SB Juice Glass Bottle 300 ml (With wrap)",
+      "qty": 0,
+      "unit": "pcs",
+      "section": "SFG"
+    },
+    {
+      "name": "SB Juice Glass Bottle 500 ml (Without wrap)",
+      "qty": 0,
+      "unit": "pcs",
+      "section": "SFG"
+    },
+    {
+      "name": "Jatamansi (Herb)",
+      "qty": 5.03,
+      "unit": "Kg",
+      "section": "RM"
+    },
+    {
+      "name": "500 gm Packaging Carton Box (Empty) - Powder",
+      "qty": 0,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "100 gram packaging carton box - berry",
+      "qty": 0,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "250 gram packaging carton box - berry",
+      "qty": 0,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "500 gram packaging carton box - berry",
+      "qty": 0,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Hair oil bottles empty w/o cap with logo",
+      "qty": 375,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "SB Faceoil plastic seal",
+      "qty": 339,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Juice air wrap",
+      "qty": 110,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "SB Faceoil Carpets",
+      "qty": 1.5,
+      "unit": "Roll",
+      "section": "PKG"
+    },
+    {
+      "name": "Acacia Tea Bag Empty Dip Sachet",
+      "qty": 0,
+      "unit": "Roll",
+      "section": "PKG"
+    },
+    {
+      "name": "Blank(No print) Hair Oil Box",
+      "qty": 0,
+      "unit": "kg",
+      "section": "PKG"
+    },
+    {
+      "name": "Disposable Packaging Caps",
+      "qty": 4,
+      "unit": "packs",
+      "section": "PKG"
+    },
+    {
+      "name": "MRP Stickers (New)",
+      "qty": 47,
+      "unit": "sheet",
+      "section": "PKG"
+    },
+    {
+      "name": "MRP Stickers",
+      "qty": 58,
+      "unit": "sheet",
+      "section": "PKG"
+    },
+    {
+      "name": "#33",
+      "qty": 36,
+      "unit": "Pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Tea bag roll",
+      "qty": 2,
+      "unit": "Roll",
+      "section": "PKG"
+    },
+    {
+      "name": "Air pouches (300ML)",
+      "qty": 910,
+      "unit": "pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Air pouches (500ML)",
+      "qty": 1000,
+      "unit": "pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Golden stickers (Powder)",
+      "qty": 22,
+      "unit": "Sheets",
+      "section": "PKG"
+    },
+    {
+      "name": "Golden stickers (Berry)",
+      "qty": 25,
+      "unit": "Sheets",
+      "section": "PKG"
+    },
+    {
+      "name": "Carton 19*14*16",
+      "qty": 10,
+      "unit": "pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Carton 19*14*12",
+      "qty": 10,
+      "unit": "pcs",
+      "section": "PKG"
+    },
+    {
+      "name": "Carton 19*14*9",
+      "qty": 10,
+      "unit": "pcs",
+      "section": "PKG"
+    }
+  ],
   "flags": {
     "unmappedNames": 0,
-    "unmappedComponents": 34,
+    "unmappedComponents": 27,
     "unparsedQuantities": 0,
-    "manualReview": 2,
-    "negativeStock": 10,
+    "manualReview": 0,
+    "negativeStock": 0,
     "bomGaps": 5,
     "detail": {
       "unmapped_names": [],
@@ -751,231 +1043,169 @@ export const CENTRAL_WH_DATA = {
         {
           "section": "SFG",
           "name": "AC Tea Pouches(Green, Filled)",
-          "raw": "0"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "SFG",
           "name": "SB Juice Glass Bottle 300 ml (Without wrap)",
-          "raw": "79"
+          "raw": "69",
+          "bucket": "consumable"
         },
         {
           "section": "SFG",
           "name": "SB Juice Glass Bottle 300 ml (With wrap)",
-          "raw": "630"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "SFG",
           "name": "SB Juice Glass Bottle 500 ml (Without wrap)",
-          "raw": "153"
-        },
-        {
-          "section": "SFG",
-          "name": "SB Oil (5 cann)",
-          "raw": "5"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "RM",
-          "name": "Jatamansi oil",
-          "raw": "0"
+          "name": "Jatamansi (Herb)",
+          "raw": "5.03",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "500 gm Packaging Carton Box (Empty) - Powder",
-          "raw": "4"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "100 gram packaging carton box - berry",
-          "raw": "0"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "250 gram packaging carton box - berry",
-          "raw": "0"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "500 gram packaging carton box - berry",
-          "raw": "5"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Hair oil bottles empty w/o cap with logo",
-          "raw": "160"
+          "raw": "375",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "SB Faceoil plastic seal",
-          "raw": "500"
+          "raw": "339",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Juice air wrap",
-          "raw": "0"
+          "raw": "110",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "SB Faceoil Carpets",
-          "raw": "2"
+          "raw": "1.5",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Acacia Tea Bag Empty Dip Sachet",
-          "raw": "0"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Blank(No print) Hair Oil Box",
-          "raw": "23.5"
+          "raw": "0",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Disposable Packaging Caps",
-          "raw": "3"
+          "raw": "4",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
-          "name": "MRP Stickers",
-          "raw": "27"
+          "name": "MRP Stickers (New)",
+          "raw": "47",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
-          "name": "Jatamansi Hair Oil Foam",
-          "raw": "36"
+          "name": "MRP Stickers (Old)",
+          "raw": "58",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
-          "name": "Sealing Machine",
-          "raw": "2"
-        },
-        {
-          "section": "PKG",
-          "name": "Heat Gun Machine",
-          "raw": "1"
-        },
-        {
-          "section": "PKG",
-          "name": "Tape Machine",
-          "raw": "1"
-        },
-        {
-          "section": "PKG",
-          "name": "Tape Bundle",
-          "raw": "0"
-        },
-        {
-          "section": "PKG",
-          "name": "Picking Equipment",
-          "raw": "0"
-        },
-        {
-          "section": "PKG",
-          "name": "Empty Drums",
-          "raw": "14"
-        },
-        {
-          "section": "PKG",
-          "name": "AC Unit",
-          "raw": "4"
-        },
-        {
-          "section": "PKG",
-          "name": "Laptop",
-          "raw": "1"
-        },
-        {
-          "section": "PKG",
-          "name": "TSC Label Printer",
-          "raw": "1"
-        },
-        {
-          "section": "PKG",
-          "name": "2d wireless barcode scanner",
-          "raw": "1"
-        },
-        {
-          "section": "PKG",
-          "name": "Tables",
-          "raw": "3"
-        },
-        {
-          "section": "PKG",
-          "name": "Benches",
-          "raw": "4"
-        },
-        {
-          "section": "PKG",
-          "name": "Office chairs",
-          "raw": "4"
-        },
-        {
-          "section": "PKG",
-          "name": "Thermal inkjet printer",
-          "raw": "1"
+          "name": "#33",
+          "raw": "36",
+          "bucket": "consumable"
         },
         {
           "section": "PKG",
           "name": "Tea bag roll",
-          "raw": "2"
-        }
-      ],
-      "manual_review": [
-        {
-          "section": "FG",
-          "name": "SB Powder 500 gm Packed",
-          "raw": "36-50",
-          "picked": 36
+          "raw": "2",
+          "bucket": "consumable"
         },
         {
-          "section": "FG",
-          "name": "SB Powder 100 gm Packed",
-          "raw": "206-100",
-          "picked": 206
+          "section": "PKG",
+          "name": "Air pouches (300ML)",
+          "raw": "910",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Air pouches (500ML)",
+          "raw": "1000",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Golden stickers (Powder)",
+          "raw": "22",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Golden stickers (Berry)",
+          "raw": "25",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Carton 19*14*16",
+          "raw": "10",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Carton 19*14*12",
+          "raw": "10",
+          "bucket": "consumable"
+        },
+        {
+          "section": "PKG",
+          "name": "Carton 19*14*9",
+          "raw": "10",
+          "bucket": "consumable"
         }
       ],
+      "manual_review": [],
       "unparsed_quantities": [],
-      "negative_stock": [
-        {
-          "code": "NSSBJ500",
-          "qty": -159
-        },
-        {
-          "code": "NSSBJPLP",
-          "qty": -121.5
-        },
-        {
-          "code": "NSPKGCB250",
-          "qty": -97
-        },
-        {
-          "code": "NSPKGCB100",
-          "qty": -99
-        },
-        {
-          "code": "NSPKGJB500",
-          "qty": -153
-        },
-        {
-          "code": "NSPKGJB300",
-          "qty": -150
-        },
-        {
-          "code": "NSPKGJTUB300",
-          "qty": -150
-        },
-        {
-          "code": "NSPKGJLBL300",
-          "qty": -150
-        },
-        {
-          "code": "NSPKGJTUB500",
-          "qty": -153
-        },
-        {
-          "code": "NSPKGJLBL500",
-          "qty": -153
-        }
-      ],
+      "negative_stock": [],
       "bom_gaps": [
         {
           "ref": "NSPKGJB300",

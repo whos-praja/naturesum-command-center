@@ -18,12 +18,29 @@ const fs = require("fs");
 const path = require("path");
 
 // ─── Config ─────────────────────────────────────────────────────
-const ANCHOR_DATE = new Date("2026-05-05T00:00:00Z");
+// ANCHOR_DATE is now AUTO-DETECTED — the latest "Audit DDMMYY" sheet in the
+// workbook (parsed from the sheet name; cross-checked against the "As of"
+// text). See detectLatestAudit() below. `let` because it's assigned at runtime.
+let ANCHOR_DATE = new Date("2026-05-05T00:00:00Z");
+let ANCHOR_SHEET = "Audit 050525";
 const MERGE_OLD_SB500 = true;
 const RANGE_RULE = "first"; // first | sum | min | max
 const W30 = 30, W60 = 60;
-const INPUT = process.argv[2] || "/Users/shivamprajapati/Downloads/Naturesum Live Inventory (1).xlsx";
+const INPUT = process.argv[2] || "/Users/shivamprajapati/Downloads/Naturesum Live Inventory (2).xlsx";
 const OUT_JS = path.join(__dirname, "..", "src", "bundledCentralWHData.js");
+
+// ─── Fixed-asset + consumable classification ────────────────────
+// Per founder: equipment + furniture = FIXED ASSETS (own section below the
+// material breakdown). Everything in the audit's PACKAGING section that is
+// NOT a BOM component and NOT a fixed asset falls into CONSUMABLES & SHIPPING
+// (cartons, stickers, tape, rolls, caps, carpets, foam) — shown separately.
+// Matching is on the normalised name (norm()).
+const FIXED_ASSET_NAMES = new Set([
+  "sealing machine", "heat gun machine", "tape machine", "tape bundle",
+  "picking equipment", "empty drums", "ac unit", "laptop",
+  "tsc label printer", "2d wireless barcode scanner", "tables", "benches",
+  "office chairs", "thermal inkjet printer", "steel racks",
+].map(s => s)); // already lowercase / no punctuation → norm() lands here
 
 // ─── §2a — Finished-good SKUs ───────────────────────────────────
 const SKUS = [
@@ -257,45 +274,128 @@ const flags = {
   notes: [],
 };
 const ledger = [];
-const openingFG = {};   // code → qty
-const openingComp = {}; // ref → qty
+// FG: separate new (sellable) vs old (excluded from runway per founder).
+const newFG = {};    // code → qty (fresh, sellable)
+const oldFG = {};     // code → qty ('(old)' stock — shown, NOT counted in runway)
+// Components: new + old both usable for producing → summed for stock,
+// but old tracked separately for the modal.
+const newComp = {};  // ref → qty
+const oldComp = {};   // ref → qty
+// Non-BOM audit lines, split into the two display buckets.
+const fixedAssets   = [];  // { name, qty, unit }
+const consumables   = [];  // { name, qty, unit } — cartons, stickers, tape...
+// Back-compat aliases the rest of the script reads from.
+const openingFG = newFG;
+const openingComp = newComp;
 
-// ─── §3b — Parse Audit ──────────────────────────────────────────
+// ─── Detect the latest audit sheet ──────────────────────────────
+// Sheet names look like "Audit DDMMYY" (e.g. Audit 050626 = 5 Jun 2026).
+// Parse the name; cross-check with the "As of <date>" text in row 1; pick
+// the sheet with the max date. Falls back to name-date when text is unclear.
+function detectLatestAudit() {
+  const candidates = [];
+  for (const name of wb.SheetNames) {
+    const m = name.match(/audit\s+(\d{2})(\d{2})(\d{2})/i);
+    if (!m) continue;
+    const dd = +m[1], mm = +m[2], yy = 2000 + +m[3];
+    // Name year can be a typo (050525 meant 2026) — prefer the "As of" text.
+    const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "", raw: true });
+    const asOfText = String(grid[1]?.[0] || "");
+    const tm = asOfText.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+),?\s*(\d{4})/i);
+    let date = new Date(Date.UTC(yy, mm - 1, dd));
+    if (tm) {
+      const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+      const mi = months.findIndex(x => tm[2].toLowerCase().startsWith(x));
+      if (mi >= 0) date = new Date(Date.UTC(+tm[3], mi, +tm[1]));
+    }
+    // V-2 / detailed variants share a date with the base — prefer the one
+    // WITHOUT a "V-" suffix unless it's strictly newer (handled by sort).
+    candidates.push({ name, date, isVariant: /v-?\d/i.test(name) });
+  }
+  if (!candidates.length) return { name: ANCHOR_SHEET, date: ANCHOR_DATE };
+  candidates.sort((a, b) => {
+    if (b.date.getTime() !== a.date.getTime()) return b.date.getTime() - a.date.getTime();
+    return (a.isVariant ? 1 : 0) - (b.isVariant ? 1 : 0); // non-variant first on tie
+  });
+  return candidates[0];
+}
+
+// Strip "(old)" and "(Flipkart shipment)" tags off an audit item name and
+// return { base, isOld, isFkShipment }. Both tags are case-insensitive.
+function splitAuditTags(name) {
+  let s = String(name || "");
+  const isOld = /\(\s*old\s*\)/i.test(s);
+  const isFkShipment = /flipkart\s*shipment/i.test(s);
+  s = s.replace(/\(\s*old\s*\)/ig, " ")
+       .replace(/\([^)]*flipkart\s*shipment[^)]*\)/ig, " ")
+       .replace(/\s+/g, " ").trim();
+  return { base: s, isOld, isFkShipment };
+}
+
+// ─── §3b — Parse Audit (latest sheet, old/new + 3-bucket) ───────
 function parseAudit() {
-  const grid = XLSX.utils.sheet_to_json(wb.Sheets["Audit 050525"], { header: 1, defval: "", raw: true });
+  const detected = detectLatestAudit();
+  ANCHOR_SHEET = detected.name;
+  ANCHOR_DATE  = detected.date;
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[ANCHOR_SHEET], { header: 1, defval: "", raw: true });
   let section = null;
   for (const r of grid) {
     const a = String(r[0] || "");
-    const b = String(r[1] || "");
-    // Order matters — SEMI-FINISHED matches /FINISH/i too, so test SEMI first.
+    const bRaw = String(r[1] || "");
     if (/SEMI/i.test(a))   { section = "SFG"; continue; }
     if (/FINISH/i.test(a)) { section = "FG"; continue; }
     if (/RAW/i.test(a))    { section = "RM"; continue; }
     if (/PACKAG/i.test(a)) { section = "PKG"; continue; }
     if (!section) continue;
-    if (!b || b === "·") continue;
-    if (!a.startsWith("#")) continue; // only "#N" item rows
+    if (!bRaw || bRaw === "·") continue;
+    if (!a.startsWith("#")) continue;
 
     const cq = cleanQty(r[2]);
-    if (cq.unparsed)     flags.unparsed_quantities.push({ section, name: b, raw: cq.raw });
-    if (cq.manualReview) flags.manual_review.push({ section, name: b, raw: cq.raw, picked: cq.qty });
+    const unit = String(r[3] || "").trim();
+    if (cq.unparsed)     flags.unparsed_quantities.push({ section, name: bRaw, raw: cq.raw });
+    if (cq.manualReview) flags.manual_review.push({ section, name: bRaw, raw: cq.raw, picked: cq.qty });
 
-    const nm = norm(b);
+    const { base, isOld, isFkShipment } = splitAuditTags(bRaw);
+    const nm = norm(base);
+
     if (section === "FG") {
       const code = FG_ALIASES[nm];
-      if (!code) { flags.unmapped_names.push({ source: "audit-FG", name: b }); continue; }
-      openingFG[code] = (openingFG[code] || 0) + cq.qty;
+      if (!code) { flags.unmapped_names.push({ source: "audit-FG", name: bRaw }); continue; }
+      // FK-shipment FG → counts as fresh central-WH FG (founder: team will
+      // move it into FG; Daily Movement deducts it when it actually ships).
+      if (isOld && !isFkShipment) oldFG[code] = (oldFG[code] || 0) + cq.qty;
+      else                        newFG[code] = (newFG[code] || 0) + cq.qty;
+      continue;
+    }
+
+    // SFG / RM / PKG — classify into BOM component | fixed asset | consumable.
+    const ref = COMPONENT_ALIASES[nm];
+    if (ref) {
+      if (isOld) oldComp[ref] = (oldComp[ref] || 0) + cq.qty;
+      else       newComp[ref] = (newComp[ref] || 0) + cq.qty;
+      continue;
+    }
+    // Not a BOM component → fixed asset or consumable/shipping.
+    if (FIXED_ASSET_NAMES.has(nm)) {
+      fixedAssets.push({ name: base, qty: cq.qty, unit });
     } else {
-      const ref = COMPONENT_ALIASES[nm];
-      if (!ref) { flags.unmapped_components.push({ section, name: b, raw: cq.raw }); continue; }
-      openingComp[ref] = (openingComp[ref] || 0) + cq.qty;
+      consumables.push({ name: base, qty: cq.qty, unit, section });
+      // still log as unmapped-component so the data-quality tab sees it
+      flags.unmapped_components.push({ section, name: bRaw, raw: cq.raw, bucket: "consumable" });
     }
   }
-  for (const [code, qty] of Object.entries(openingFG)) {
+
+  // Opening-balance ledger entries.
+  // FG audit_open = NEW only (sellable). Old stock is a static side field —
+  // it does not roll forward and is excluded from sellable/runway.
+  for (const [code, qty] of Object.entries(newFG)) {
     ledger.push({ date: ANCHOR_DATE, code, type: "FG", txn: "audit_open", qty });
   }
-  for (const [ref, qty] of Object.entries(openingComp)) {
+  // Components: new + old both usable for producing → sum into the balance.
+  const allComp = new Set([...Object.keys(newComp), ...Object.keys(oldComp)]);
+  for (const ref of allComp) {
     const meta = COMP_BY_REF[ref];
+    const qty = (newComp[ref] || 0) + (oldComp[ref] || 0);
     ledger.push({ date: ANCHOR_DATE, code: ref, type: meta?.type || "PKG", txn: "audit_open", qty });
   }
 }
@@ -465,9 +565,13 @@ function computeMetrics(balance, asOf) {
     const reorder = runwayDays != null && runwayDays < sku.leadDays;
     const stockValue = fgStock * sku.price;
 
+    // Old stock — static side field (NOT in fgStock/sellable/runway). Per
+    // founder: shown in the material-breakdown modal, excluded from runway.
+    const oldStock = Math.max(0, oldFG[code] || 0);
+
     fgRows.push({
       code, name: sku.name, variant: sku.variant, price: sku.price, leadDays: sku.leadDays,
-      fgStock, producible, totalAvail, binding,
+      fgStock, oldStock, producible, totalAvail, binding,
       sales30: +sales30.toFixed(3), depletion30: +depletion30.toFixed(3),
       runwayDays, momGrowth: mom, stockValue,
       worstComp, worstCoverDays, reorder,
@@ -502,7 +606,8 @@ function computeMetrics(balance, asOf) {
     }
     compRows.push({
       ref: c.ref, name: c.name, type: c.type, unit: c.unit, leadDays: c.leadDays,
-      stock, consumption: +consumption.toFixed(3), daysCover, reorder, blocks,
+      stock, oldStock: Math.max(0, oldComp[c.ref] || 0),
+      consumption: +consumption.toFixed(3), daysCover, reorder, blocks,
     });
   }
 
@@ -541,14 +646,20 @@ const out = `/**
  * DO NOT hand-edit. Regenerate via:
  *   node scripts/build-central-wh.cjs <path-to-xlsx>
  *
- * Anchor: ${dateKey(ANCHOR_DATE)} (physical audit). As-of: ${dateKey(asOf)}.
+ * Anchor: ${dateKey(ANCHOR_DATE)} (audit sheet "${ANCHOR_SHEET}"). As-of: ${dateKey(asOf)}.
  */
 export const CENTRAL_WH_DATA = ${JSON.stringify({
   anchorDate: dateKey(ANCHOR_DATE),
+  anchorSheet: ANCHOR_SHEET,
   asOf: dateKey(asOf),
   config: { MERGE_OLD_SB500, RANGE_RULE, W30, W60 },
   fg: Object.fromEntries(fgRows.map(r => [r.code, r])),
   components: Object.fromEntries(compRows.map(r => [r.ref, r])),
+  // Non-BOM audit lines, split per founder's request:
+  //   fixedAssets = equipment + furniture (own section below materials)
+  //   consumables = cartons, stickers, tape, rolls, caps (shown separately)
+  fixedAssets,
+  consumables,
   flags: {
     unmappedNames: flags.unmapped_names.length,
     unmappedComponents: flags.unmapped_components.length,
