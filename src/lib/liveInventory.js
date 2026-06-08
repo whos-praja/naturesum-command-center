@@ -43,49 +43,17 @@ export function clearLiveInventory() {
  * Overlay live numbers onto the synth inventory.
  * Returns a new inventory array; the input is not mutated.
  */
-export function applyLiveData(synthInventory, live) {
-  if (!live) return synthInventory;
-
-  return synthInventory.map(s => {
-    const liveFg     = live.fg?.[s.code];
-    const liveSemi   = live.semiFg?.[s.code];
-    const liveRaw    = live.raw?.[s.code];
-    const livePkg    = live.pkg?.[s.code];
-    const liveVel    = live.velocity?.[s.code];
-
-    // Nothing live for this SKU → leave untouched
-    if (liveFg == null && liveSemi == null && liveRaw == null && livePkg == null && liveVel == null) {
-      return s;
-    }
-
-    const wb = { ...s.warehouseBreakdown };
-    if (liveFg   != null) wb.fg          = liveFg;
-    if (liveSemi != null) wb.semiFg      = liveSemi;
-    if (liveRaw  != null) wb.rawMaterial = liveRaw;
-    if (livePkg  != null) wb.packaging   = livePkg;
-    // Producible FG always = min(semiFg, packaging). Recompute when either input
-    // moved, since the cached value would now be stale.
-    wb.producibleFG = Math.min(wb.semiFg ?? 0, wb.packaging ?? 0);
-
-    const newWarehouseFg = liveFg != null ? liveFg : s.stock.warehouse;
-    const stock = { ...s.stock, warehouse: newWarehouseFg };
-    const velocity = liveVel != null ? liveVel : s.velocity;
-    const totalStock = stock.warehouse + stock.amazonFBA + stock.flipkart + stock.blinkit;
-    const runway = velocity > 0 ? Math.round(totalStock / velocity) : 0;
-    const runwayStatus = runway <= s.leadTime ? "red" : runway < 30 ? "amber" : "green";
-
-    return {
-      ...s,
-      stock,
-      warehouseBreakdown: wb,
-      velocity,
-      totalStock,
-      runway,
-      runwayStatus,
-      // Mark this row as live-sourced so the UI can show a small badge.
-      _live: true,
-    };
-  });
+export function applyLiveData(synthInventory) {
+  // ⚠️ RETIRED (FIX-SPEC, 2026-06). This legacy "live inventory" synth path used
+  // to override warehouseBreakdown / stock.warehouse / velocity / producible /
+  // runway from a stale `ns.liveInventory` localStorage payload — a SECOND
+  // warehouse source that conflicted with (and clobbered) the central-WH engine,
+  // reintroducing the old producible=min(semiFg,packaging) bug (ignores D1) and
+  // the green-stockout runway bug. The central-WH engine (data.js overlay) is
+  // now the SINGLE warehouse authority and the durable upload path is the 7th
+  // 'central-wh' zone (multiFileStore → centralWhEngine), so this synth is a
+  // no-op pass-through. Signature kept so existing call sites don't break.
+  return synthInventory;
 }
 
 /**

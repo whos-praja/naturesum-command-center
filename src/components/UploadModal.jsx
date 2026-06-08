@@ -94,7 +94,11 @@ export function UploadModal({ onClose }) {
     }
   };
 
-  const filesCount = Object.keys(store?.files || {}).length;
+  // Count only files that map to a CURRENT zone, so the "N of M sources" copy
+  // can never read e.g. "7 of 6" when a legacy slot (retired 'nitin' /
+  // 'amazon-orders') still lingers in storage from an older upload.
+  const zoneKeys = new Set(ZONES.map((z) => z.key));
+  const filesCount = Object.keys(store?.files || {}).filter((k) => zoneKeys.has(k)).length;
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -103,7 +107,7 @@ export function UploadModal({ onClose }) {
           <div>
             <div className="modal-title">Upload data</div>
             <div className="modal-sub">
-              Drop daily exports per source. Each file has its own date-cutoff (any rows past it are ignored). Apply &amp; reload to refresh the dashboard.
+              Drop daily exports per source. Each sales/marketplace file has its own date-cutoff (rows past it are ignored); the Central Warehouse workbook has none — it always uses the latest audit + post-audit movement. Apply &amp; reload to refresh the dashboard.
             </div>
           </div>
           <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
@@ -143,16 +147,40 @@ export function UploadModal({ onClose }) {
 }
 
 function UploadZone({ zone, entry, onUpdate }) {
+  // The central-WH workbook has NO cutoff (D2): it always uses the latest audit
+  // as baseline + post-audit production/movement. We hide the picker for it and
+  // never pass a cutoff to its parser (the engine ignores opts.dateCutoff anyway).
+  const noCutoff = zone.key === "central-wh";
+
   const [stage, setStage] = useState("idle"); // idle | parsing | error | uploaded
   const [error, setError] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [dateCutoff, setDateCutoff] = useState(entry?.dataAsOf || todayISO());
+
+  // D2 persistence fix: re-read this file's OWN stored cutoff whenever the
+  // persisted entry changes (e.g. after a hard refresh re-seeds the store, or
+  // another zone's upload re-renders this one). Without this sync the local
+  // useState initializer only ran at first mount, so a zone could keep showing
+  // a stale/default cutoff while the store held a different per-file value —
+  // making the displayed cutoffs appear to "equalize". Each zone now tracks its
+  // own dataAsOf independently. central-WH is exempt (no cutoff concept).
+  useEffect(() => {
+    if (noCutoff) return;
+    if (entry?.dataAsOf && entry.dataAsOf !== dateCutoff) {
+      setDateCutoff(entry.dataAsOf);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry?.dataAsOf, noCutoff]);
   // AI-assist state — populated asynchronously after a successful parse.
   // aiState: "idle" | "checking" | "done" | "skipped". When the /api/
   // endpoint is unreachable or the env key isn't set we mark "skipped"
   // and the deterministic JS parse stands on its own.
   const [aiState, setAiState] = useState("idle");
   const [anomalies, setAnomalies] = useState([]);
+  // True when the cutoff was changed AFTER a file was uploaded — the stored
+  // cutoff is updated immediately, but the parse still reflects the old cutoff
+  // until the file is re-picked. We surface a small hint for this.
+  const [cutoffDirty, setCutoffDirty] = useState(false);
 
   const isUploaded = !!entry;
 
@@ -162,9 +190,11 @@ function UploadZone({ zone, entry, onUpdate }) {
     setError(null);
     setAiState("idle");
     setAnomalies([]);
+    setCutoffDirty(false); // a fresh parse re-applies the current cutoff
     let parsed;
     try {
-      parsed = await parseByType(zone.key, file, { dateCutoff });
+      // central-WH ignores cutoff entirely (D2) — pass none so intent is explicit.
+      parsed = await parseByType(zone.key, file, noCutoff ? {} : { dateCutoff });
     } catch (e) {
       // Format-guard fallback: ask Claude to identify the file type. If it
       // confidently disagrees with the zone the file was dropped in,
@@ -177,8 +207,15 @@ function UploadZone({ zone, entry, onUpdate }) {
       setStage("error");
       return;
     }
+    // D2: persist each file's OWN cutoff so per-sheet cutoffs survive a hard
+    // refresh (read back independently per zone). central-WH has no cutoff — we
+    // record its audit "as-of"/anchor date instead so the status copy stays
+    // meaningful, and so a re-read never resurrects a bogus picker value.
+    const dataAsOf = noCutoff
+      ? (parsed?.asOf || parsed?.anchorDate || null)
+      : dateCutoff;
     const updated = upsertFile(zone.key, {
-      dataAsOf: dateCutoff,
+      dataAsOf,
       fileName: file.name,
       parsed,
     });
@@ -215,6 +252,22 @@ function UploadZone({ zone, entry, onUpdate }) {
     const updated = removeFile(zone.key);
     onUpdate(updated || { uploadedAt: new Date().toISOString(), files: {} });
     setStage("idle");
+    setCutoffDirty(false);
+  };
+
+  // D2: changing the cutoff updates this zone's local state AND, when a file is
+  // already uploaded, immediately re-persists the new per-file cutoff so it
+  // survives a hard refresh (read back independently per zone — they never
+  // equalize). The cutoff also affects how rows are filtered at parse time, so
+  // we flag the zone "dirty" to nudge a re-pick that re-applies it to the data.
+  const handleCutoffChange = (iso) => {
+    const next = iso || todayISO();
+    setDateCutoff(next);
+    if (isUploaded && next !== entry?.dataAsOf) {
+      const updated = upsertFile(zone.key, { ...entry, dataAsOf: next });
+      onUpdate(updated);
+      setCutoffDirty(true);
+    }
   };
 
   // Brief summary of what was parsed (count of SKUs / rows)
@@ -277,11 +330,19 @@ function UploadZone({ zone, entry, onUpdate }) {
           </div>
           {isUploaded ? (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
-              {entry.fileName} · {summary} · cutoff {fmtDate(entry.dataAsOf)}
+              {entry.fileName} · {summary}
+              {noCutoff
+                ? ` · ${entry.dataAsOf ? `audit ${fmtDate(entry.dataAsOf)}` : "latest audit"} · no cutoff`
+                : ` · cutoff ${fmtDate(entry.dataAsOf)}`}
             </div>
           ) : (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
               Accepts {zone.accept}
+            </div>
+          )}
+          {cutoffDirty && !noCutoff && (
+            <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 4 }}>
+              Cutoff saved. Re-pick the file to re-apply it to the parsed rows.
             </div>
           )}
           {stage === "error" && (
@@ -324,14 +385,28 @@ function UploadZone({ zone, entry, onUpdate }) {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Cutoff
-          </label>
-          <DatePicker
-            value={dateCutoff}
-            onChange={(iso) => setDateCutoff(iso || todayISO())}
-            width={150}
-          />
+          {noCutoff ? (
+            // D2: central-WH has no cutoff picker — it always uses the latest
+            // audit + post-audit movement. Show a note in place of the picker.
+            <span
+              className="muted"
+              title="The central-warehouse workbook always uses its latest audit as the baseline plus all post-audit production and daily-movement rows. There is no cutoff to set."
+              style={{ fontSize: 10.5, fontStyle: "italic", maxWidth: 200, lineHeight: 1.3, textAlign: "right" }}
+            >
+              uses latest audit + post-audit movement — no cutoff
+            </span>
+          ) : (
+            <>
+              <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Cutoff
+              </label>
+              <DatePicker
+                value={dateCutoff}
+                onChange={handleCutoffChange}
+                width={150}
+              />
+            </>
+          )}
 
           {isUploaded ? (
             <button className="btn ghost sm" onClick={handleRemove} title="Remove this file">Remove</button>
@@ -362,8 +437,9 @@ function UploadZone({ zone, entry, onUpdate }) {
 }
 
 // ── DataAsOfPill — topbar entry point for the multi-file uploader ─────
-// Doubles as a status badge: shows whether the dashboard is on sample or
-// live data, plus an upload-arrow so the click affordance is obvious.
+// Doubles as a status badge: shows whether the dashboard is on bundled
+// real-data or freshly-uploaded live data, plus an upload-arrow so the click
+// affordance is obvious. (Bundled data is REAL, never "sample".)
 export function DataAsOfPill({ onClick }) {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -373,14 +449,18 @@ export function DataAsOfPill({ onClick }) {
   }, []);
   const store = loadMultiFile();
   const summary = summariseStore(store);
-  const isLive = summary.count > 0;
+  // Count only files mapping to a current zone so the badge can't read "7/6"
+  // when a retired slot lingers in storage.
+  const zoneKeys = new Set(ZONES.map((z) => z.key));
+  const liveCount = Object.keys(store?.files || {}).filter((k) => zoneKeys.has(k)).length;
+  const isLive = liveCount > 0;
   return (
     <button
       className={"btn" + (isLive ? "" : " ghost")}
       onClick={onClick}
       title={isLive
         ? `Last upload: ${summary.uploadedAt ? new Date(summary.uploadedAt).toLocaleString("en-IN") : "—"} · click to update`
-        : "Dashboard is on bundled sample data — click to upload"}
+        : "Dashboard is on bundled real-data — click to upload newer exports"}
       style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
     >
       <Icon name="download" size={13}/>
@@ -389,7 +469,7 @@ export function DataAsOfPill({ onClick }) {
         background: isLive ? "var(--success)" : "var(--ink-4)",
         display: "inline-block",
       }}/>
-      {isLive ? `Live data · ${summary.count}/${ZONES.length}` : "Upload data"}
+      {isLive ? `Live data · ${liveCount}/${ZONES.length}` : "Upload data"}
     </button>
   );
 }

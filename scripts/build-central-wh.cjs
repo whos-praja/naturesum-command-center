@@ -119,6 +119,19 @@ const BOM = {
   NSACDT30:  [["NSACDSF30", 30],  ["NSPKGACTC30", 30], ["NSPKGACTCBOX", 1]],
 };
 
+// ─── D1 — NON-CONSTRAINING components ────────────────────────────
+// Founder decision (FIX-SPEC D1): these BOM components are quickly/easily
+// arranged (outer cartons + protective juice "air pouches") and must NEVER be
+// the producible bottleneck. They are still LISTED per-SKU for display (with a
+// constrains:false flag) but are excluded from the producible min + binding.
+//   NSPKGCB100 / NSPKGCB250 — Moringa shipping carton boxes.
+//   NSPKGJB300 / NSPKGJB500 — juice air pouches (protective air-wrap).
+// Everything else in a BOM (raw materials, primary pouches, bottles, SFG,
+// droppers/caps, outer product boxes, juice tube/label) STAYS constraining.
+const NON_CONSTRAINING = new Set([
+  "NSPKGCB100", "NSPKGCB250", "NSPKGJB300", "NSPKGJB500",
+]);
+
 // ─── §2d — Normaliser + alias maps ──────────────────────────────
 function norm(s) {
   if (s == null) return "";
@@ -289,34 +302,82 @@ const consumables   = [];  // { name, qty, unit } — cartons, stickers, tape...
 const openingFG = newFG;
 const openingComp = newComp;
 
-// ─── Detect the latest audit sheet ──────────────────────────────
-// Sheet names look like "Audit DDMMYY" (e.g. Audit 050626 = 5 Jun 2026).
-// Parse the name; cross-check with the "As of <date>" text in row 1; pick
-// the sheet with the max date. Falls back to name-date when text is unclear.
+// ─── D7 — Robust latest-audit detection ─────────────────────────
+// Pick the SINGLE latest-dated audit sheet, robust to the naming convention
+// shifting on a future upload. For every sheet whose NAME contains "audit"
+// (in any case) we try to parse a date from the name in several formats
+// (DDMMYY run-together, DD-MM-YY, DD/MM/YYYY, or "5th June 2026" words) and
+// ALSO read the "As of <date>" cell (row ~2, col A). We pick the larger of the
+// two dates as the sheet's effective date, then choose the sheet with the max
+// effective date across all candidates.
+//
+// Tie / quality handling:
+//   - Detailed "V-2"/"V2"/"V-<n>" variants and the partial leading-space
+//     " warehouse inventory" sheet are DOWN-RANKED: on an equal effective date
+//     they lose to a clean primary audit, and they are only ever chosen when
+//     STRICTLY newer than every clean candidate.
+// R-FAILLOUD (FIX-SPEC D7): return null when NO audit sheet is detectable so
+// the caller can throw — never silently fall back to a stale anchor.
+const MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+function monthIndex(word) {
+  if (!word) return -1;
+  return MONTHS.findIndex(x => word.toLowerCase().startsWith(x));
+}
+function mkUTC(yy, mm, dd) {
+  if (!(mm >= 1 && mm <= 12) || !(dd >= 1 && dd <= 31)) return null;
+  if (yy < 100) yy += 2000;
+  const d = new Date(Date.UTC(yy, mm - 1, dd));
+  return isNaN(d.getTime()) ? null : d;
+}
+// Parse a date out of free text (sheet name or "As of" cell). Tries, in order:
+//   words ("5th June 2026"), DD-MM-YY[YY] / DD/MM/YY[YY] / DD.MM.YY[YY],
+//   then a run-together DDMMYY (6 digits) or DDMMYYYY (8 digits).
+function parseFlexibleDate(text) {
+  if (!text) return null;
+  const s = String(text).trim();
+  // 1) "5th June, 2026" / "5 jun 2026" (day month year, words)
+  let m = s.match(/(\d{1,2})(?:st|nd|rd|th)?[\s,]+([a-z]{3,})[\s,]+(\d{2,4})/i);
+  if (m) { const mi = monthIndex(m[2]); if (mi >= 0) { const d = mkUTC(+m[3], mi + 1, +m[1]); if (d) return d; } }
+  // 1b) "June 5, 2026" (month day year, words)
+  m = s.match(/([a-z]{3,})[\s,]+(\d{1,2})(?:st|nd|rd|th)?[\s,]+(\d{2,4})/i);
+  if (m) { const mi = monthIndex(m[1]); if (mi >= 0) { const d = mkUTC(+m[3], mi + 1, +m[2]); if (d) return d; } }
+  // 2) DD-MM-YY[YY] / DD/MM/YY[YY] / DD.MM.YY[YY] (founder always DD-MM)
+  m = s.match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+  if (m) { const d = mkUTC(+m[3], +m[2], +m[1]); if (d) return d; }
+  // 3) run-together DDMMYY (6 digits) or DDMMYYYY (8 digits)
+  m = s.match(/(?<!\d)(\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (m) { const d = mkUTC(+m[3], +m[2], +m[1]); if (d) return d; }
+  m = s.match(/(?<!\d)(\d{2})(\d{2})(\d{4})(?!\d)/);
+  if (m) { const d = mkUTC(+m[3], +m[2], +m[1]); if (d) return d; }
+  return null;
+}
 function detectLatestAudit() {
   const candidates = [];
   for (const name of wb.SheetNames) {
-    const m = name.match(/audit\s+(\d{2})(\d{2})(\d{2})/i);
-    if (!m) continue;
-    const dd = +m[1], mm = +m[2], yy = 2000 + +m[3];
-    // Name year can be a typo (050525 meant 2026) — prefer the "As of" text.
+    if (!/audit/i.test(name)) continue;                       // name must say "audit"
+    const nameDate = parseFlexibleDate(name);
+    // Cross-check the "As of <date>" cell (scan the first few rows of col A).
     const grid = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "", raw: true });
-    const asOfText = String(grid[1]?.[0] || "");
-    const tm = asOfText.match(/(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+),?\s*(\d{4})/i);
-    let date = new Date(Date.UTC(yy, mm - 1, dd));
-    if (tm) {
-      const months = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
-      const mi = months.findIndex(x => tm[2].toLowerCase().startsWith(x));
-      if (mi >= 0) date = new Date(Date.UTC(+tm[3], mi, +tm[1]));
+    let cellDate = null;
+    for (let r = 0; r < 4 && !cellDate; r++) {
+      const txt = String(grid[r]?.[0] || "");
+      if (/as of/i.test(txt) || /\d/.test(txt)) cellDate = parseFlexibleDate(txt) || cellDate;
     }
-    // V-2 / detailed variants share a date with the base — prefer the one
-    // WITHOUT a "V-" suffix unless it's strictly newer (handled by sort).
-    candidates.push({ name, date, isVariant: /v-?\d/i.test(name) });
+    // Effective date = the MAX of name-date and cell-date (D7: cross-check,
+    // choose max). At least one must parse for the sheet to be a candidate.
+    const date = (nameDate && cellDate)
+      ? (nameDate.getTime() >= cellDate.getTime() ? nameDate : cellDate)
+      : (nameDate || cellDate);
+    if (!date) continue;                                       // un-dateable → skip
+    // Down-rank detailed variants ("V-2"/"V2") and the partial " warehouse
+    // inventory" recount so a clean primary audit wins on an equal date.
+    const isVariant = /v-?\d/i.test(name) || /warehouse\s+inventory/i.test(name);
+    candidates.push({ name, date, isVariant });
   }
-  if (!candidates.length) return { name: ANCHOR_SHEET, date: ANCHOR_DATE };
+  if (!candidates.length) return null;                         // R-FAILLOUD signal
   candidates.sort((a, b) => {
     if (b.date.getTime() !== a.date.getTime()) return b.date.getTime() - a.date.getTime();
-    return (a.isVariant ? 1 : 0) - (b.isVariant ? 1 : 0); // non-variant first on tie
+    return (a.isVariant ? 1 : 0) - (b.isVariant ? 1 : 0);     // clean before variant on tie
   });
   return candidates[0];
 }
@@ -336,6 +397,15 @@ function splitAuditTags(name) {
 // ─── §3b — Parse Audit (latest sheet, old/new + 3-bucket) ───────
 function parseAudit() {
   const detected = detectLatestAudit();
+  // R-FAILLOUD (FIX-SPEC D7): no detectable audit sheet → throw, never fall
+  // back to a stale hardcoded anchor (which would emit silently-wrong stock).
+  if (!detected) {
+    throw new Error(
+      'Central Warehouse Workbook: no Audit sheet detectable — expected a sheet whose name contains "audit" with a parseable date ' +
+      '(e.g. "Audit 050626", "Audit 05-06-26", or an "As of <date>" cell). ' +
+      `Sheets present: ${wb.SheetNames.join(", ") || "(none)"}.`
+    );
+  }
   ANCHOR_SHEET = detected.name;
   ANCHOR_DATE  = detected.date;
   const grid = XLSX.utils.sheet_to_json(wb.Sheets[ANCHOR_SHEET], { header: 1, defval: "", raw: true });
@@ -507,14 +577,22 @@ function computeMetrics(balance, asOf) {
   for (const sku of SKUS) {
     const code = sku.code;
     const fgStock = Math.max(0, balance[code] || 0);
-    // Producible
+    // ─── D1 — Producible over CONSTRAINING BOM components only ──────
+    // producible = min over BOM components NOT in NON_CONSTRAINING of
+    // floor(stock / perPack). Non-constraining components (cartons + juice air
+    // pouches) are still LISTED in bomDetail with constrains:false but can
+    // never cap producible nor become the binding component.
     let producible = Infinity, binding = null, bindingMissing = false;
+    const bomDetail = [];
     for (const [ref, perPack] of (BOM[code] || [])) {
-      const cs = Math.max(0, balance[ref] || 0);
-      const cap = Math.floor(cs / perPack);
+      const cs = Math.max(0, balance[ref] || 0);                 // D3: old already folded into balance via audit_open; clamp ≥0
+      const cap = perPack > 0 ? Math.floor(cs / perPack) : Infinity;
+      const constrains = !NON_CONSTRAINING.has(ref);
+      bomDetail.push({ ref, perPack, stock: cs, cap: Number.isFinite(cap) ? cap : null, constrains });
+      if (!constrains) continue;                                 // never the bottleneck
       if (cap < producible) { producible = cap; binding = ref; bindingMissing = cs === 0 && !(ref in openingComp); }
     }
-    if (producible === Infinity) producible = 0;
+    if (producible === Infinity) producible = 0;                 // SAFE: no constraining component → 0
     const totalAvail = fgStock + producible;
 
     // Velocity (depletion = gross_out - returns; sales = depletion - marketing_out)
@@ -594,9 +672,12 @@ function computeMetrics(balance, asOf) {
       monthly = [];                            // SAFE FALLBACK — never throw
     }
 
-    // Worst component cover (across BOM) — uses consumption velocity per component
+    // Worst component cover (across CONSTRAINING BOM components only — D1).
+    // Non-constraining components (cartons/air pouches) are quickly arranged so
+    // they must not drive the SKU's worst-cover bottleneck either.
     let worstComp = null, worstCover = Infinity;
     for (const [ref, perPack] of (BOM[code] || [])) {
+      if (NON_CONSTRAINING.has(ref)) continue;
       const cs = Math.max(0, balance[ref] || 0);
       // Rough consumption velocity: this SKU's sales velocity × perPack (other SKUs not yet folded — done in component pass)
       const vel = sales30 > 0 ? sales30 * perPack : 0;
@@ -617,6 +698,9 @@ function computeMetrics(balance, asOf) {
     fgRows.push({
       code, name: sku.name, variant: sku.variant, price: sku.price, leadDays: sku.leadDays,
       fgStock, oldStock, producible, totalAvail, binding,
+      // D1: per-component BOM detail with constrains flag (cartons + juice air
+      // pouches are constrains:false — listed for display, never bottleneck).
+      bomDetail: Array.isArray(bomDetail) ? bomDetail : [],
       sales30: +sales30.toFixed(3), depletion30: +depletion30.toFixed(3),
       runwayDays, momGrowth: mom, stockValue,
       // ADDITIVE raw data: up to 4 trailing 30-day central-WH sales buckets,
@@ -640,22 +724,32 @@ function computeMetrics(balance, asOf) {
         consumption += sv * perPack;
       }
     }
+    // D8: deplete-only stock — balance[ref] is the audit baseline minus
+    // post-audit production consumption (no inbound/PO sheet), clamped ≥0.
     const stock = Math.max(0, balance[c.ref] || 0);
     const daysCover = consumption > 0 ? Math.round(stock / consumption) : null;
+    // D6: reorder flag = daysCover < leadDays (own lead time). Kept for ALL
+    // components incl. non-constraining (you still reorder cartons) — but a
+    // non-constraining component can NEVER block production (D1), so it is
+    // excluded from `blocks`.
     const reorder = daysCover != null && daysCover < c.leadDays;
-    // Which SKUs does this block? Any SKU where this is the binding component OR cover < sku.leadDays.
-    for (const fg of fgRows) {
-      const recipe = BOM[fg.code] || [];
-      const usesIt = recipe.some(([r]) => r === c.ref);
-      if (!usesIt) continue;
-      if (fg.binding === c.ref || (daysCover != null && daysCover < fg.leadDays)) {
-        blocks.push(fg.code);
+    const constrains = !NON_CONSTRAINING.has(c.ref);            // D1 flag
+    // Which SKUs does this block? Only CONSTRAINING components block: a SKU
+    // where this is the binding component OR cover < sku.leadDays.
+    if (constrains) {
+      for (const fg of fgRows) {
+        const recipe = BOM[fg.code] || [];
+        const usesIt = recipe.some(([r]) => r === c.ref);
+        if (!usesIt) continue;
+        if (fg.binding === c.ref || (daysCover != null && daysCover < fg.leadDays)) {
+          blocks.push(fg.code);
+        }
       }
     }
     compRows.push({
       ref: c.ref, name: c.name, type: c.type, unit: c.unit, leadDays: c.leadDays,
       stock, oldStock: Math.max(0, oldComp[c.ref] || 0),
-      consumption: +consumption.toFixed(3), daysCover, reorder, blocks,
+      consumption: +consumption.toFixed(3), daysCover, reorder, constrains, blocks,
     });
   }
 
@@ -726,6 +820,10 @@ export const CENTRAL_WH_DATA = ${JSON.stringify({
   anchorSheet: ANCHOR_SHEET,
   asOf: dateKey(asOf),
   config: { MERGE_OLD_SB500, RANGE_RULE, W30, W60 },
+  // D1: components that can never be the producible bottleneck (cartons + juice
+  // air pouches). Mirrors the NON_CONSTRAINING set in the engine; emitted so
+  // data.js / the UI can label them consistently.
+  nonConstraining: [...NON_CONSTRAINING],
   fg: Object.fromEntries(fgRows.map(r => [r.code, r])),
   components: Object.fromEntries(compRows.map(r => [r.ref, r])),
   // Non-BOM audit lines, split per founder's request:

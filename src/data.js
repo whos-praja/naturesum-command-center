@@ -5,11 +5,11 @@
 // scripts/import-marketplace-data.cjs for the regeneration pipeline.
 import { REAL_MARKETPLACE_DATA as BUNDLED_MP, REAL_DATA_SNAPSHOT_DATE } from "./realMarketplaceData.js";
 
-// Nitin's live inventory sheet (DATA-005 sample) — 72-day per-channel
-// movement log + central warehouse stock (as of 5-May-2026). Higher
-// precedence than the marketplace ledgers for: central WH stock (real
-// physical count) and Amazon daily velocity (72-day avg beats 1-day proxy).
-import { NITIN_DATA as BUNDLED_NITIN } from "./realNitinData.js";
+// ⚠️ Nitin's live inventory sheet (realNitinData.js) is NO LONGER imported
+// (FIX-SPEC V9, GROUND-TRUTH §3.5). Its 72-day log is warehouse MOVEMENT, not
+// sales, and was inflating velocity; its warehouse-stock leg conflicted with
+// the central-WH engine. The engine is the single warehouse-FG authority and
+// velocity is sales-only — so the entire nitin runtime path is severed.
 
 // Founder's Agency Channel-wise Sales Sheet, pre-parsed at build time and
 // bundled. Per truth table, this is the source-of-truth for Amazon channel
@@ -47,7 +47,7 @@ const CWH_CONSUMABLES  = CWH_SRC?.consumables || [];
 // on any cell that supports override (velocity, growth, leadTime, etc).
 // When set, the override wins over derived/uploaded numbers. Applied as
 // the LAST step of per-SKU derivation so it beats every real-data leg
-// in the precedence chain (agency > Manage Orders > Nitin > stub).
+// in the precedence chain (agency > Manage Orders > stub).
 function _readSkuOverrides() {
   if (typeof window === "undefined") return {};
   const out = {};
@@ -69,13 +69,12 @@ const __overrideMap = _readSkuOverrides();
 // SKUs/channels not present in the upload fall back to the bundled real
 // data, which themselves fall back to stub. Reads localStorage at
 // init time so refreshes pick up the latest upload without code change.
-import { loadMultiFile, buildRealMarketplaceOverride, buildNitinOverride, buildCentralWhOverride } from "./lib/multiFileStore.js";
+import { loadMultiFile, buildRealMarketplaceOverride, buildCentralWhOverride } from "./lib/multiFileStore.js";
 // readParam → the amber-runway threshold (and other tunables) so the default
 // render path honors the ⚙ Settings value instead of a hardcoded 30 (R21).
 import { readParam } from "./lib/formulaParams.js";
 const __liveStore = (typeof window !== "undefined") ? loadMultiFile() : null;
 const __liveMp    = buildRealMarketplaceOverride(__liveStore) || {};
-const __liveNitin = buildNitinOverride(__liveStore);
 function _mergeBundledAndLive(code) {
   const b = BUNDLED_MP[code] || {};
   const l = __liveMp[code] || {};
@@ -93,7 +92,6 @@ const REAL_MARKETPLACE_DATA = new Proxy({}, {
   ownKeys: () => [...new Set([...Object.keys(BUNDLED_MP), ...Object.keys(__liveMp)])],
   getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
 });
-const NITIN_DATA = __liveNitin || BUNDLED_NITIN;
 
 // ── MAX-MoM growth (founder rule, 2026-06) ───────────────────────────────
 // From a monthly sales array [m0,m1,m2,m3] (MOST-RECENT FIRST), compute the
@@ -262,49 +260,48 @@ const NSData = (function () {
   //     + outer carton.
   //   - Producible FG = min(input capacity, min over pkg capacities).
   //
-  // ITEM_QTY is the canonical "what's in the warehouse right now" lookup
-  // keyed by refCode (matches Master sheet items). SKU_RECIPE is the
-  // per-SKU BOM (which item it consumes, how much per pack).
-  const ITEM_QTY = {
-    // Semi-FG
-    NSJOF100:     0,        // Jatamansi Hair Oil filled Bottles
-    NSACDSF30:    9073,     // AC Tea Dip Sachets (Filled)
-    NSACTPF:      0,        // AC Tea Pouches (Green, Filled)
-    // Raw
-    NSMLPR:       200,      // Moringa Leaves Powder
-    NSSBPR:       0,        // SB Powder (Raw)
-    NSSBDBR:      946.79,   // SB Dry Berries (Raw)
-    NSSBJPLP:     0,        // SB Juice Pulp
-    NSSBOR:       5,        // SB Face Oil (Raw)
-    // Packaging — bottles / pouches / boxes / labels
-    NSPKGCB100:   950,      // 100 gram Carton Box
-    NSPKGCB250:   1675,     // 250 gm Carton Box
-    NSPKGMP100:   0,        // Moringa Powder Empty Pouch (100 gm)
-    NSPKGMP250:   0,        // Moringa Powder Empty Pouch (250 gm)
-    NSPKGSBP100:  1481,     // SB Powder Empty Pouches (100 gm)
-    NSPKGSBP250:  2997,     // SB Powder Empty Pouches (250 gm)
-    NSPKGSBP500:  2972,     // SB Powder Empty Pouches (500 gm)
-    NSPKGDBP100:  67,       // Dry Berries Empty Pouches (100 gm)
-    NSPKGDBP250:  916,      // Dry Berries Empty Pouches (250 gm)
-    NSPKGDBP500:  3055,     // Dry Berries Empty Pouches (500 gm)
-    NSPKGJB300:   1025,     // Small Air Pouch for Juice (300 ml)
-    NSPKGJB500:   483,      // Large Air Pouch for Juice (500 ml)
-    NSPKGJBOT300: 0,        // Juice Bottle 300 ml
-    NSPKGJBOT500: 0,        // Juice Bottle 500 ml
-    NSPKGJTUB300: 0,        // Juice Tube 300 ml
-    NSPKGJTUB500: 0,        // Juice Tube 500 ml
-    NSPKGJLBL300: 0,        // Juice Label 300 ml
-    NSPKGJLBL500: 0,        // Juice Label 500 ml
-    NSPKGBOB15:   1014,     // SB Faceoil Empty Box 15 ml
-    NSPKGBOB30:   123,      // SB Faceoil Empty Box 30 ml
-    NSPKGBOBT15:  497,      // SB Oil Empty Bottles 15 ml (uncapped)
-    NSPKGBOBT30:  26,       // SB Face Oil Empty Bottle 30 ml
-    NSPKGBOCAP:   1050,     // SB Face Oil Bottle Caps (shared 15/30)
-    NSPKGBODROP:  1050,     // SB Faceoil Droppers (shared 15/30)
-    NSPKGJOB100:  533,      // Jatamansi Empty Box with print
-    NSPKGACTC30:  44350,    // Acacia Catechu Tea Bag Empty Pouch (green)
-    NSPKGACTCBOX: 2543,     // Acacia Catechu Tea Bag Empty Outer Box
-  };
+  // ⚠️ ITEM_QTY (the legacy hardcoded "what's in the warehouse" map) has been
+  // REMOVED (FIX-SPEC, 2026-06). It was STALE (Moringa raw 200 vs real 100,
+  // Moringa pouch 0 vs real 2935, dry berry 946.79 vs audit) and was the root
+  // cause of the wrong Materials-breakdown / producible / bottleneck numbers.
+  // The central-WH engine (CWH_COMP / CWH_FG[code].bomDetail) is now the SINGLE
+  // source for every component stock. See `compStock()` below.
+  //
+  // SKU_RECIPE is still the per-SKU BOM *structure* (which item it consumes, how
+  // much per pack, display name/unit/label) — but the QUANTITIES come from the
+  // engine, never from a hardcoded literal.
+
+  // Component stock lookup — engine-sourced, with a safe fallback chain.
+  // 1) CWH_COMP[ref].stock  (component pass: audit baseline − post-audit
+  //    production consumption, clamped ≥0).
+  // 2) the binding-SKU's bomDetail stock (same number; belt-and-suspenders for
+  //    components that only appear inside a SKU's bomDetail).
+  // 3) 0 — never undefined/NaN, so capacity arithmetic can never white-screen.
+  // SAFE FALLBACK: tolerates a missing/half-baked engine payload.
+  const _bomStockIndex = (() => {
+    const idx = {};
+    for (const code of Object.keys(CWH_FG)) {
+      for (const d of (CWH_FG[code]?.bomDetail || [])) {
+        if (d && d.ref != null && Number.isFinite(d.stock)) idx[d.ref] = d.stock;
+      }
+    }
+    return idx;
+  })();
+  function compStock(ref) {
+    if (!ref) return 0;
+    const c = CWH_COMP[ref];
+    if (c && Number.isFinite(c.stock)) return c.stock;
+    if (Number.isFinite(_bomStockIndex[ref])) return _bomStockIndex[ref];
+    return 0;
+  }
+  // D1 non-constraining set (cartons + juice air pouches) — read from whichever
+  // engine payload won (uploaded workbook over bundled). SAFE FALLBACK to the
+  // known set so the flag is correct even if the payload omits `nonConstraining`.
+  const NON_CONSTRAINING = new Set(
+    (Array.isArray(CWH_SRC?.nonConstraining) && CWH_SRC.nonConstraining.length)
+      ? CWH_SRC.nonConstraining
+      : ["NSPKGCB100", "NSPKGCB250", "NSPKGJB300", "NSPKGJB500"]
+  );
 
   // Per-SKU recipe — kind (raw/semi), the input item, and packaging components.
   // Display labels in the popover: SFG / RM / PKG1 / PKG2 / …
@@ -618,11 +615,12 @@ const NSData = (function () {
 
   const inventory = skus.map((s) => {
     const opsRaw = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
-    // Override central WH FG stock with Nitin's real physical count when
-    // available (5-May-2026 snapshot). Falls back to stub for any SKU not
-    // in the sheet.
-    const nitinFg = NITIN_DATA?.warehouseInventory?.fg?.[s.code];
-    const ops = nitinFg != null ? { ...opsRaw, fg: nitinFg } : opsRaw;
+    // ⚠️ Legacy `nitin` warehouse-FG synth path REMOVED (FIX-SPEC, 2026-06).
+    // It was a SECOND, conflicting warehouse source (Nitin's 5-May daily sheet)
+    // racing the central-WH engine. The engine (CWH_FG, applied in the overlay
+    // below) is now the single warehouse-FG authority; `opsRaw.fg` is only a
+    // stub fallback for any SKU the engine doesn't cover.
+    const ops = opsRaw;
     const recipe = SKU_RECIPE[s.code];
     const ch = CHANNEL_MIX[s.code] || { amazon: 0, shopify: 0, flipkart: 0, blinkit: 0 };
     const totalChUnits = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) || 0;
@@ -652,54 +650,84 @@ const NSData = (function () {
       blinkit:  real.blinkit  ? "real" : "stub",
     };
 
-    // Build the per-SKU input rows from the recipe + Live ITEM_QTY snapshot.
-    // Exactly one of `sfg`/`rm` is populated; the other stays null and the UI
-    // will render an "N/A" row in its slot.
+    // Build the per-SKU input rows from the recipe + the CENTRAL-WH ENGINE
+    // component stock (NOT the killed ITEM_QTY map). Exactly one of `sfg`/`rm`
+    // is populated; the other stays null and the UI renders an "N/A" row.
+    //
+    // D1 — each row carries a `constrains` flag (false for cartons + juice air
+    // pouches). `capacity` is the REAL pack-equivalent (for honest display); the
+    // UI's bottleneck/producible math filters on `constrains` so a "quickly-
+    // arranged" carton/air-pouch can never become the bottleneck — matching the
+    // engine's producible, which excludes them.
+    const mkLead = (ref) => {
+      const fromEngine = CWH_COMP[ref]?.leadDays;
+      return Number.isFinite(fromEngine) ? fromEngine : (COMPONENT_LEAD_TIMES[ref] ?? null);
+    };
     let sfg = null, rm = null;
     if (recipe) {
-      const inputQty = ITEM_QTY[recipe.input.refCode] ?? 0;
+      const ref = recipe.input.refCode;
+      const inputQty = compStock(ref);                       // engine-sourced
+      const constrains = !NON_CONSTRAINING.has(ref);
+      // Capacity = how many FG packs this input alone can make. Clamp ≥0
+      // (negative engine stock shouldn't contaminate caps). Non-constraining →
+      // Infinity so it never becomes the bottleneck (D1).
+      const rawCap = recipe.input.perPack > 0 ? Math.max(0, Math.floor(inputQty / recipe.input.perPack)) : 0;
       const inputRow = {
         label:   recipe.kind === "semi" ? "SFG" : "RM",
-        refCode: recipe.input.refCode,
+        refCode: ref,
         name:    recipe.input.name,
         unit:    recipe.input.unit,
         qty:     inputQty,
+        stock:   inputQty,
         perPack: recipe.input.perPack,
-        // Per-input capacity = how many FG packs this input alone can make.
-        // Bug #12 — clamp non-negative: negative component stocks (a real
-        // data-quality issue surfaced by the central WH engine) shouldn't
-        // contaminate downstream capacity arithmetic with negative caps.
-        capacity: recipe.input.perPack > 0 ? Math.max(0, Math.floor(inputQty / recipe.input.perPack)) : 0,
-        leadTime: COMPONENT_LEAD_TIMES[recipe.input.refCode] ?? null,
+        capacity: rawCap,                                    // real pack-equivalent
+        capacityReal: rawCap,
+        constrains,                                          // D1 — UI filters on this
+        leadTime: mkLead(ref),
       };
       if (recipe.kind === "semi") sfg = inputRow;
       else rm = inputRow;
     }
     const pkgList = (recipe?.pkg || []).map((p, idx) => {
-      const qty = ITEM_QTY[p.refCode] ?? 0;
+      const qty = compStock(p.refCode);                      // engine-sourced
+      const constrains = !NON_CONSTRAINING.has(p.refCode);
+      const rawCap = p.unitsPerPack > 0 ? Math.max(0, Math.floor(qty / p.unitsPerPack)) : 0;
       return {
         label:        `PKG${idx + 1}`,
         refCode:      p.refCode,
         name:         p.name,
         unit:         p.unit,
         qty,
+        stock:        qty,
         unitsPerPack: p.unitsPerPack,
-        // Same non-negative clamp (Bug #12).
-        capacity:     p.unitsPerPack > 0 ? Math.max(0, Math.floor(qty / p.unitsPerPack)) : 0,
-        leadTime:     COMPONENT_LEAD_TIMES[p.refCode] ?? null,
+        capacity:     rawCap,                                // real pack-equivalent
+        capacityReal: rawCap,
+        constrains,                                          // D1 — UI filters on this
+        leadTime:     mkLead(p.refCode),
       };
     });
 
-    // Producible FG = the binding constraint across input + every pkg component.
-    let producibleFG;
-    if (!recipe || (sfg == null && rm == null)) {
+    // Producible FG + binding — sourced from the CENTRAL-WH ENGINE (CWH_FG),
+    // which already excludes NON_CONSTRAINING components (cartons/air pouches)
+    // from the min and never lets them bind. We DON'T recompute it locally from
+    // ITEM_QTY any more (that produced the phantom-pouch 0). SAFE FALLBACK: if
+    // the engine has no row for this SKU, fall back to a local min over
+    // CONSTRAINING rows only (still excludes cartons), then 0 — never NaN.
+    const cwhFgRow = CWH_FG[s.code] || null;
+    let producibleFG, bindingComponent;
+    if (cwhFgRow && Number.isFinite(cwhFgRow.producible)) {
+      producibleFG = Math.max(0, cwhFgRow.producible);
+      bindingComponent = cwhFgRow.binding || null;
+    } else if (!recipe || (sfg == null && rm == null)) {
       producibleFG = 0;
+      bindingComponent = null;
     } else {
-      const inputCap = (sfg || rm).capacity;
-      const pkgCaps  = pkgList.map(p => p.capacity);
-      producibleFG = Math.min(inputCap, ...(pkgCaps.length ? pkgCaps : [Infinity]));
+      const constrainingRows = [sfg, rm, ...pkgList].filter(r => r && r.constrains);
+      const caps = constrainingRows.map(r => r.capacityReal);
+      producibleFG = caps.length ? Math.max(0, Math.min(...caps)) : 0;
       if (!isFinite(producibleFG)) producibleFG = 0;
-      producibleFG = Math.max(0, producibleFG); // Bug #12 — never negative
+      const bindRow = constrainingRows.find(r => r.capacityReal === producibleFG);
+      bindingComponent = bindRow?.refCode || null;
     }
 
     const warehouseBreakdown = {
@@ -716,7 +744,14 @@ const NSData = (function () {
       // call sites should switch to `inputs.{sfg,rm,pkg}`.
       semiFg:       sfg?.qty ?? 0,
       rawMaterial:  rm?.qty ?? 0,
-      packaging:    pkgList.length ? Math.min(...pkgList.map(p => p.qty)) : 0,
+      // Legacy "packaging" scalar = the tightest CONSTRAINING pkg stock (D1:
+      // cartons/air pouches excluded so they don't drag this to 0). Falls back
+      // to the first pkg when none constrain.
+      packaging:    (() => {
+        const con = pkgList.filter(p => p.constrains);
+        if (con.length) return Math.min(...con.map(p => p.qty));
+        return pkgList.length ? Math.min(...pkgList.map(p => p.qty)) : 0;
+      })(),
       perPacketRaw: (rm || sfg)?.perPack || 0.1,
       codes: {
         semiFg:      sfg?.refCode || null,
@@ -724,6 +759,10 @@ const NSData = (function () {
         packaging:   pkgList[0]?.refCode || null,
       },
       producibleFG,
+      // D1 — authoritative binding component (engine-sourced; never a carton/air
+      // pouch). The overlay re-affirms this from CWH_FG; set here too for SKUs
+      // the engine doesn't cover.
+      bindingComponent,
     };
 
     const total = totalStock.warehouse + totalStock.amazonFBA + totalStock.flipkart + totalStock.blinkit;
@@ -746,16 +785,12 @@ const NSData = (function () {
       flipkart: stubVel * (ch.flipkart / denomUnits),
       blinkit:  stubVel * (ch.blinkit  / denomUnits),
     };
-    // Nitin's 72-day daily movement log — preferred when present because
-    // it's a multi-day average instead of the 1-day Amazon proxy (and gives
-    // us "offline" + "marketing" demand legs the marketplace exports miss).
-    const nitinCh = NITIN_DATA?.dailyMovement?.byCode?.[s.code]?.channels;
-    const nitinAmazonDaily   = nitinCh?.amazon?.dailyOut;
-    const nitinFlipkartDaily = nitinCh?.flipkart?.dailyOut;
-    const nitinBlinkitDaily  = nitinCh?.blinkit?.dailyOut;
-    const nitinWebsiteDaily  = nitinCh?.website?.dailyOut;
-    const nitinOfflineDaily  = nitinCh?.offline?.dailyOut;
-    const nitinMarketingDaily= nitinCh?.marketing?.dailyOut;
+    // ⚠️ Nitin's 72-day daily-movement velocity legs REMOVED (FIX-SPEC V9,
+    // GROUND-TRUTH §3.5). That log is WAREHOUSE MOVEMENT (dominated by bulk
+    // replenishment shipments to marketplace WHs), not SALES, so it must not
+    // feed velocity / runway / growth / reorder. Velocity is now sales-only
+    // (agency → native sales → shopify). The central-WH engine still owns the
+    // physical FG count + producible + components.
 
     // Agency Channel-wise Sales Sheet — founder's truth-table source for
     // Amazon velocity + growth. Wins over every other Amazon-velocity
@@ -771,20 +806,102 @@ const NSData = (function () {
     //   1. Agency Channel-wise Sales Sheet (TOP) — `amazon` row dailyOut
     //   2. Amazon "Manage Orders" 32-day FBA daily (MCF intentionally excluded —
     //      MCF report is not part of this version's data feed, per founder)
-    //   3. Nitin's 72-day daily-movement avg
-    //   4. 1-day FBA ledger proxy
+    //   3. 1-day FBA ledger proxy
+    //   (Nitin's 72-day movement avg REMOVED — it is warehouse movement, not
+    //    sales; GROUND-TRUTH §3.5.)
     const orderDailyAmz = real.amazon?.orders
       ? (real.amazon.orders.dailyFba || 0)
       : null;
-    const realAmazonDaily   = agencyAmazonDaily ?? orderDailyAmz ?? nitinAmazonDaily ?? real.amazon?.totalShippedToday ?? null;
-    // For the other channels, the native marketplace exports are the truth.
-    // Agency sheet acts as a fallback ONLY when the native export is missing.
-    const realShopifyDaily  = (real.shopify?.sales30d != null ? real.shopify.sales30d  / 30 : null) ?? agencyShopifyDaily  ?? nitinWebsiteDaily;
-    const realFlipkartDaily = (real.flipkart?.sales30d != null ? real.flipkart.sales30d / 30 : null) ?? agencyFlipkartDaily ?? nitinFlipkartDaily;
-    const realBlinkitDaily  = (real.blinkit?.totalSales30d != null ? real.blinkit.totalSales30d / 30 : null) ?? agencyBlinkitDaily ?? nitinBlinkitDaily;
-    // Offline + marketing demand the marketplace ledgers don't capture —
-    // gets added to central WH base velocity so total runway accounts for it.
-    const extraOffMktDaily  = (nitinOfflineDaily ?? 0) + (nitinMarketingDaily ?? 0);
+
+    // ── D5 — MAX(30-day rate, 14-day rate) per channel ────────────────
+    // Velocity = MAX(sales30d/30, sales14d/14) so we plan for the HIGHER recent
+    // demand (conservative — never under-stock). Blinkit uses its 15-day bucket
+    // (sales15d/15) since the panel exposes 15d not 14d; the agency sheet is
+    // also 15d. Where no short-window bucket is available we fall back to the
+    // 30-day rate and FLAG it (velocityWindow.<ch> = "30d-only").
+    // SAFE FALLBACK: every helper tolerates null/NaN and never emits NaN/Inf.
+    const velFlag = {};   // ch → "max(30,14)" | "max(30,15)" | "30d-only"
+    // Compute MAX(rate30, rateShort) given total units in each window.
+    // shortDays is 14 or 15. Returns { daily, flag } or null when no 30d signal.
+    const maxRate = (units30, unitsShort, shortDays, chKey) => {
+      const has30 = Number.isFinite(units30);
+      const hasShort = Number.isFinite(unitsShort) && shortDays > 0;
+      if (!has30 && !hasShort) return null;
+      const rate30 = has30 ? units30 / 30 : null;
+      const rateShort = hasShort ? unitsShort / shortDays : null;
+      if (rate30 != null && rateShort != null) {
+        velFlag[chKey] = `max(30,${shortDays})`;
+        return Math.max(rate30, rateShort);
+      }
+      // Only one window present → use it; flag when the short window is missing.
+      if (rate30 != null) { velFlag[chKey] = "30d-only"; return rate30; }
+      velFlag[chKey] = `${shortDays}d-only`;
+      return rateShort;
+    };
+
+    // Amazon ORDERS leg (excludes website D2C — that's the shopify leg).
+    // Agency exposes sales30d + sales15d; fall back to the orders-feed/ledger
+    // daily proxies (single-window → 30d-only flag handled below).
+    let realAmazonDaily;
+    if (agencyCh?.amazon && (Number.isFinite(agencyCh.amazon.sales30d) || Number.isFinite(agencyCh.amazon.sales15d))) {
+      realAmazonDaily = maxRate(agencyCh.amazon.sales30d, agencyCh.amazon.sales15d, 15, "amazon");
+    } else {
+      realAmazonDaily = agencyAmazonDaily ?? orderDailyAmz ?? real.amazon?.totalShippedToday ?? null;
+      if (realAmazonDaily != null) velFlag.amazon = "30d-only";
+    }
+    // Shopify / website D2C leg. Native CSV has sales14d (live uploads) — use it
+    // for max(30,14); bundled shopify has only 30d → 30d-only fallback.
+    let realShopifyDaily;
+    if (real.shopify && (Number.isFinite(real.shopify.sales30d) || Number.isFinite(real.shopify.sales14d))) {
+      realShopifyDaily = maxRate(real.shopify.sales30d, real.shopify.sales14d, 14, "shopify");
+    } else if (agencyCh?.shopify && (Number.isFinite(agencyCh.shopify.sales30d) || Number.isFinite(agencyCh.shopify.sales15d))) {
+      realShopifyDaily = maxRate(agencyCh.shopify.sales30d, agencyCh.shopify.sales15d, 15, "shopify");
+    } else {
+      realShopifyDaily = agencyShopifyDaily ?? null;
+      if (realShopifyDaily != null) velFlag.shopify = "30d-only";
+    }
+    // Flipkart leg. Native FK has sales14d; agency FK has sales15d.
+    let realFlipkartDaily;
+    if (real.flipkart && (Number.isFinite(real.flipkart.sales30d) || Number.isFinite(real.flipkart.sales14d))) {
+      realFlipkartDaily = maxRate(real.flipkart.sales30d, real.flipkart.sales14d, 14, "flipkart");
+    } else if (agencyCh?.flipkart && (Number.isFinite(agencyCh.flipkart.sales30d) || Number.isFinite(agencyCh.flipkart.sales15d))) {
+      realFlipkartDaily = maxRate(agencyCh.flipkart.sales30d, agencyCh.flipkart.sales15d, 15, "flipkart");
+    } else {
+      realFlipkartDaily = agencyFlipkartDaily ?? null;
+      if (realFlipkartDaily != null) velFlag.flipkart = "30d-only";
+    }
+    // Blinkit leg. Native panel = per-WH sales15d summed (blinkit total15d) for
+    // max(30,15); agency blinkit has sales15d. Fall back to total30d/30.
+    const blinkitTotal15d = (() => {
+      const b = real.blinkit;
+      if (!b) return null;
+      if (Number.isFinite(b.totalSales15d)) return b.totalSales15d;
+      // Aggregate per-WH sales15d when the total isn't precomputed.
+      if (b.byWh && typeof b.byWh === "object") {
+        let sum = 0, seen = false;
+        for (const wh of Object.keys(b.byWh)) {
+          const v = b.byWh[wh]?.sales15d;
+          if (Number.isFinite(v)) { sum += v; seen = true; }
+        }
+        if (seen) return sum;
+      }
+      return null;
+    })();
+    let realBlinkitDaily;
+    if (real.blinkit && (Number.isFinite(real.blinkit.totalSales30d) || Number.isFinite(blinkitTotal15d))) {
+      realBlinkitDaily = maxRate(real.blinkit.totalSales30d, blinkitTotal15d, 15, "blinkit");
+    } else if (agencyCh?.blinkit && (Number.isFinite(agencyCh.blinkit.sales30d) || Number.isFinite(agencyCh.blinkit.sales15d))) {
+      realBlinkitDaily = maxRate(agencyCh.blinkit.sales30d, agencyCh.blinkit.sales15d, 15, "blinkit");
+    } else {
+      realBlinkitDaily = agencyBlinkitDaily ?? null;
+      if (realBlinkitDaily != null) velFlag.blinkit = "30d-only";
+    }
+    // ⚠️ Nitin offline+marketing addend REMOVED (FIX-SPEC V9, GROUND-TRUTH
+    // §3.5). It was warehouse movement, not sales, and inflated velocity by
+    // up to ~36% on some SKUs. The minor direct-WH-sales leg is not isolable
+    // from the current sales exports, so it is 0 (a SAFE finite default that
+    // keeps the cascade math NaN-free); derive it from a real direct-WH-sales
+    // export if one is added later.
 
     // For Amazon channel: combine real Amazon + real Shopify when either
     // has signal; otherwise fall back to the stub combined value.
@@ -807,14 +924,26 @@ const NSData = (function () {
       flipkart: real.flipkart ? "real"  : "stub",
       blinkit:  real.blinkit  ? "real"  : "stub",
     };
+    // D5 — which window each channel's velocity used: "max(30,14)" / "max(30,15)"
+    // / "30d-only" (short bucket unavailable → fell back to 30d, flagged). The
+    // amazon channel is the Amazon-orders + Shopify-D2C fold, so we surface the
+    // tighter (more-cautious) of the two legs' flags. SAFE: defaults to null.
+    const velocityWindow = {
+      amazon:   velFlag.shopify === "30d-only" || velFlag.amazon === "30d-only"
+                  ? (velFlag.amazon || velFlag.shopify || null)
+                  : (velFlag.amazon || velFlag.shopify || null),
+      flipkart: velFlag.flipkart || null,
+      blinkit:  velFlag.blinkit  || null,
+      shopify:  velFlag.shopify  || null,
+    };
 
-    // Total velocity now = sum of channel velocities + warehouse own.
-    // Warehouse own velocity ≈ 0 once Shopify is folded into Amazon and
-    // the SKU has full coverage, but we preserve any residual stub share.
-    const stubChannelShare = (ch.amazon + ch.shopify + ch.flipkart + ch.blinkit) / denomUnits;
-    // Warehouse base velocity = whatever isn't claimed by marketplaces +
-    // Nitin's offline + marketing demand (shipped from central WH directly).
-    const whBaseVelocity = r1(stubVel * Math.max(0, 1 - stubChannelShare) + extraOffMktDaily);
+    // Total velocity = sum of per-channel SALES velocities (GROUND-TRUTH §3.5).
+    // Warehouse own (direct-WH) velocity is the MINOR direct-WH-sales leg only —
+    // not isolable from current exports, so 0. It is NOT the stub channel-share
+    // residual (that double-counted demand the marketplace legs already carry)
+    // and NOT Nitin warehouse movement (removed). Kept as a finite SAFE default
+    // so the cascade math is never NaN, and so total velocity == channel sales.
+    const whBaseVelocity = 0;
     const channelTotalVel = channelVelocity.amazon + channelVelocity.flipkart + channelVelocity.blinkit;
     // If we have ANY real signal, trust the sum-of-channels. Otherwise keep ops.vel as before.
     const hasRealSignal = velocitySource.amazon === "real" || velocitySource.flipkart === "real" || velocitySource.blinkit === "real";
@@ -844,9 +973,9 @@ const NSData = (function () {
     // hardcoded May-2026 mix.
     // Splits express units/30d. We multiply the per-channel daily rate by 30
     // rather than reading `real.<channel>.<sales-field>` directly — because
-    // `realFooDaily` may have come from Nitin's daily-movement log even when
-    // the corresponding marketplace export is null. Reading the marketplace
-    // field unconditionally would crash for SKUs covered only by Nitin.
+    // `realFooDaily` may have come from the agency sheet's daily-out leg even
+    // when the corresponding native marketplace export is null. Reading the
+    // marketplace field unconditionally would crash for agency-only SKUs.
     const realSplits = {
       amazon:   realAmazonDaily   != null ? Math.round(realAmazonDaily   * 30) : ch.amazon,
       shopify:  realShopifyDaily  != null ? Math.round(realShopifyDaily  * 30) : ch.shopify,
@@ -998,6 +1127,9 @@ const NSData = (function () {
       // Per-channel "real | stub" marker — set when we substituted real
       // export data into the velocity. UI uses this to show provenance.
       velocitySource,
+      // D5 — which window drove each channel's velocity (max(30,14)/max(30,15)/
+      // 30d-only). UI can flag SKUs where the short bucket was unavailable.
+      velocityWindow,
       cascade: {
         whStock:       ops.fg,
         whBaseVelocity,
@@ -1110,6 +1242,25 @@ const NSData = (function () {
     // replenishment lead time. (Fixes engine reorder=false on stockout, R12.)
     next.reorder = cwhSellable <= 0
       || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime);
+
+    // ── D4 — per-SKU TOTAL stock value (all locations × SP, each unit once) ──
+    // stockValue stays FG-only (WH finished goods × SP) per spec; totalValue is
+    // the all-locations roll-up the headline card sums: WH new + WH old +
+    // Amazon FBA + Flipkart + Blinkit, each counted ONCE (FK is a physically
+    // separate pool — no double-count with WH). oldStockValue is the WH old-
+    // stock line (counted in totalValue, EXCLUDED from runway). SP basis =
+    // pricing.sp, MRP fallback for the two TBD SKUs. SAFE FALLBACK: every term
+    // coerces to 0, so a missing field can never NaN the dashboard total.
+    const spUnit = sku.pricing?.sp ?? sku.pricing?.mrp ?? 500;
+    const whNewUnits = next.stock.warehouse || 0;
+    const whOldUnits = next.centralWhOldStock || 0;
+    const allLocationUnits = whNewUnits + whOldUnits
+                           + (next.stock.amazonFBA || 0)
+                           + (next.stock.flipkart  || 0)
+                           + (next.stock.blinkit   || 0);
+    next.totalValue    = allLocationUnits * spUnit;   // all locations × SP
+    next.oldStockValue = whOldUnits * spUnit;          // WH old-stock value line
+    next.allLocationUnits = allLocationUnits;          // exposed for UI sums
     return next;
   }).map((sku) => {
     // ── FINAL STEP — apply per-SKU overrides from Formulas tab ──
@@ -1137,9 +1288,16 @@ const NSData = (function () {
       next.runwayStatus = next.velocity <= 0 ? "amber"
         : next.runway <= next.leadTime ? "red"
         : next.runway < 30 ? "amber" : "green";
-      // stockValue still uses original `price` — pricing object is unchanged.
+      // D4 — keep stockValue FG-ONLY (WH finished goods × SP) even after an
+      // override (the prior code flipped it to total-basis, double-meaning the
+      // field and inflating at-risk value — AUDIT CWH-13). totalValue carries
+      // the all-locations roll-up instead.
       const px = sku.pricing?.sp ?? sku.pricing?.mrp ?? 500;
-      next.stockValue = next.totalStock * px;
+      next.stockValue = (next.stock.warehouse || 0) * px;
+      const whOldUnits = next.centralWhOldStock || 0;
+      next.allLocationUnits = next.totalStock + whOldUnits;
+      next.totalValue = next.allLocationUnits * px;
+      next.oldStockValue = whOldUnits * px;
     }
     next.__hasOverrides = Object.keys(ov);
     return next;
@@ -1159,6 +1317,66 @@ const NSData = (function () {
       }
     }
     return map;
+  })();
+
+  // ── D6 — Per-component reorder coverage (raw materials + primary packaging) ──
+  // Exposed on NSData so the UI can render component reorder DATES alongside FG.
+  // Each entry mirrors the engine component row + a computed reorder horizon:
+  //   reorderByDays = daysCover − leadDays  → days from as-of until the latest
+  //   safe order date for that component (NEGATIVE = overdue). When daysCover is
+  //   null (no consumption signal) the component isn't draining → no reorder
+  //   pressure → reorderByDays = null.
+  // Stock is the engine's deplete-only balance (D8). Old component stock is
+  // already folded into the engine balance, so it's reflected in `stock`.
+  // SAFE FALLBACK: tolerates a missing/partial engine payload → [].
+  const centralWhComponents = (() => {
+    try {
+      const asOf = CWH_SRC?.asOf || CWH_SRC?.anchorDate || null;
+      return Object.values(CWH_COMP || {})
+        .filter(c => c && c.ref)
+        .map(c => {
+          const stock = Number.isFinite(c.stock) ? c.stock : 0;
+          const leadDays = Number.isFinite(c.leadDays) ? c.leadDays : null;
+          const daysCover = Number.isFinite(c.daysCover) ? c.daysCover : null;
+          const reorderByDays = (daysCover != null && leadDays != null)
+            ? daysCover - leadDays
+            : null;
+          return {
+            ref: c.ref,
+            name: c.name ?? c.ref,
+            type: c.type ?? null,           // RM | SFG | PKG
+            unit: c.unit ?? null,
+            stock,
+            oldStock: Number.isFinite(c.oldStock) ? c.oldStock : 0,
+            consumption: Number.isFinite(c.consumption) ? c.consumption : 0,
+            daysCover,
+            leadDays,
+            reorder: !!c.reorder,
+            reorderByDays,
+            // Reorder date (ISO, as-of + reorderByDays). null when no signal or
+            // as-of is unknown. Negative reorderByDays → a past date (overdue).
+            reorderDate: (reorderByDays != null && asOf)
+              ? (() => {
+                  const d = new Date(asOf + "T00:00:00Z");
+                  if (isNaN(d.getTime())) return null;
+                  d.setUTCDate(d.getUTCDate() + reorderByDays);
+                  return d.toISOString().slice(0, 10);
+                })()
+              : null,
+            constrains: c.constrains !== false,   // D1 flag (cartons/air pouches false)
+            blocks: Array.isArray(c.blocks) ? c.blocks : [],
+            usedBy: itemUsedBy[c.ref] || [],
+          };
+        })
+        .sort((a, b) => {
+          // Most-urgent first: overdue/low reorderByDays at the top, nulls last.
+          const av = a.reorderByDays == null ? Infinity : a.reorderByDays;
+          const bv = b.reorderByDays == null ? Infinity : b.reorderByDays;
+          return av - bv;
+        });
+    } catch {
+      return [];   // SAFE FALLBACK — never break the page on a bad payload
+    }
   })();
 
   // ── Batches ───────────────────────────────────────────
@@ -1348,11 +1566,16 @@ const NSData = (function () {
       // (smaller-requirement #13). Comes from whichever source won (uploaded
       // workbook over bundled). SAFE FALLBACK: null when absent.
       flags: CWH_SRC?.flags || null,
+      // D6 — per-component reorder coverage (RM + primary packaging) with stock,
+      // daysCover, leadDays, reorder flag, reorderByDays + reorderDate. Sorted
+      // most-urgent first so the UI can render component reorder dates.
+      components: centralWhComponents,
+      nonConstraining: [...NON_CONSTRAINING],
     },
-    nitinSheetSnapshot: {
-      warehouseAsOf: NITIN_DATA?.warehouseInventory?.asOf ?? null,
-      movementDays:  NITIN_DATA?.dailyMovement?.days ?? 0,
-    },
+    // Also expose at the top level for convenience (same array reference).
+    centralWhComponents,
+    // ⚠️ nitinSheetSnapshot REMOVED (FIX-SPEC V9) — the nitin runtime path is
+    // severed; the central-WH engine owns the warehouse as-of/movement dates.
     adAccounts, googleCampaigns, metaCampaigns, influencers,
     marketplaceAmazon, recentReviews,
     costCards, pnl, cashflow, launches,

@@ -1024,12 +1024,20 @@ const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) =>
 const UnifiedStockTab = ({ inventory }) => {
   const D = NSData;
   const { live } = useLiveData();
-  // Format the "data as of" line for the stock-meta strip.
-  // Prefers the date the sheet itself says it represents; falls back to
-  // upload timestamp; finally to a placeholder when no upload exists.
-  const dataAsOfLabel = live
-    ? (live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }))
-    : "sample data";
+  // Format the "data as of" line for the stock-meta strip. The REAL as-of date
+  // is the central-WH engine's roll-forward date (audit baseline → latest daily
+  // movement) — bundled OR uploaded, both are REAL data (never "sample"). Falls
+  // back to the legacy live payload's date, then the engine anchor date.
+  const _fmtAsOf = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso + (iso.length === 10 ? "T00:00:00" : ""));
+    return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  };
+  const dataAsOfLabel =
+    _fmtAsOf(D.centralWh?.asOf)
+    || (live ? (live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })) : null)
+    || _fmtAsOf(D.centralWh?.anchorDate)
+    || "—";
   // Warehouse-only scope.
   const warehouseUnits = inventory.reduce((a, b) => a + b.stock.warehouse, 0);
   // unitCost = selling price per unit (R16). NEVER stockValue/totalStock —
@@ -1042,6 +1050,21 @@ const UnifiedStockTab = ({ inventory }) => {
     (a, b) => a + ((b.stock.warehouse || 0) + (b.centralWhOldStock || 0)) * unitCost(b), 0);
   const oldStockValue = inventory.reduce(
     (a, b) => a + (b.centralWhOldStock || 0) * unitCost(b), 0);
+  // D4 — TOTAL stock value across ALL locations × SP, each unit counted once:
+  // WH FG (new + old) + Amazon FBA + Flipkart + Blinkit (FK is a physically
+  // separate pool — no double-count). Uses the per-SKU `totalValue` helper from
+  // data.js. SAFE FALLBACK: per-SKU all-locations sum when totalValue absent.
+  const totalStockValueAllLoc = inventory.reduce((a, b) => {
+    if (Number.isFinite(b.totalValue)) return a + b.totalValue;
+    const units = (b.stock.warehouse || 0) + (b.centralWhOldStock || 0)
+                + (b.stock.amazonFBA || 0) + (b.stock.flipkart || 0) + (b.stock.blinkit || 0);
+    return a + units * unitCost(b);
+  }, 0);
+  const totalUnitsAllLoc = inventory.reduce(
+    (a, b) => a + (Number.isFinite(b.allLocationUnits)
+      ? b.allLocationUnits
+      : (b.stock.warehouse || 0) + (b.centralWhOldStock || 0)
+        + (b.stock.amazonFBA || 0) + (b.stock.flipkart || 0) + (b.stock.blinkit || 0)), 0);
   const activeSkus = inventory.filter(s => s.active !== false).length;
 
   // Stock-runway alerts:
@@ -1143,29 +1166,28 @@ const UnifiedStockTab = ({ inventory }) => {
             <span className="rw-risk-icon"><Icon name="finance" size={14}/></span>
             <div>
               <div className="rw-risk-title">Total stock value</div>
-              <div className="rw-risk-sub">central warehouse FG (new + old) at selling price</div>
+              <div className="rw-risk-sub">all locations (WH + Amazon + Flipkart + Blinkit) at selling price</div>
             </div>
           </div>
-          <div className="rw-risk-num" style={{ color: "var(--ink)" }}>{D.fmtINR(warehouseStockValue)}</div>
-          {oldStockValue > 0 && (
-            <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>
-              incl. {D.fmtINR(oldStockValue)} old stock (excluded from runway)
-            </div>
-          )}
+          <div className="rw-risk-num" style={{ color: "var(--ink)" }}>{D.fmtINR(totalStockValueAllLoc)}</div>
+          <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>
+            incl. {D.fmtINR(warehouseStockValue)} central WH
+            {oldStockValue > 0 && <> · {D.fmtINR(oldStockValue)} old stock (excluded from runway)</>}
+          </div>
           <div className="stock-meta">
             <div className="stock-meta-item">
-              <div className="stock-meta-num mono">{D.fmtN(warehouseUnits)}</div>
-              <div className="stock-meta-label">FG units · central warehouse</div>
+              <div className="stock-meta-num mono">{D.fmtN(totalUnitsAllLoc)}</div>
+              <div className="stock-meta-label">units · all locations</div>
             </div>
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
-              <div className="stock-meta-num mono">{activeSkus}</div>
-              <div className="stock-meta-label">active Items</div>
+              <div className="stock-meta-num mono">{D.fmtN(warehouseUnits)}</div>
+              <div className="stock-meta-label">FG units · central WH</div>
             </div>
             <div className="stock-meta-divider"/>
             <div className="stock-meta-item">
               <div className="stock-meta-num mono" style={{ fontSize: 13 }}>{dataAsOfLabel}</div>
-              <div className="stock-meta-label">{live ? "data as of" : "last MIS sync"}</div>
+              <div className="stock-meta-label">data as of</div>
             </div>
           </div>
         </div>
@@ -1224,7 +1246,7 @@ const UnifiedStockTab = ({ inventory }) => {
 
       <Card
         title="Inventory by Item × location"
-        sub="Source: central warehouse MIS sheet (live). Click any Item for the full material breakdown."
+        sub={`Central warehouse from the audit roll-forward (as of ${dataAsOfLabel}); marketplaces from each channel's latest export (snapshot ${NSData.realDataSnapshotDate}). Click any Item for the full material breakdown.`}
         padded={false}
         action={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -1517,15 +1539,19 @@ const MaterialsTab = ({ inventory }) => {
   const rows = inventory.map(s => {
     const wb = s.warehouseBreakdown || { fg: 0, semiFg: 0, rawMaterial: 0, packaging: 0, producibleFG: 0, kind: null, inputs: { sfg: null, rm: null, pkg: [] } };
     const inputObj = wb.inputs?.sfg || wb.inputs?.rm;
-    const inputCap = inputObj?.capacity ?? Infinity;
+    // D1 — only CONSTRAINING components can be the bottleneck (cartons + juice
+    // air pouches carry constrains:false and are excluded; the engine already
+    // does the same for producibleFG).
+    const inputCap = (inputObj && inputObj.constrains !== false) ? (inputObj.capacity ?? Infinity) : Infinity;
     const pkgList  = wb.inputs?.pkg || [];
-    const pkgMinCap = pkgList.length ? Math.min(...pkgList.map(p => p.capacity)) : Infinity;
+    const conPkg   = pkgList.filter(p => p.constrains !== false);
+    const pkgMinCap = conPkg.length ? Math.min(...conPkg.map(p => p.capacity)) : Infinity;
     let bottleneck = "—";
-    if (inputObj && inputCap <= pkgMinCap) {
+    if (inputObj && inputObj.constrains !== false && inputCap <= pkgMinCap) {
       bottleneck = wb.kind === "semi" ? "SFG" : "RM";
-    } else if (pkgList.length) {
+    } else if (conPkg.length) {
       // Identify which specific PKG component is the binding constraint
-      const minIdx = pkgList.findIndex(p => p.capacity === pkgMinCap);
+      const minIdx = pkgList.findIndex(p => p.constrains !== false && p.capacity === pkgMinCap);
       bottleneck = `PKG${minIdx + 1}`;
     }
     const maxInput = Math.max(wb.fg, wb.semiFg, wb.rawMaterial, wb.packaging, 1);
@@ -1670,26 +1696,41 @@ const MaterialsTab = ({ inventory }) => {
                     ) : (
                       <div className="mat-pkg-list">
                         {s.wb.inputs.pkg.map((p, idx) => {
-                          // Bottleneck pkg row = whichever pkg has the lowest capacity
-                          // AND is the binding constraint overall (PKG bottleneck on this SKU)
-                          const minCap = Math.min(...s.wb.inputs.pkg.map(x => x.capacity));
-                          const isMinPkg = bnPack && p.capacity === minCap;
+                          // Bottleneck pkg row = whichever CONSTRAINING pkg has the
+                          // lowest capacity (D1: cartons/air pouches excluded) AND is
+                          // the binding constraint overall (PKG bottleneck on this SKU)
+                          const conCaps = s.wb.inputs.pkg.filter(x => x.constrains !== false).map(x => x.capacity);
+                          const minCap = conCaps.length ? Math.min(...conCaps) : Infinity;
+                          const isMinPkg = bnPack && p.constrains !== false && p.capacity === minCap;
+                          // D1 — carton / juice air pouch: quickly arranged, excluded
+                          // from producible + bottleneck. Show no runway chip (a
+                          // runway here would imply it caps output) and flag it.
+                          const isNonCon = p.constrains === false;
                           // Per-PKG runway = component capacity (in pack-equivalents)
                           // ÷ SKU velocity. Each PKG component drains at the
                           // SKU's sell-through rate, so the slowest pkg caps
                           // the whole producible-FG runway. Per MAT-002.
-                          const days = s.velocity > 0 ? p.capacity / s.velocity : null;
+                          const days = (!isNonCon && s.velocity > 0) ? p.capacity / s.velocity : null;
                           const rwPkgRow = days != null ? {
                             days,
                             status: days < 14 ? "red" : days < 30 ? "amber" : "muted",
                             label:  days >= 60 ? `~${(days / 30).toFixed(1)}mo` : `~${Math.round(days)}d`,
                           } : null;
                           return (
-                            <div key={p.refCode} className={"mat-pkg-row" + (isMinPkg ? " is-min" : "")} title={`${p.name} · supports ${D.fmtN(p.capacity)} packs`}>
+                            <div key={p.refCode} className={"mat-pkg-row" + (isMinPkg ? " is-min" : "")} title={isNonCon ? `${p.name} · quickly arranged — not a producible/bottleneck constraint` : `${p.name} · supports ${D.fmtN(p.capacity)} packs`} style={isNonCon ? { opacity: 0.7 } : undefined}>
                               <div className="mat-pkg-row-top">
                                 <span className="mat-pkg-tag">PKG{idx + 1}</span>
                                 <span className="mat-pkg-qty mono">{D.fmtN(p.qty)}</span>
                                 {rwPkgRow && <RunwayChip rw={rwPkgRow}/>}
+                                {isNonCon && (
+                                  <span
+                                    className="mono"
+                                    title="Quickly arranged (carton / protective air pouch) — excluded from producible + bottleneck"
+                                    style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--ink-4)", border: "1px solid var(--border-soft)", borderRadius: 3, padding: "0 4px", whiteSpace: "nowrap" }}
+                                  >
+                                    not a constraint
+                                  </span>
+                                )}
                               </div>
                               <div className="mat-pkg-name muted">{p.name}</div>
                             </div>
@@ -1726,6 +1767,17 @@ const MaterialsTab = ({ inventory }) => {
         </table>
       </Card>
 
+      {/* ── D6 — Component reorder coverage (raw materials + primary packaging
+          + SFG), each with its OWN lead time + reorder date. Sourced from the
+          central-WH engine (deplete-only balance, D8). Surfaces the latest safe
+          order date per component so RM / packaging never silently runs the line
+          dry. Non-constraining (carton / juice air pouch) rows are flagged + not
+          alarmed. */}
+      <ComponentReorderSection
+        components={D.centralWh?.components || []}
+        asOf={D.centralWh?.asOf}
+      />
+
       {/* ── Fixed assets + Consumables — non-BOM warehouse lines, kept
           BELOW the material breakdown per founder. Sourced from the central
           WH engine (audit lines that aren't finished goods or BOM
@@ -1741,6 +1793,138 @@ const MaterialsTab = ({ inventory }) => {
         <SkuBreakdownModal sku={popoverSku} onClose={() => setPopoverSku(null)}/>
       )}
     </>
+  );
+};
+
+// ── D6 — Component reorder coverage (RM + primary packaging + SFG) ──────
+// Renders the engine-sourced per-component reorder horizon: stock, days of
+// cover, lead time and the latest safe order DATE (as-of + (daysCover −
+// leadDays)). Overdue (date in the past) is alarmed red. Components with no
+// consumption signal show "no draw". Non-constraining cartons / juice air
+// pouches are flagged "not a constraint" and never alarmed (quickly arranged).
+// SAFE FALLBACK: empty/missing array → renders nothing (never white-screens).
+const ComponentReorderSection = ({ components, asOf }) => {
+  const D = NSData;
+  const list = Array.isArray(components) ? components : [];
+  if (list.length === 0) return null;
+
+  const _fmtDate = (iso) => {
+    if (!iso) return null;
+    const d = new Date(iso + "T00:00:00");
+    return isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  };
+  const _asOfLabel = _fmtDate(asOf) || asOf || "—";
+
+  const TYPE_LABEL = { RM: "Raw material", SFG: "Semi-FG", PKG: "Packaging" };
+  // Overdue count is over CONSTRAINING components only — a quickly-arranged
+  // carton/air-pouch being "late" isn't a production threat.
+  const overdueCount = list.filter(
+    (c) => c.constrains !== false && c.reorderByDays != null && c.reorderByDays < 0
+  ).length;
+  const soonCount = list.filter(
+    (c) => c.constrains !== false && c.reorderByDays != null && c.reorderByDays >= 0 && c.reorderByDays < 14
+  ).length;
+
+  // Days-of-cover chip → reuse the existing .cell-runway tiers (red <14, amber
+  // <30, muted otherwise). Non-constraining or no-signal → muted, no alarm.
+  const coverChip = (c) => {
+    if (c.daysCover == null) {
+      return <span className="cell-runway runway-muted" title="No consumption recorded since the audit — not currently draining">no draw</span>;
+    }
+    const d = c.daysCover;
+    const status = (c.constrains === false) ? "muted" : d < 14 ? "red" : d < 30 ? "amber" : "muted";
+    const label = d >= 60 ? `~${(d / 30).toFixed(1)}mo` : `~${Math.round(d)}d`;
+    return <span className={"cell-runway runway-" + status} title={`${d.toFixed(1)} days of cover at current consumption`}>{label}</span>;
+  };
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <Card
+        title="Component reorder — raw materials & packaging"
+        sub={`Latest safe order date per component = as of ${_asOfLabel} + (days of cover − lead time). Deplete-only balance from the central-WH engine; old component stock is folded in. Carton / juice air pouch are quickly arranged — flagged and excluded from urgency.`}
+        padded={false}
+        action={
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            <strong style={{ color: overdueCount > 0 ? "var(--critical)" : "var(--ink-2)" }}>{overdueCount}</strong> overdue
+            {" · "}
+            <strong style={{ color: soonCount > 0 ? "var(--warning)" : "var(--ink-2)" }}>{soonCount}</strong> within 14d
+          </span>
+        }
+      >
+        <table className="table mat-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Type</th>
+              <th className="num">In stock</th>
+              <th className="num">Days cover</th>
+              <th className="num">Lead time</th>
+              <th className="num">Reorder by</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((c) => {
+              const isNonCon = c.constrains === false;
+              const overdue = !isNonCon && c.reorderByDays != null && c.reorderByDays < 0;
+              const dateLabel = _fmtDate(c.reorderDate);
+              // Reorder-by cell: overdue → red date + "overdue Nd"; future → date;
+              // no signal → muted "no reorder". Non-constraining → muted date.
+              const reorderCell = c.reorderByDays == null
+                ? <span className="muted">no reorder</span>
+                : (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1 }}>
+                    <span
+                      className="mono"
+                      style={{ fontWeight: overdue ? 700 : 500, color: overdue ? "var(--critical)" : isNonCon ? "var(--ink-4)" : "var(--ink)" }}
+                    >
+                      {dateLabel || "—"}
+                    </span>
+                    {overdue && (
+                      <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, color: "var(--critical)" }}>
+                        overdue {Math.abs(c.reorderByDays)}d
+                      </span>
+                    )}
+                  </div>
+                );
+              return (
+                <tr key={c.ref} style={isNonCon ? { opacity: 0.72 } : undefined}>
+                  <td className="mat-cell">
+                    <div className="mat-cell-name" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {c.name}
+                      {isNonCon && (
+                        <span
+                          className="mono"
+                          title="Quickly arranged (carton / protective air pouch) — excluded from producible + bottleneck"
+                          style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--ink-4)", border: "1px solid var(--border-soft)", borderRadius: 3, padding: "0 4px", whiteSpace: "nowrap" }}
+                        >
+                          not a constraint
+                        </span>
+                      )}
+                    </div>
+                    <div className="sku">
+                      {c.ref}
+                      {Array.isArray(c.usedBy) && c.usedBy.length > 0 && (
+                        <span className="muted"> · used by {c.usedBy.length} SKU{c.usedBy.length === 1 ? "" : "s"}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="mat-cell muted" style={{ fontSize: 11.5 }}>{TYPE_LABEL[c.type] || c.type || "—"}</td>
+                  <td className="num mat-cell mono">
+                    {D.fmtN(c.stock)}{c.unit ? <span className="muted" style={{ fontSize: 10.5, marginLeft: 3 }}>{c.unit}</span> : null}
+                    {c.oldStock > 0 && (
+                      <div className="muted" style={{ fontSize: 9.5 }}>incl. {D.fmtN(c.oldStock)} old</div>
+                    )}
+                  </td>
+                  <td className="num mat-cell">{coverChip(c)}</td>
+                  <td className="num mat-cell mono muted">{c.leadDays != null ? `${c.leadDays}d` : "—"}</td>
+                  <td className="num mat-cell">{reorderCell}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+    </div>
   );
 };
 
@@ -1855,9 +2039,15 @@ const TargetCoverEditor = ({ sku }) => {
 const SkuBreakdownModal = ({ sku, onClose }) => {
   const D = NSData;
   const { live } = useLiveData();
+  // Source line — the central-WH engine (audit roll-forward) is the REAL
+  // warehouse source whether bundled or uploaded (never "sample data").
+  const _cwAsOf = D.centralWh?.asOf || D.centralWh?.anchorDate || null;
+  const _cwSheet = D.centralWh?.anchorSheet || "central-warehouse audit";
   const sourceLine = live
     ? `Source: ${live.fileName || "uploaded MIS sheet"} · data as of ${live.dataAsOf || new Date(live.uploadedAt).toLocaleDateString("en-IN")}`
-    : "Source: sample data · upload the MIS sheet to see live numbers";
+    : (_cwAsOf
+        ? `Source: ${_cwSheet} (central-WH engine) · data as of ${_cwAsOf}`
+        : "Source: central-WH engine");
   const wb = sku.warehouseBreakdown;
   const unitCost = sku.pricing?.sp ?? sku.pricing?.mrp ?? 0;   // SP per unit (R16)
 
@@ -1878,14 +2068,18 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   const inputs = wb.inputs || { sfg: null, rm: null, pkg: [] };
   const usedBy = D.itemUsedBy || {};
 
-  // Bottleneck = the constraint that defines producibleFG.
-  // It's whichever row has the lowest "capacity" (FG packs it can support).
+  // Bottleneck = the constraint that defines producibleFG. Prefer the engine's
+  // authoritative binding component; otherwise fall back to the lowest-capacity
+  // CONSTRAINING row (D1: cartons + juice air pouches excluded — they carry
+  // constrains:false and can never be the bottleneck).
   const allRows = [];
   if (inputs.sfg) allRows.push({ kind: "sfg", obj: inputs.sfg });
   if (inputs.rm)  allRows.push({ kind: "rm",  obj: inputs.rm  });
   inputs.pkg.forEach(p => allRows.push({ kind: "pkg", obj: p }));
-  const minCap = allRows.length ? Math.min(...allRows.map(r => r.obj.capacity)) : 0;
-  const bottleneckRefCode = allRows.find(r => r.obj.capacity === minCap)?.obj.refCode;
+  const conRows = allRows.filter(r => r.obj.constrains !== false);
+  const minCap = conRows.length ? Math.min(...conRows.map(r => r.obj.capacity)) : 0;
+  const bottleneckRefCode = wb.bindingComponent
+    || conRows.find(r => r.obj.capacity === minCap)?.obj.refCode;
 
   // Per-channel velocity + growth — SALES-based, same authority as the Unified
   // Stock table (NOT a revenue-share split of the SKU total). Each row carries
@@ -1913,7 +2107,11 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
   const InputRow = ({ role, label, data, isFG }) => {
     const swatchColor = MATERIAL_COLORS[role === "sfg" ? "semiFg" : role === "rm" ? "rawMaterial" : role === "pkg" ? "packaging" : "fg"];
     const isNA = !data && !isFG;
-    const isBottleneck = !isFG && data && data.refCode === bottleneckRefCode && minCap > 0;
+    // D1 — a non-constraining component (cartons, juice air pouches) is quickly
+    // arranged and EXCLUDED from producible / bottleneck. It can never be the
+    // bottleneck and is visually flagged "not a constraint".
+    const isNonConstraining = !isFG && !!data && data.constrains === false;
+    const isBottleneck = !isFG && data && data.constrains !== false && data.refCode === bottleneckRefCode && minCap > 0;
     const isExpanded = expandedRow === (data?.refCode || role);
     const handleClick = () => {
       if (isFG || isNA) return;
@@ -1928,6 +2126,9 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
         className={"wb-row" + (isBottleneck ? " wb-row-bottleneck" : "") + (isNA ? " wb-row-na" : "") + (!isFG && !isNA ? " wb-row-clickable" : "") + (isExpanded ? " is-expanded" : "")}
         key={label}
         onClick={handleClick}
+        // D1 — slightly de-emphasise non-constraining rows so they don't read as
+        // a real capacity constraint (they're excluded from producible/bottleneck).
+        style={isNonConstraining ? { opacity: 0.72 } : undefined}
       >
         <div className="wb-row-label">
           <span className="wb-row-swatch" style={{ background: isNA ? "var(--ink-4)" : swatchColor }}/>
@@ -1940,6 +2141,18 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                   <span style={{ fontWeight: 500 }}>{isFG ? "Produced FG (ready to ship)" : data.name}</span>
                   {code && <span className="wb-row-code sku">{code}</span>}
                   {isBottleneck && <span className="wb-row-bn-tag">bottleneck</span>}
+                  {/* D1 — non-constraining (carton / juice air pouch): quickly
+                      arranged, excluded from producible + bottleneck. Muted chip
+                      so the founder knows it never caps output. */}
+                  {isNonConstraining && (
+                    <span
+                      className="wb-row-old-chip"
+                      title="Quickly arranged (carton / protective air pouch) — excluded from the producible-FG cap and the bottleneck"
+                      style={{ color: "var(--ink-4)" }}
+                    >
+                      not a constraint
+                    </span>
+                  )}
                   {/* Old stock chip — only on the FG row, only when there IS
                       old stock. Per founder: old stock is shown but EXCLUDED
                       from runway/sellable. */}
@@ -2316,6 +2529,9 @@ const SimulatorTab = ({ inventory }) => {
         qty:          p.qty,
         unitsPerPack: p.unitsPerPack,
         leadTime:     p.leadTime ?? s.leadTime ?? 21,
+        // D1 — carton/juice-air-pouch carry constrains:false so the simulator's
+        // producible math excludes them (mirrors the engine + base tool).
+        constrains:   p.constrains !== false,
       })),
       // Lead times
       leadAmzInbound: MP_INBOUND_LEAD_DEFAULT.amazonFBA,
@@ -2384,9 +2600,13 @@ const SimulatorTab = ({ inventory }) => {
     wh:  effVel.wh  * (1 + effGrowth.wh  / 100),
   };
 
-  // ── Producible FG = min(input pack-equivalents, every PKG pack-equiv) ──
+  // ── Producible FG = min(input pack-equivalents, every CONSTRAINING PKG) ──
+  // D1: cartons + juice air pouches (constrains:false) are excluded — they're
+  // quickly arranged and must never cap producible (mirrors the engine).
   const inputPackEq = sim.inputPerPack > 0 ? Math.floor(sim.inputQty / sim.inputPerPack) : 0;
-  const pkgCaps = sim.pkg.map(p => p.unitsPerPack > 0 ? Math.floor(p.qty / p.unitsPerPack) : 0);
+  const pkgCaps = sim.pkg
+    .filter(p => p.constrains !== false)
+    .map(p => p.unitsPerPack > 0 ? Math.floor(p.qty / p.unitsPerPack) : 0);
   const producibleFg = pkgCaps.length
     ? Math.min(inputPackEq, ...pkgCaps)
     : inputPackEq;

@@ -7,19 +7,23 @@
  *
  * Storage shape:
  *   {
- *     uploadedAt: ISO,
+ *     uploadedAt: ISO,            // last time ANY file slot changed
  *     files: {
- *       "amazon-ledger": { dataAsOf, fileName, parsed },
- *       "amazon-orders": { dataAsOf, fileName, parsed },
+ *       "central-wh":    { dataAsOf, fileName, parsed },  // audit "as-of" date; NO cutoff (D2)
+ *       "amazon-ledger": { dataAsOf, fileName, parsed },  // snapshot — dataAsOf is the picker cutoff
+ *       "agency":        { dataAsOf, fileName, parsed },
  *       "blinkit":       { dataAsOf, fileName, parsed },
  *       "flipkart":      { dataAsOf, fileName, parsed },
  *       "shopify":       { dataAsOf, fileName, parsed },
- *       "nitin":         { dataAsOf, fileName, parsed },
+ *       // legacy slots that may linger from older uploads: "amazon-orders", "nitin"
  *     }
  *   }
  *
  * Each entry is independent — you can upload one file at a time and
- * later overlay another without resetting the rest.
+ * later overlay another without resetting the rest. CRUCIALLY, each entry's
+ * `dataAsOf` (the per-sheet cutoff for sales/marketplace files, or the audit
+ * date for central-wh) is stored and read back PER FILE, so different sheets
+ * keep DIFFERENT cutoffs across a hard refresh — they never equalize (D2).
  */
 
 const KEY = "ns.multiFileUpload";
@@ -112,27 +116,14 @@ export function buildRealMarketplaceOverride(store) {
  *  Returns the full parsed engine payload ({ fg, components, fixedAssets,
  *  consumables, anchorDate, asOf, flags, ... }) so data.js can overlay WH FG +
  *  producible + components, or null when nothing usable is uploaded.
- *  NOTE: this supersedes the legacy 'nitin' Warehouse Daily Inventory path
- *  (buildNitinOverride) — both claim to set warehouse stock, but per founder
- *  decision §8.1 the in-browser central-WH engine is the durable source of
- *  truth. SAFE FALLBACK: guard on `p.fg` so a malformed parse → null, never a
- *  half-baked override. */
+ *  NOTE: this is the SINGLE warehouse source. The legacy 'nitin' Warehouse
+ *  Daily Inventory path (buildNitinOverride) was REMOVED (FIX-SPEC V9): it
+ *  conflicted with this engine and fed velocity from warehouse movement
+ *  (GROUND-TRUTH §3.5 violation). SAFE FALLBACK: guard on `p.fg` so a malformed
+ *  parse → null, never a half-baked override. */
 export function buildCentralWhOverride(store) {
   const p = store?.files?.["central-wh"]?.parsed;
   return (p && p.fg) ? p : null;
-}
-
-/** Build a NITIN_DATA-shaped object from the Nitin upload.
- *  LEGACY: superseded by buildCentralWhOverride ('central-wh' zone). Kept for
- *  back-compat with existing uploads; the central-WH engine wins when present. */
-export function buildNitinOverride(store) {
-  const parsed = store?.files?.["nitin"]?.parsed;
-  if (!parsed) return null;
-  // parseInventoryFile output → match NITIN_DATA shape used by data.js.
-  return {
-    warehouseInventory: { fg: parsed.fg || {}, asOf: parsed.dataAsOf || null },
-    dailyMovement:      parsed.dailyMovement || { byCode: {}, days: 0 },
-  };
 }
 
 /** A compact summary of what's uploaded — used in the UI status pill. */

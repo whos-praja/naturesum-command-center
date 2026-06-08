@@ -6,18 +6,24 @@
  * DO NOT hand-edit. Regenerate via:
  *   node scripts/build-central-wh.cjs <path-to-xlsx>
  *
- * Anchor: 2026-06-05 (audit sheet "Audit 050626"). As-of: 2026-06-06.
+ * Anchor: 2026-06-05 (audit sheet "Audit 050626"). As-of: 2026-06-08.
  */
 export const CENTRAL_WH_DATA = {
   "anchorDate": "2026-06-05",
   "anchorSheet": "Audit 050626",
-  "asOf": "2026-06-06",
+  "asOf": "2026-06-08",
   "config": {
     "MERGE_OLD_SB500": true,
     "RANGE_RULE": "first",
     "W30": 30,
     "W60": 60
   },
+  "nonConstraining": [
+    "NSPKGCB100",
+    "NSPKGCB250",
+    "NSPKGJB300",
+    "NSPKGJB500"
+  ],
   "fg": {
     "NSMP100": {
       "code": "NSMP100",
@@ -27,19 +33,43 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 25,
       "fgStock": 91,
       "oldStock": 0,
-      "producible": 0,
-      "totalAvail": 91,
-      "binding": "NSPKGCB100",
-      "sales30": 7.2,
-      "depletion30": 7.2,
+      "producible": 1000,
+      "totalAvail": 1091,
+      "binding": "NSMLPR",
+      "bomDetail": [
+        {
+          "ref": "NSMLPR",
+          "perPack": 0.1,
+          "stock": 100,
+          "cap": 1000,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGMP100",
+          "perPack": 1,
+          "stock": 2935,
+          "cap": 2935,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGCB100",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": false
+        }
+      ],
+      "sales30": 7.167,
+      "depletion30": 7.167,
       "runwayDays": 13,
       "momGrowth": 200,
       "stockValue": 24115,
       "monthly": [
-        216
+        215,
+        1
       ],
-      "worstComp": "NSPKGCB100",
-      "worstCoverDays": 0,
+      "worstComp": "NSMLPR",
+      "worstCoverDays": 140,
       "reorder": true
     },
     "NSMP250": {
@@ -50,9 +80,32 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 25,
       "fgStock": 65,
       "oldStock": 0,
-      "producible": 0,
-      "totalAvail": 65,
-      "binding": "NSPKGCB250",
+      "producible": 400,
+      "totalAvail": 465,
+      "binding": "NSMLPR",
+      "bomDetail": [
+        {
+          "ref": "NSMLPR",
+          "perPack": 0.25,
+          "stock": 100,
+          "cap": 400,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGMP250",
+          "perPack": 1,
+          "stock": 2934,
+          "cap": 2934,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGCB250",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": false
+        }
+      ],
       "sales30": 6.9,
       "depletion30": 6.9,
       "runwayDays": 9,
@@ -61,8 +114,8 @@ export const CENTRAL_WH_DATA = {
       "monthly": [
         207
       ],
-      "worstComp": "NSPKGCB250",
-      "worstCoverDays": 0,
+      "worstComp": "NSMLPR",
+      "worstCoverDays": 58,
       "reorder": true
     },
     "NSSB100": {
@@ -71,20 +124,37 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 450,
       "leadDays": 50,
-      "fgStock": 650,
+      "fgStock": 649,
       "oldStock": 124,
       "producible": 651,
-      "totalAvail": 1301,
+      "totalAvail": 1300,
       "binding": "NSPKGSBP100",
-      "sales30": 23.5,
-      "depletion30": 23.5,
+      "bomDetail": [
+        {
+          "ref": "NSSBPR",
+          "perPack": 0.1,
+          "stock": 910.7,
+          "cap": 9107,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGSBP100",
+          "perPack": 1,
+          "stock": 651,
+          "cap": 651,
+          "constrains": true
+        }
+      ],
+      "sales30": 23.367,
+      "depletion30": 23.367,
       "runwayDays": 28,
-      "momGrowth": 76.3,
-      "stockValue": 292500,
+      "momGrowth": 75.7,
+      "stockValue": 292050,
       "monthly": [
-        705,
-        400,
-        411
+        701,
+        399,
+        413,
+        4
       ],
       "worstComp": "NSPKGSBP100",
       "worstCoverDays": 28,
@@ -96,20 +166,37 @@ export const CENTRAL_WH_DATA = {
       "variant": "250 g",
       "price": 750,
       "leadDays": 50,
-      "fgStock": 662,
+      "fgStock": 652,
       "oldStock": 218,
       "producible": 670,
-      "totalAvail": 1332,
+      "totalAvail": 1322,
       "binding": "NSPKGSBP250",
-      "sales30": 44.667,
-      "depletion30": 44.667,
+      "bomDetail": [
+        {
+          "ref": "NSSBPR",
+          "perPack": 0.25,
+          "stock": 910.7,
+          "cap": 3642,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGSBP250",
+          "perPack": 1,
+          "stock": 670,
+          "cap": 670,
+          "constrains": true
+        }
+      ],
+      "sales30": 43.4,
+      "depletion30": 43.4,
       "runwayDays": 15,
-      "momGrowth": 200,
-      "stockValue": 496500,
+      "momGrowth": 191.3,
+      "stockValue": 489000,
       "monthly": [
-        1340,
-        402,
-        533
+        1302,
+        447,
+        526,
+        10
       ],
       "worstComp": "NSPKGSBP250",
       "worstCoverDays": 15,
@@ -126,15 +213,32 @@ export const CENTRAL_WH_DATA = {
       "producible": 113,
       "totalAvail": 224,
       "binding": "NSPKGSBP500",
-      "sales30": 27.367,
-      "depletion30": 27.367,
+      "bomDetail": [
+        {
+          "ref": "NSSBPR",
+          "perPack": 0.5,
+          "stock": 910.7,
+          "cap": 1821,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGSBP500",
+          "perPack": 1,
+          "stock": 113,
+          "cap": 113,
+          "constrains": true
+        }
+      ],
+      "sales30": 27.3,
+      "depletion30": 27.3,
       "runwayDays": 4,
       "momGrowth": 200,
       "stockValue": 149850,
       "monthly": [
-        821,
-        95,
-        220
+        819,
+        96,
+        219,
+        2
       ],
       "worstComp": "NSPKGSBP500",
       "worstCoverDays": 4,
@@ -151,15 +255,31 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
-      "sales30": 4.4,
-      "depletion30": 4.4,
+      "bomDetail": [
+        {
+          "ref": "NSSBDBR",
+          "perPack": 0.1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGDBP100",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        }
+      ],
+      "sales30": 3.867,
+      "depletion30": 3.867,
       "runwayDays": 0,
-      "momGrowth": -80,
+      "momGrowth": -82.8,
       "stockValue": 0,
       "monthly": [
-        132,
-        660,
-        320
+        116,
+        673,
+        323
       ],
       "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
@@ -176,15 +296,32 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
-      "sales30": 4.5,
-      "depletion30": 4.5,
+      "bomDetail": [
+        {
+          "ref": "NSSBDBR",
+          "perPack": 0.25,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGDBP250",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        }
+      ],
+      "sales30": 4.467,
+      "depletion30": 4.467,
       "runwayDays": 0,
-      "momGrowth": -66.3,
+      "momGrowth": -66.6,
       "stockValue": 0,
       "monthly": [
-        135,
-        400,
-        308
+        134,
+        401,
+        307,
+        1
       ],
       "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
@@ -201,6 +338,22 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
+      "bomDetail": [
+        {
+          "ref": "NSSBDBR",
+          "perPack": 0.5,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGDBP500",
+          "perPack": 1,
+          "stock": 1200,
+          "cap": 1200,
+          "constrains": true
+        }
+      ],
       "sales30": -1.033,
       "depletion30": -1.033,
       "runwayDays": null,
@@ -221,19 +374,56 @@ export const CENTRAL_WH_DATA = {
       "variant": "300 ml",
       "price": 690,
       "leadDays": 50,
-      "fgStock": 586,
+      "fgStock": 565,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 586,
+      "totalAvail": 565,
       "binding": "NSSBJPLP",
-      "sales30": 9.933,
-      "depletion30": 9.933,
-      "runwayDays": 59,
-      "momGrowth": -19.2,
-      "stockValue": 404340,
+      "bomDetail": [
+        {
+          "ref": "NSSBJPLP",
+          "perPack": 0.3,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJBOT300",
+          "perPack": 1,
+          "stock": 1826,
+          "cap": 1826,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJB300",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": false
+        },
+        {
+          "ref": "NSPKGJTUB300",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJLBL300",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        }
+      ],
+      "sales30": 10.567,
+      "depletion30": 10.567,
+      "runwayDays": 53,
+      "momGrowth": -14.6,
+      "stockValue": 389850,
       "monthly": [
-        298,
-        369
+        317,
+        371
       ],
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
@@ -250,6 +440,43 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBJPLP",
+      "bomDetail": [
+        {
+          "ref": "NSSBJPLP",
+          "perPack": 0.5,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJBOT500",
+          "perPack": 1,
+          "stock": 2022,
+          "cap": 2022,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJB500",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": false
+        },
+        {
+          "ref": "NSPKGJTUB500",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJLBL500",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        }
+      ],
       "sales30": 24.967,
       "depletion30": 24.967,
       "runwayDays": 0,
@@ -274,6 +501,43 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 105,
       "binding": "NSPKGBOB15",
+      "bomDetail": [
+        {
+          "ref": "NSSBOR",
+          "perPack": 0.015,
+          "stock": 5.6,
+          "cap": 373,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOBT15",
+          "perPack": 1,
+          "stock": 375,
+          "cap": 375,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOB15",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOCAP",
+          "perPack": 1,
+          "stock": 1503,
+          "cap": 1503,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBODROP",
+          "perPack": 1,
+          "stock": 876,
+          "cap": 876,
+          "constrains": true
+        }
+      ],
       "sales30": 0.167,
       "depletion30": 0.167,
       "runwayDays": 630,
@@ -299,6 +563,43 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 30,
       "binding": "NSPKGBOBT30",
+      "bomDetail": [
+        {
+          "ref": "NSSBOR",
+          "perPack": 0.03,
+          "stock": 5.6,
+          "cap": 186,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOBT30",
+          "perPack": 1,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOB30",
+          "perPack": 1,
+          "stock": 86,
+          "cap": 86,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBOCAP",
+          "perPack": 1,
+          "stock": 1503,
+          "cap": 1503,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGBODROP",
+          "perPack": 1,
+          "stock": 876,
+          "cap": 876,
+          "constrains": true
+        }
+      ],
       "sales30": 0,
       "depletion30": 0,
       "runwayDays": null,
@@ -323,15 +624,31 @@ export const CENTRAL_WH_DATA = {
       "producible": 96,
       "totalAvail": 667,
       "binding": "NSJOF100",
+      "bomDetail": [
+        {
+          "ref": "NSJOF100",
+          "perPack": 1,
+          "stock": 96,
+          "cap": 96,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGJOB100",
+          "perPack": 1,
+          "stock": 177,
+          "cap": 177,
+          "constrains": true
+        }
+      ],
       "sales30": 2.667,
       "depletion30": 2.667,
       "runwayDays": 214,
-      "momGrowth": 100,
+      "momGrowth": 105.1,
       "stockValue": 770850,
       "monthly": [
         80,
-        10,
-        248
+        9,
+        249
       ],
       "worstComp": "NSJOF100",
       "worstCoverDays": 36,
@@ -348,6 +665,29 @@ export const CENTRAL_WH_DATA = {
       "producible": 0,
       "totalAvail": 25,
       "binding": "NSACDSF30",
+      "bomDetail": [
+        {
+          "ref": "NSACDSF30",
+          "perPack": 30,
+          "stock": 0,
+          "cap": 0,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGACTC30",
+          "perPack": 30,
+          "stock": 37550,
+          "cap": 1251,
+          "constrains": true
+        },
+        {
+          "ref": "NSPKGACTCBOX",
+          "perPack": 1,
+          "stock": 2507,
+          "cap": 2507,
+          "constrains": true
+        }
+      ],
       "sales30": 1.733,
       "depletion30": 1.733,
       "runwayDays": 14,
@@ -356,7 +696,8 @@ export const CENTRAL_WH_DATA = {
       "monthly": [
         52,
         26,
-        99
+        97,
+        2
       ],
       "worstComp": "NSACDSF30",
       "worstCoverDays": 0,
@@ -372,10 +713,14 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 25,
       "stock": 100,
       "oldStock": 0,
-      "consumption": 2.445,
+      "consumption": 2.442,
       "daysCover": 41,
       "reorder": false,
-      "blocks": []
+      "constrains": true,
+      "blocks": [
+        "NSMP100",
+        "NSMP250"
+      ]
     },
     "NSSBPR": {
       "ref": "NSSBPR",
@@ -385,9 +730,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 50,
       "stock": 910.7,
       "oldStock": 0,
-      "consumption": 27.2,
-      "daysCover": 33,
+      "consumption": 26.837,
+      "daysCover": 34,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSB100",
         "NSSB250",
@@ -402,9 +748,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 50,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 1.048,
+      "consumption": 0.987,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBDB100",
         "NSSBDB250",
@@ -419,9 +766,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 50,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 15.463,
+      "consumption": 15.654,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBJ300",
         "NSSBJ500"
@@ -438,6 +786,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0.003,
       "daysCover": 2236,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSJOF100": {
@@ -451,6 +800,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 2.667,
       "daysCover": 36,
       "reorder": false,
+      "constrains": true,
       "blocks": [
         "NSJO100"
       ]
@@ -466,6 +816,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 51.99,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSACDT30"
       ]
@@ -478,9 +829,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 2935,
       "oldStock": 0,
-      "consumption": 7.2,
-      "daysCover": 408,
+      "consumption": 7.167,
+      "daysCover": 410,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGMP250": {
@@ -494,6 +846,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 6.9,
       "daysCover": 425,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGCB100": {
@@ -504,12 +857,11 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 7.2,
+      "consumption": 7.167,
       "daysCover": 0,
       "reorder": true,
-      "blocks": [
-        "NSMP100"
-      ]
+      "constrains": false,
+      "blocks": []
     },
     "NSPKGCB250": {
       "ref": "NSPKGCB250",
@@ -522,9 +874,8 @@ export const CENTRAL_WH_DATA = {
       "consumption": 6.9,
       "daysCover": 0,
       "reorder": true,
-      "blocks": [
-        "NSMP250"
-      ]
+      "constrains": false,
+      "blocks": []
     },
     "NSPKGSBP100": {
       "ref": "NSPKGSBP100",
@@ -534,9 +885,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 651,
       "oldStock": 0,
-      "consumption": 23.5,
+      "consumption": 23.367,
       "daysCover": 28,
       "reorder": false,
+      "constrains": true,
       "blocks": [
         "NSSB100"
       ]
@@ -549,9 +901,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 670,
       "oldStock": 0,
-      "consumption": 44.667,
+      "consumption": 43.4,
       "daysCover": 15,
       "reorder": false,
+      "constrains": true,
       "blocks": [
         "NSSB250"
       ]
@@ -564,9 +917,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 113,
       "oldStock": 0,
-      "consumption": 27.367,
+      "consumption": 27.3,
       "daysCover": 4,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSB500"
       ]
@@ -579,9 +933,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 4.4,
+      "consumption": 3.867,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBDB100"
       ]
@@ -594,9 +949,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 4.5,
+      "consumption": 4.467,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBDB250"
       ]
@@ -612,6 +968,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": -1.033,
       "daysCover": null,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGJBOT300": {
@@ -622,9 +979,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 1826,
       "oldStock": 0,
-      "consumption": 9.933,
-      "daysCover": 184,
+      "consumption": 10.567,
+      "daysCover": 173,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGJB300": {
@@ -635,12 +993,11 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 9.933,
+      "consumption": 10.567,
       "daysCover": 0,
       "reorder": true,
-      "blocks": [
-        "NSSBJ300"
-      ]
+      "constrains": false,
+      "blocks": []
     },
     "NSPKGJTUB300": {
       "ref": "NSPKGJTUB300",
@@ -650,9 +1007,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 9.933,
+      "consumption": 10.567,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBJ300"
       ]
@@ -665,9 +1023,10 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 9.933,
+      "consumption": 10.567,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBJ300"
       ]
@@ -683,6 +1042,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 24.967,
       "daysCover": 81,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGJB500": {
@@ -696,9 +1056,8 @@ export const CENTRAL_WH_DATA = {
       "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
-      "blocks": [
-        "NSSBJ500"
-      ]
+      "constrains": false,
+      "blocks": []
     },
     "NSPKGJTUB500": {
       "ref": "NSPKGJTUB500",
@@ -711,6 +1070,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBJ500"
       ]
@@ -726,6 +1086,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 24.967,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBJ500"
       ]
@@ -741,6 +1102,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0.167,
       "daysCover": 2246,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGBOB15": {
@@ -754,6 +1116,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0.167,
       "daysCover": 0,
       "reorder": true,
+      "constrains": true,
       "blocks": [
         "NSSBBO15"
       ]
@@ -769,6 +1132,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0,
       "daysCover": null,
       "reorder": false,
+      "constrains": true,
       "blocks": [
         "NSSBBO30"
       ]
@@ -784,6 +1148,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0,
       "daysCover": null,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGBOCAP": {
@@ -797,6 +1162,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0.167,
       "daysCover": 9000,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGBODROP": {
@@ -810,6 +1176,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 0.167,
       "daysCover": 5246,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGJOB100": {
@@ -823,6 +1190,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 2.667,
       "daysCover": 66,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGACTC30": {
@@ -836,6 +1204,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 51.99,
       "daysCover": 722,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     },
     "NSPKGACTCBOX": {
@@ -849,6 +1218,7 @@ export const CENTRAL_WH_DATA = {
       "consumption": 1.733,
       "daysCover": 1447,
       "reorder": false,
+      "constrains": true,
       "blocks": []
     }
   },
@@ -1094,7 +1464,7 @@ export const CENTRAL_WH_DATA = {
     }
   ],
   "flags": {
-    "unmappedNames": 0,
+    "unmappedNames": 1,
     "unmappedComponents": 27,
     "unparsedQuantities": 0,
     "manualReview": 0,
@@ -1102,7 +1472,12 @@ export const CENTRAL_WH_DATA = {
     "bomGaps": 5,
     "offlineMarketingSpike": 0,
     "detail": {
-      "unmapped_names": [],
+      "unmapped_names": [
+        {
+          "source": "production",
+          "name": "AC Tea Pouches(Green, Filled)"
+        }
+      ],
       "unmapped_components": [
         {
           "section": "SFG",

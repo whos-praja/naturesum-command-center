@@ -239,8 +239,11 @@ export async function parseShopify(file, opts = {}) {
     if (cutoff && day > cutoff.getTime()) continue;
     const ageDays = (lastTs - day) / 86400000;
     const units = num(r["Net items sold"]);
-    if (!byCode[code]) byCode[code] = { sales7d: 0, sales30d: 0, sales60d: 0, sales90d: 0 };
+    // D5: sales14d (0-14d) added alongside the existing buckets so data.js can
+    // compute a 14-day velocity for the MAX(30d,14d) window.
+    if (!byCode[code]) byCode[code] = { sales7d: 0, sales14d: 0, sales30d: 0, sales60d: 0, sales90d: 0 };
     if (ageDays <= 7)  byCode[code].sales7d  += units;
+    if (ageDays <= 14) byCode[code].sales14d += units;
     if (ageDays <= 30) byCode[code].sales30d += units;
     if (ageDays <= 60) byCode[code].sales60d += units;
     if (ageDays <= 90) byCode[code].sales90d += units;
@@ -348,7 +351,12 @@ function parseSheetDate(v) {
 }
 
 // Process a single daily-log channel tab → aggregate sales into byCode[channel].
-function processAgencyDailyLogTab(ws, channel, byCode) {
+// `cutoff` (Date | null) — D2 per-sheet cutoff: any daily-log row dated STRICTLY
+// AFTER the cutoff is dropped, and the trailing-window reference date is clamped
+// to the cutoff so the 7/14/30/60-day buckets age back from the cutoff, not from
+// a future row the founder asked to ignore. Null → no cutoff (use sheet's own
+// latest date, original behaviour).
+function processAgencyDailyLogTab(ws, channel, byCode, cutoff = null) {
   const grid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: true });
   if (!grid.length) return false;
 
@@ -371,12 +379,19 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
   }
   if (Object.keys(colMap).length === 0) return false;
 
-  // Determine cutoff = latest row date (snapshot semantics — not literal "today").
+  // Determine the trailing-window reference = latest row date ON OR BEFORE the
+  // D2 cutoff (snapshot semantics — not literal "today"). Rows dated strictly
+  // after the cutoff are ignored entirely, so they neither move the reference
+  // forward nor contribute to any bucket.
+  const cutoffTs = cutoff instanceof Date && !isNaN(cutoff.getTime()) ? cutoff.getTime() : null;
   const dataRows = grid.slice(headerIdx + 1);
   let latestTs = -Infinity;
   for (const r of dataRows) {
     const d = parseSheetDate(r[0]);
-    if (d) latestTs = Math.max(latestTs, d.getTime());
+    if (!d) continue;
+    const t = d.getTime();
+    if (cutoffTs != null && t > cutoffTs) continue; // D2: drop post-cutoff rows
+    latestTs = Math.max(latestTs, t);
   }
   if (!Number.isFinite(latestTs)) return false;
 
@@ -385,6 +400,7 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
   for (const r of dataRows) {
     const d = parseSheetDate(r[0]);
     if (!d) continue;
+    if (cutoffTs != null && d.getTime() > cutoffTs) continue; // D2: drop post-cutoff rows
     const ageDays = (latestTs - d.getTime()) / 86400000;
     // Extended to 120d so we can build a 4-month MoM ladder (monthly[]) for
     // data.js's MAX-MoM growth model. sales7/15/30/60 stay byte-identical.
@@ -393,9 +409,12 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
       const { code, multiplier } = colMap[col];
       const val = num(r[col]) * multiplier;
       if (!byCode[code])             byCode[code] = {};
-      if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales15d: 0, sales30d: 0, sales60d: 0, sales90d: 0, sales120d: 0 };
+      // D5: sales14d added (trailing 14d) alongside the existing buckets so
+      // data.js can compute a 14-day velocity for MAX(30d,14d).
+      if (!byCode[code][channel])    byCode[code][channel] = { sales7d: 0, sales14d: 0, sales15d: 0, sales30d: 0, sales60d: 0, sales90d: 0, sales120d: 0 };
       const tgt = byCode[code][channel];
       if (ageDays <=  7) tgt.sales7d  += val;
+      if (ageDays <= 14) tgt.sales14d += val;
       if (ageDays <= 15) tgt.sales15d += val;
       if (ageDays <= 30) tgt.sales30d += val;
       if (ageDays <= 60) tgt.sales60d += val;
@@ -432,8 +451,12 @@ function processAgencyDailyLogTab(ws, channel, byCode) {
   return true;
 }
 
-export async function parseAgencyChannelSales(file, _opts = {}) {
+export async function parseAgencyChannelSales(file, opts = {}) {
   const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+  // D2 per-sheet cutoff — applied to the daily-log path (the only agency shape
+  // with dated rows). WIDE/LONG shapes carry pre-aggregated 30d/60d totals with
+  // no row dates, so a cutoff is not applicable there.
+  const cutoff = opts.dateCutoff ? new Date(opts.dateCutoff) : null;
 
   // ── Try DAILY-LOG (founder's actual format) first when it's an xlsx
   //    workbook with channel-named tabs. Each tab is processed
@@ -448,7 +471,7 @@ export async function parseAgencyChannelSales(file, _opts = {}) {
       const byCode = {};
       const processedTabs = [];
       for (const { name, channel } of channelTabs) {
-        const ok = processAgencyDailyLogTab(wb.Sheets[name], channel, byCode);
+        const ok = processAgencyDailyLogTab(wb.Sheets[name], channel, byCode, cutoff);
         if (ok) processedTabs.push({ name, channel });
       }
       if (processedTabs.length > 0) {
@@ -555,14 +578,11 @@ export async function parseAgencyChannelSales(file, _opts = {}) {
   return { byCode, shape: "wide" };
 }
 
-// ─── 7. Nitin's live inventory sheet (xlsx) ─────────────────
-// Reuses the parseInventoryFile.js Nitin parser. Wrap it here so the
-// dispatcher has a single signature.
-export async function parseNitinSheet(file, _opts = {}) {
-  const { parseInventoryFile } = await import("./parseInventoryFile.js");
-  const result = await parseInventoryFile(file);
-  return result; // { fg, semiFg, raw, pkg, velocity, dataAsOf, ... }
-}
+// ─── 7. (retired) Nitin's live inventory sheet ──────────────
+// The parseNitinSheet wrapper + the 'nitin' upload zone were REMOVED
+// (FIX-SPEC V9). The central-warehouse engine (parseCentralWhWorkbook) is the
+// single warehouse source; its 72-day movement log must never feed velocity
+// (GROUND-TRUTH §3.5 — consumption = SALES, not warehouse movement).
 
 // ─── Dispatcher ──────────────────────────────────────────────
 // Every zone accepts every common spreadsheet/text format. The parser
@@ -580,10 +600,13 @@ export const FILE_TYPES = {
   "blinkit":       { label: "Blinkit Feeder-WH Inventory Sheet",  accept: ALL_FORMATS, parse: parseBlinkit },
   "flipkart":      { label: "Flipkart Current Inventory Sheet",   accept: ALL_FORMATS, parse: parseFlipkart },
   "shopify":       { label: "Shopify Website Sales Sheet",        accept: ALL_FORMATS, parse: parseShopify },
-  "nitin":         { label: "Warehouse Daily Inventory Sheet",    accept: ALL_FORMATS, parse: parseNitinSheet },
-  // 7th zone — ports the offline build-central-wh.cjs engine into the browser
-  // (audit baseline + post-audit production/movement roll-forward) so WH numbers
-  // are durable per founder decision §8.1. Supersedes the legacy 'nitin' path.
+  // ⚠️ The legacy 'nitin' (Warehouse Daily Inventory Sheet) zone is RETIRED
+  // (FIX-SPEC V9). It was a second, conflicting warehouse source whose 72-day
+  // log fed velocity as if it were sales (GROUND-TRUTH §3.5 violation). The
+  // central-warehouse engine below is the single warehouse authority.
+  // Central Warehouse Workbook zone — ports the offline build-central-wh.cjs
+  // engine into the browser (audit baseline + post-audit production/movement
+  // roll-forward) so WH numbers are durable per founder decision §8.1.
   "central-wh":    { label: "Central Warehouse Workbook (Audit + Production + Daily Movement)", accept: ALL_FORMATS, parse: (file, opts) => parseCentralWhWorkbook(file, opts) },
 };
 
