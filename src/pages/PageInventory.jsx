@@ -134,11 +134,17 @@ function writeBlkThreshold(skuCode, val) {
 }
 
 // Per-WH velocity for Blinkit. When real per-WH sales are present (from the
-// Blinkit Seller Panel export), use those directly. Otherwise fall back to
-// the rough split-total-velocity-across-WHs heuristic.
+// Blinkit Seller Panel export), use the SAME MAX(30d,15d) rule the channel cell
+// uses (D5 — plan for the higher recent demand; 15d is Blinkit's nearest-to-14d
+// window). Using 30d-only here understated per-WH velocity and overstated per-WH
+// days-of-cover vs the cell. Otherwise fall back to the rough
+// split-total-velocity-across-WHs heuristic.
 function blkPerWhVelocity(feeders, sku, whCode) {
   if (feeders?.perWhSales30d && feeders.perWhSales30d[whCode] != null) {
-    return feeders.perWhSales30d[whCode] / 30;
+    const rate30 = feeders.perWhSales30d[whCode] / 30;
+    const s15 = feeders.perWhSales15d?.[whCode];
+    const rate15 = Number.isFinite(s15) ? s15 / 15 : null;
+    return rate15 != null ? Math.max(rate30, rate15) : rate30;
   }
   const ever = feeders?.ever?.length || 0;
   const blkVel = sku?.channelVelocity?.blinkit ?? 0;
@@ -251,9 +257,11 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
   const stats = blkFeederStats(feeders, sku, threshold);
   // Roll-ups across all launched WHs
   const total30d = rows.reduce((a, r) => a + r.sales30d, 0);
+  const total15d = rows.reduce((a, r) => a + r.sales15d, 0);
   const total7d  = rows.reduce((a, r) => a + r.sales7d, 0);
   const totalDamaged = rows.reduce((a, r) => a + r.damaged, 0);
-  const avgDaily30 = total30d / 30;
+  // D5: "avg /d" uses MAX(30d,15d) to match the channel cell + per-WH rows.
+  const avgDaily30 = Math.max(total30d / 30, total15d / 15);
   const onSaveThreshold = () => {
     const v = Number(draftThreshold) || BLK_DEFAULT_AMBER;
     writeBlkThreshold(sku.code, v);
@@ -315,7 +323,7 @@ const BlinkitFeederModal = ({ sku, onClose }) => {
             </div>
             <div>
               <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: "var(--ink)" }}>{avgDaily30.toFixed(1)}</div>
-              <div className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 }}>avg /d</div>
+              <div className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: 2 }} title="MAX(30d avg, 15d avg) — matches the channel cell">avg /d · max(30,15)</div>
             </div>
             <div>
               <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: totalDamaged > 0 ? "var(--critical)" : "var(--ink-4)" }}>{D.fmtN(totalDamaged)}</div>
@@ -814,8 +822,16 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 
   const live = fk.live || 0;
   const daily30 = (fk.sales30d || 0) / 30;
-  const daily60 = (fk.sales60d || 0) / 60;
-  const days = daily30 > 0 ? Math.floor(live / daily30) : null;
+  // D5: the hero velocity + days-of-cover must use the SAME MAX(30d,14d) rule as
+  // the marketplace CELL (sku.channelVelocity.flipkart). Using 30d-only here made
+  // the modal disagree with the cell (~2× cover divergence) and understated
+  // velocity on a stockout-risk screen. The MoM growth below still uses the pure
+  // 30d-vs-prior-30d basis (a like-for-like window comparison). SAFE FALLBACK:
+  // 30d rate when channelVelocity is absent.
+  const velDaily = Number.isFinite(sku.channelVelocity?.flipkart)
+    ? sku.channelVelocity.flipkart
+    : daily30;
+  const days = velDaily > 0 ? Math.floor(live / velDaily) : null;
   const trend7vs30 = windows[0].daily - windows[2].daily; // 7d daily vs 30d daily
   const trendPct = windows[2].daily > 0 ? (trend7vs30 / windows[2].daily) * 100 : 0;
   // MoM growth: cur 30d daily vs prior 30d daily (sales60d − sales30d ÷ 30).
@@ -868,8 +884,8 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
               <div className="blk-modal-summary-label">stock left <FormulaIcon formulaId="fkStockLeft" skuCode={sku.code} currentValue={`${D.fmtN(live)} units (Live on Website)`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
-              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{daily30.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span></div>
-              <div className="blk-modal-summary-label">velocity · 30d avg <FormulaIcon formulaId="fkVelocity" skuCode={sku.code} currentValue={`${daily30.toFixed(1)}/d = ${fk.sales30d} sold ÷ 30`}/></div>
+              <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>{velDaily.toFixed(1)}<span className="blk-modal-summary-denom" style={{ marginLeft: 2 }}>/d</span></div>
+              <div className="blk-modal-summary-label">velocity · max(30,14) <FormulaIcon formulaId="fkVelocity" skuCode={sku.code} currentValue={`${velDaily.toFixed(1)}/d = MAX(${fk.sales30d} ÷ 30, ${fk.sales14d} ÷ 14)`}/></div>
             </div>
             <div className="blk-modal-summary-stat">
               <div className="blk-modal-summary-num mono" style={{ color: momColor }}>{momLabel}</div>
@@ -884,7 +900,7 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
               <div className="blk-modal-summary-num mono" style={{ color: "var(--ink)" }}>
                 {days != null ? `${days}d` : "—"}
               </div>
-              <div className="blk-modal-summary-label">days of cover <FormulaIcon formulaId="fkDaysOfCover" skuCode={sku.code} currentValue={`${days}d = ${D.fmtN(live)} stock ÷ ${daily30.toFixed(1)}/d`}/></div>
+              <div className="blk-modal-summary-label">days of cover <FormulaIcon formulaId="fkDaysOfCover" skuCode={sku.code} currentValue={`${days}d = ${D.fmtN(live)} stock ÷ ${velDaily.toFixed(1)}/d`}/></div>
             </div>
           </div>
 
@@ -973,7 +989,7 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 //      against the simpler marketplace cells).
 //   2. Runway pill + per-channel velocity + MoM growth chip (when velocity > 0)
 // Runway color tier: <14d red, <30d amber, otherwise neutral.
-const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) => {
+const PlatformCell = ({ units, runwayUnits, breakdown, breakdownLabel, velocity, growth }) => {
   const D = NSData;
   // Velocity floor — anything below this hides the runway pill (rounds to
   // 0.0/d on display anyway). Tunable from the ⚙ Settings modal.
@@ -981,7 +997,16 @@ const PlatformCell = ({ units, breakdown, breakdownLabel, velocity, growth }) =>
   const hasPositiveVel = velocity != null && velocity > floor;
   const isNetReturns   = velocity != null && velocity < 0;   // Bug #6 hook —
                                                               // returns outpacing sales
-  const runway = hasPositiveVel ? Math.round(units / velocity) : null;
+  // Runway basis: by default the displayed `units`, but a cell can pass a
+  // separate `runwayUnits` when the stock hero and the runway denominator
+  // legitimately differ. The Warehouse cell does this: hero = FG + Producible
+  // (what we COULD ship/pack), but runway = FG ÷ velocity per GROUND-TRUTH §3.5
+  // (producible needs a production run, so it is NOT instantly-shippable cover).
+  // Keeping the cell runway on FG-only also makes it agree with the SKU-level
+  // `s.runway` that drives the row status colour / reorder alert — otherwise the
+  // cell pill (incl. producible) contradicted the red/amber status (FG-only).
+  const runwayBasis = runwayUnits != null ? runwayUnits : units;
+  const runway = hasPositiveVel ? Math.round(runwayBasis / velocity) : null;
   const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
   // Bug #7 — render the growth chip independently of velocity. A SKU with
   // 0 sales today can still have a meaningful growth signal (e.g. just
@@ -1070,19 +1095,17 @@ const UnifiedStockTab = ({ inventory }) => {
   // Stock-runway alerts:
   //   skusRunningOut = SKUs where current runway ≤ supplier lead time (red).
   //     i.e. the reorder window has closed — we will run out before new stock lands.
-  //   materialsToReorder = count of (sku, materialType) pairs where coverage < 30d.
-  //     Raw coverage  = rawMaterial / (velocity × perPacketRaw)
-  //     Pkg coverage  = packaging   / velocity
+  //   materialsToReorder = count of CONSTRAINING components whose sales-based
+  //     days-of-cover < their own lead time (the engine component model — same
+  //     source as the Suppliers "Component reorder coverage" tab). This replaces
+  //     the legacy per-SKU warehouseBreakdown path, which used a flat 30d cutoff
+  //     with NO lead time + NO shared-pool (double-counted shared raw once per
+  //     SKU, missed the real shared bottleneck, and false-flagged zero-stock
+  //     lines). Non-constraining (cartons/air pouches) are excluded from the
+  //     headline alert — they're quickly arranged and never block production.
   const skusRunningOut = inventory.filter(s => s.runwayStatus === "red").length;
-  let materialsToReorder = 0;
-  inventory.forEach(s => {
-    const wb = s.warehouseBreakdown;
-    if (!wb || !s.velocity) return;
-    const rawCoverage = wb.rawMaterial / (s.velocity * (wb.perPacketRaw || 1));
-    const pkgCoverage = wb.packaging / s.velocity;
-    if (rawCoverage < 30) materialsToReorder++;
-    if (pkgCoverage < 30) materialsToReorder++;
-  });
+  const materialsToReorder = (D.centralWh?.components || [])
+    .filter(c => c.reorder && c.constrains).length;
   const hasCriticalAlerts = skusRunningOut > 0;
 
   // Top mover — the SKU with the highest sell-through velocity. Tie-breaker
@@ -1218,7 +1241,7 @@ const UnifiedStockTab = ({ inventory }) => {
           </div>
           <div className="rw-risk-detail">
             <strong>{skusRunningOut === 1 ? "Item" : "Items"}</strong> running out
-            <span className="muted"> · {materialsToReorder} material{materialsToReorder === 1 ? "" : "s"} need reordering (&lt; 30d coverage)</span>
+            <span className="muted"> · {materialsToReorder} material{materialsToReorder === 1 ? "" : "s"} need reordering (cover &lt; lead time)</span>
           </div>
         </div>
 
@@ -1406,6 +1429,7 @@ const UnifiedStockTab = ({ inventory }) => {
                   <td className="num mat-cell">
                     <PlatformCell
                       units={maxFg}
+                      runwayUnits={fg}
                       breakdown={
                         <>
                           <span className="pf-cell-bd-num">{D.fmtN(fg)}</span>
@@ -1414,7 +1438,7 @@ const UnifiedStockTab = ({ inventory }) => {
                           <span className="pf-cell-bd-tag">producible</span>
                         </>
                       }
-                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}${s.centralWhBinding ? ` (binding component: ${s.centralWhBinding})` : ""}`}
+                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}${s.centralWhBinding ? ` (binding component: ${s.centralWhBinding})` : ""}. Runway = packed FG ${D.fmtN(fg)} ÷ ${vel.warehouse}/d (producible needs a production run, excluded from cover).`}
                       velocity={vel.warehouse}
                       growth={s.centralWhGrowth ?? channelGrowth.warehouse}
                     />
@@ -3173,20 +3197,27 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   // marketplace integrations come online.
   const CHANNEL_LEAD = { amazonFBA: 3, flipkart: 2, blinkit: 1 };
 
-  // Runway = MaxFG ÷ projected velocity, where projected velocity =
-  // base velocity × (1 + MoM growth %). MoM growth represents the
-  // observed month-over-month trend; applying it projects next month's
-  // expected sales rate.
-  //   • Current mode  → uses each item's actual MoM growth
-  //   • Custom mode   → defaults to actual MoM; user can override per row
-  // Toggling without overriding = identical numbers (no surprise jumps).
+  // Runway = MaxFG ÷ velocity.
+  //   • Current mode  → displayed runway stays at the CURRENT 30-day sales pace
+  //                     (growthFactor = 1). Per GROUND-TRUTH §3.5: "Displayed
+  //                     runway stays at current 30-day pace (truthful); growth
+  //                     feeds only the forward reorder projection." Applying
+  //                     growth here inflated a declining SKU's runway (and would
+  //                     deflate a growing SKU's) — wrong either way.
+  //   • Custom mode   → an explicit what-if: project velocity by the chosen
+  //                     growth (defaults to the SKU's actual MoM; user can
+  //                     override per row), so the growth factor IS applied.
   const inventory = rawInventory.map(s => {
     // Growth source = central-WH sales-based aggregate MoM (mirror the display
     // precedence used on the Unified tab); fall back to legacy single growth.
     const actualGrowth = s.centralWhGrowth ?? s.growth ?? 0;
     const customGrowth = perRowGrowth[s.code] ?? actualGrowth;
     const effectiveGrowth = mode === "custom" ? customGrowth : actualGrowth;
-    const growthFactor = 1 + (Number.isFinite(effectiveGrowth) ? effectiveGrowth : 0) / 100;
+    // Only the custom what-if projects demand forward; current mode is truthful
+    // current-pace (§3.5). SAFE: NaN growth → factor 1.
+    const growthFactor = mode === "custom"
+      ? 1 + (Number.isFinite(effectiveGrowth) ? effectiveGrowth : 0) / 100
+      : 1;
     const whFg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = whFg + producibleFg;
@@ -3641,10 +3672,19 @@ const ForecastTab = ({ inventory, days, setDays }) => {
   //   - required: units we need to cover the period + 30d buffer
   //   - reorder:  max(0, required − maxFg)
   //   - atRisk:   maxFg < forecast → can't meet projected demand
-  const trendForIdx = (idx) =>
-    [1.18, 0.94, 1.22, 1.06, 1.32, 0.98, 1.45, 0.82, 1.12, 0.66, 1.08, 1.18, 1.04, 0.92][idx] || 1;
-  const rows = inventory.map((s, i) => {
-    const trend = trendForIdx(i);
+  // Forward trend factor = the SKU's REAL max-trailing-MoM growth (central-WH
+  // aggregate, mirroring the Simulator/Runway tabs), NOT a hardcoded array keyed
+  // by row index. The old `trendForIdx` lied: a declining SKU at index 6 got
+  // ×1.45 (massive over-order) and a fast mover at index 9 got ×0.66. Growth is
+  // already clamped to [−100, +200]% in data.js, so trend ∈ [0, 3]. SAFE: a
+  // missing/NaN growth → factor 1 (no projection).
+  const trendForSku = (s) => {
+    const g = s.centralWhGrowth ?? s.growth ?? 0;
+    const factor = 1 + (Number.isFinite(g) ? g : 0) / 100;
+    return Math.max(0, factor);
+  };
+  const rows = inventory.map((s) => {
+    const trend = trendForSku(s);
     const fg = s.warehouseBreakdown?.fg ?? s.stock.warehouse;
     const producibleFg = s.warehouseBreakdown?.producibleFG ?? 0;
     const maxFg = fg + producibleFg;

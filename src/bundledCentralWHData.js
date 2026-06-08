@@ -965,7 +965,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 1200,
       "oldStock": 0,
-      "consumption": -1.033,
+      "consumption": 0,
       "daysCover": null,
       "reorder": false,
       "constrains": true,

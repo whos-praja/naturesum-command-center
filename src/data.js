@@ -610,6 +610,11 @@ const NSData = (function () {
       perWhSales30d: Object.fromEntries(
         real.everLaunched.map(wh => [wh, real.byWh[wh]?.sales30d ?? 0])
       ),
+      // D5: per-WH 15-day sales so the modal can apply the same MAX(30d,15d)
+      // velocity rule the channel cell uses (Blinkit's nearest-to-14d window).
+      perWhSales15d: Object.fromEntries(
+        real.everLaunched.map(wh => [wh, real.byWh[wh]?.sales15d ?? 0])
+      ),
     };
   }
 
@@ -1319,6 +1324,47 @@ const NSData = (function () {
     return map;
   })();
 
+  // ── Sales-based component consumption (GROUND-TRUTH §3.5 / D5) ──────────────
+  // The central-WH ENGINE computes component consumption from Daily-Movement FG
+  // "stock-out" over the tiny post-audit window — that is WAREHOUSE MOVEMENT
+  // (bulk replenishment shipments to FBA/FBF/feeders), NOT sales. §3.5 is
+  // explicit: consumption = SALES, never warehouse movement. Using the engine's
+  // value here produced spurious component reorder alarms (e.g. SB raw 34d <50d
+  // lead → "reorder now"; SB-500 pouch 4d <14d) and even NEGATIVE consumption
+  // (returns > ship-outs in a 2-day window).
+  //
+  // Correct model: a component drains at the rate the FG that consume it SELL.
+  //   consumption[ref] = Σ over SKUs using ref of (sku.velocity × perUnit)
+  // where `sku.velocity` is the sales-based total velocity from data.js and
+  // `perUnit` is how many units of `ref` go into ONE FG pack (raw KG/Ltr via
+  // input.perPack; packaging via pkg[].unitsPerPack).
+  //
+  // SAFE FALLBACK: missing recipe / velocity → 0; never NaN. Clamped ≥0 so a
+  // returns-heavy net-negative velocity never yields negative consumption.
+  const componentSalesConsumption = (() => {
+    const cons = {};                       // refCode → units/day consumed by sales
+    const velByCode = {};
+    for (const s of inventory) {
+      velByCode[s.code] = Number.isFinite(s.velocity) ? Math.max(0, s.velocity) : 0;
+    }
+    for (const [skuCode, recipe] of Object.entries(SKU_RECIPE)) {
+      const vel = velByCode[skuCode] || 0;
+      if (vel <= 0) continue;
+      // Raw / semi-finished input.
+      const inp = recipe.input;
+      if (inp?.refCode && Number.isFinite(inp.perPack)) {
+        cons[inp.refCode] = (cons[inp.refCode] || 0) + vel * inp.perPack;
+      }
+      // Packaging components.
+      for (const p of (recipe.pkg || [])) {
+        if (!p?.refCode) continue;
+        const per = Number.isFinite(p.unitsPerPack) ? p.unitsPerPack : 1;
+        cons[p.refCode] = (cons[p.refCode] || 0) + vel * per;
+      }
+    }
+    return cons;
+  })();
+
   // ── D6 — Per-component reorder coverage (raw materials + primary packaging) ──
   // Exposed on NSData so the UI can render component reorder DATES alongside FG.
   // Each entry mirrors the engine component row + a computed reorder horizon:
@@ -1332,15 +1378,44 @@ const NSData = (function () {
   const centralWhComponents = (() => {
     try {
       const asOf = CWH_SRC?.asOf || CWH_SRC?.anchorDate || null;
+      // Sales-based per-SKU velocity, for deriving which SKUs a low component
+      // blocks (mirrors the engine `blocks` logic but on the SALES daysCover).
+      const velByCode = {};
+      for (const s of inventory) velByCode[s.code] = Number.isFinite(s.velocity) ? Math.max(0, s.velocity) : 0;
       return Object.values(CWH_COMP || {})
         .filter(c => c && c.ref)
         .map(c => {
           const stock = Number.isFinite(c.stock) ? c.stock : 0;
           const leadDays = Number.isFinite(c.leadDays) ? c.leadDays : null;
-          const daysCover = Number.isFinite(c.daysCover) ? c.daysCover : null;
+          // §3.5: consumption = SALES-based (Σ sku.velocity × perUnit), NOT the
+          // engine's Daily-Movement value. Clamp ≥0 (a net-negative velocity
+          // never yields negative consumption — P2-3). 0 consumption → not
+          // draining → daysCover null → no reorder pressure.
+          const salesCons = componentSalesConsumption[c.ref];
+          const consumption = Number.isFinite(salesCons) ? Math.max(0, salesCons) : 0;
+          const daysCover = consumption > 0 ? Math.round(stock / consumption) : null;
+          // D6: reorder when sales-based cover < own lead time. Kept for ALL
+          // components incl. non-constraining (you still reorder cartons).
+          const reorder = daysCover != null && leadDays != null && daysCover < leadDays;
           const reorderByDays = (daysCover != null && leadDays != null)
             ? daysCover - leadDays
             : null;
+          const constrains = c.constrains !== false;   // D1 flag
+          // Which SKUs does this CONSTRAINING component block? A SKU where this
+          // is the binding component, OR where sales-based cover < that SKU's
+          // lead time (recomputed on the sales basis — the engine `blocks` used
+          // the movement basis). Non-constraining never blocks (D1).
+          let blocks = [];
+          if (constrains) {
+            for (const skuCode of (itemUsedBy[c.ref] || [])) {
+              const inv = inventory.find(x => x.code === skuCode);
+              const skuLead = inv && Number.isFinite(inv.leadTime) ? inv.leadTime : null;
+              const isBinding = CWH_FG[skuCode]?.binding === c.ref;
+              if (isBinding || (daysCover != null && skuLead != null && daysCover < skuLead)) {
+                blocks.push(skuCode);
+              }
+            }
+          }
           return {
             ref: c.ref,
             name: c.name ?? c.ref,
@@ -1348,10 +1423,10 @@ const NSData = (function () {
             unit: c.unit ?? null,
             stock,
             oldStock: Number.isFinite(c.oldStock) ? c.oldStock : 0,
-            consumption: Number.isFinite(c.consumption) ? c.consumption : 0,
+            consumption: +consumption.toFixed(3),
             daysCover,
             leadDays,
-            reorder: !!c.reorder,
+            reorder,
             reorderByDays,
             // Reorder date (ISO, as-of + reorderByDays). null when no signal or
             // as-of is unknown. Negative reorderByDays → a past date (overdue).
@@ -1363,8 +1438,8 @@ const NSData = (function () {
                   return d.toISOString().slice(0, 10);
                 })()
               : null,
-            constrains: c.constrains !== false,   // D1 flag (cartons/air pouches false)
-            blocks: Array.isArray(c.blocks) ? c.blocks : [],
+            constrains,
+            blocks,
             usedBy: itemUsedBy[c.ref] || [],
           };
         })

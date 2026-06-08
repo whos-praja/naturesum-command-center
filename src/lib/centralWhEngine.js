@@ -745,6 +745,10 @@ function computeMetrics(state, balance, asOf) {
   }
 
   // Component metrics — consumption velocity = Σ over SKUs (sku sales30 × perPack)
+  // NOTE: this is the engine's MOVEMENT-based estimate. data.js OVERRIDES it with
+  // the SALES-based consumption (§3.5) for the UI; this value is kept only for
+  // the engine's standalone snapshot. Clamp ≥0 so a net-negative movement window
+  // (returns > ship-outs) never leaks a negative consumption / NaN cover.
   const compRows = [];
   for (const c of COMPONENTS) {
     let consumption = 0;
@@ -758,6 +762,7 @@ function computeMetrics(state, balance, asOf) {
         consumption += sv * perPack;
       }
     }
+    consumption = Math.max(0, consumption);
     // D8: deplete-only stock — balance[ref] is the audit baseline minus
     // post-audit production consumption (no inbound/PO sheet), clamped ≥0.
     const stock = Math.max(0, balance[c.ref] || 0);

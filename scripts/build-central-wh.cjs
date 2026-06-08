@@ -16,6 +16,7 @@
 const XLSX = require("xlsx");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 // ─── Config ─────────────────────────────────────────────────────
 // ANCHOR_DATE is now AUTO-DETECTED — the latest "Audit DDMMYY" sheet in the
@@ -26,7 +27,25 @@ let ANCHOR_SHEET = "Audit 050525";
 const MERGE_OLD_SB500 = true;
 const RANGE_RULE = "first"; // first | sum | min | max
 const W30 = 30, W60 = 60;
-const INPUT = process.argv[2] || "/Users/shivamprajapati/Downloads/Naturesum Live Inventory (2).xlsx";
+// Input workbook. P3-7: do NOT silently default to a stale "(2).xlsx" — a no-arg
+// rebuild used to regenerate the committed artifact from an old file. Resolve the
+// LATEST "Naturesum Live Inventory*.xlsx" in ~/Downloads by mtime; fail-loud
+// (R-FAILLOUD) if none is found, so a rebuild can never silently use stale data.
+function resolveLatestWorkbook() {
+  try {
+    const dir = path.join(os.homedir(), "Downloads");
+    const cand = fs.readdirSync(dir)
+      .filter((n) => /^Naturesum Live Inventory.*\.xlsx$/i.test(n))
+      .map((n) => ({ p: path.join(dir, n), m: fs.statSync(path.join(dir, n)).mtimeMs }))
+      .sort((a, b) => b.m - a.m);
+    return cand[0]?.p || null;
+  } catch { return null; }
+}
+const INPUT = process.argv[2] || resolveLatestWorkbook();
+if (!INPUT || !fs.existsSync(INPUT)) {
+  console.error("build-central-wh: no input workbook. Pass an explicit path:\n  node scripts/build-central-wh.cjs \"<path-to-Naturesum Live Inventory (N).xlsx>\"");
+  process.exit(1);
+}
 const OUT_JS = path.join(__dirname, "..", "src", "bundledCentralWHData.js");
 
 // ─── Fixed-asset + consumable classification ────────────────────
@@ -284,6 +303,12 @@ const flags = {
   unparsed_quantities: [],
   negative_stock: [],
   bom_gaps: [],
+  // Same component ref appearing on >1 audit row (often the same physical
+  // material listed under two sections, e.g. "SB Oil" under both RAW MATERIALS
+  // and SEMI-FINISHED GOODS → summed to 5.6L when it is one 2.8L drum). We sum
+  // by default but FLAG it so the founder can confirm rather than silently
+  // double-count. R-FAILLOUD / fail-loud mandate.
+  duplicate_component_rows: [],
   offline_marketing_spike: [],   // founder: flag unusual offline/marketing outflow
   notes: [],
 };
@@ -442,6 +467,9 @@ function parseAudit() {
     // SFG / RM / PKG — classify into BOM component | fixed asset | consumable.
     const ref = COMPONENT_ALIASES[nm];
     if (ref) {
+      // Track every audit row that maps to this ref so we can FLAG duplicate
+      // lines (same material under two sections) instead of silently summing.
+      (compRowOccurrences[ref] || (compRowOccurrences[ref] = [])).push({ section, name: bRaw, qty: cq.qty });
       if (isOld) oldComp[ref] = (oldComp[ref] || 0) + cq.qty;
       else       newComp[ref] = (newComp[ref] || 0) + cq.qty;
       continue;
@@ -711,6 +739,10 @@ function computeMetrics(balance, asOf) {
   }
 
   // Component metrics — consumption velocity = Σ over SKUs (sku sales30 × perPack)
+  // NOTE: this is the engine's MOVEMENT-based estimate. data.js OVERRIDES it with
+  // the SALES-based consumption (§3.5) for the UI; this value is kept only for
+  // the engine's standalone snapshot. Clamp ≥0 so a net-negative movement window
+  // (returns > ship-outs) never leaks a negative consumption / NaN cover.
   const compRows = [];
   for (const c of COMPONENTS) {
     let consumption = 0;
@@ -724,6 +756,7 @@ function computeMetrics(balance, asOf) {
         consumption += sv * perPack;
       }
     }
+    consumption = Math.max(0, consumption);
     // D8: deplete-only stock — balance[ref] is the audit baseline minus
     // post-audit production consumption (no inbound/PO sheet), clamped ≥0.
     const stock = Math.max(0, balance[c.ref] || 0);

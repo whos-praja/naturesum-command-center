@@ -268,6 +268,21 @@ function parseBlinkit(lookups) {
   return byCode;
 }
 
+// Resolve a FK SKU that may carry a multi-pack suffix ("NSSBDB100g*2") to its
+// base canonical code + pack multiplier (R-MULTIPACK). MIRROR of
+// resolveFkMultipack in src/lib/uploadParsers.js.
+function resolveFkMultipack(byFkSku, rawSku) {
+  const sku = String(rawSku || "").trim();
+  if (!sku) return null;
+  if (byFkSku[sku]) return { code: byFkSku[sku], multiplier: 1 };
+  const m = sku.match(/^(.+?)\s*\*\s*(\d+)$/);
+  if (m) {
+    const code = byFkSku[m[1].trim()];
+    if (code) return { code, multiplier: parseInt(m[2], 10) || 1 };
+  }
+  return null;
+}
+
 // ─── 3. Flipkart ──────────────────────────────────────────────
 function parseFlipkart(lookups) {
   console.log("\n── FLIPKART ──");
@@ -275,13 +290,14 @@ function parseFlipkart(lookups) {
   console.log(`  rows: ${rows.length}`);
   const byCode = {};
   const unmapped = new Set();
+  const QTY_FIELDS = ["live", "sales7d", "sales14d", "sales30d", "sales60d", "sales90d",
+    "reservedOrders", "reservedInt", "damaged", "transferIncoming"];
   for (const r of rows) {
     const sku = String(r["SKU"] || "").trim();
-    const code = lookups.byFkSku[sku];
-    if (!code) { if (sku) unmapped.add(sku); continue; }
-    byCode[code] = {
-      warehouseId:    r["Warehouse Id"],
-      sellingPrice:   num(r["Flipkart Selling Price"]),
+    const hit = resolveFkMultipack(lookups.byFkSku, sku);
+    if (!hit) { if (sku) unmapped.add(sku); continue; }
+    const { code, multiplier } = hit;
+    const qty = {
       live:           num(r["Live on Website"]),
       sales7d:        num(r["Sales 7D"]),
       sales14d:       num(r["Sales 14D"]),
@@ -292,9 +308,20 @@ function parseFlipkart(lookups) {
       reservedInt:    num(r["Reserved for Internal Processing"]),
       damaged:        num(r["Damaged"]),
       transferIncoming: num(r["B2B Receiving"]) + num(r["Transfers Receiving"]),
-      isFAssured:     String(r["F Assured Badge"] || "").toLowerCase() === "yes",
-      fulfilmentType: r["Fulfilment Type"],
     };
+    if (!byCode[code]) {
+      byCode[code] = { warehouseId: r["Warehouse Id"], sellingPrice: num(r["Flipkart Selling Price"]),
+        live: 0, sales7d: 0, sales14d: 0, sales30d: 0, sales60d: 0, sales90d: 0,
+        reservedOrders: 0, reservedInt: 0, damaged: 0, transferIncoming: 0,
+        isFAssured: String(r["F Assured Badge"] || "").toLowerCase() === "yes",
+        fulfilmentType: r["Fulfilment Type"] };
+    } else if (multiplier === 1) {
+      byCode[code].warehouseId = r["Warehouse Id"] || byCode[code].warehouseId;
+      if (num(r["Flipkart Selling Price"])) byCode[code].sellingPrice = num(r["Flipkart Selling Price"]);
+      if (String(r["F Assured Badge"] || "").toLowerCase() === "yes") byCode[code].isFAssured = true;
+      byCode[code].fulfilmentType = byCode[code].fulfilmentType || r["Fulfilment Type"];
+    }
+    for (const f of QTY_FIELDS) byCode[code][f] += qty[f] * multiplier;
   }
   console.log(`  mapped SKUs: ${Object.keys(byCode).length}`);
   if (unmapped.size) console.log(`  unmapped Flipkart SKUs: ${[...unmapped].join(", ")}`);
@@ -323,11 +350,24 @@ function parseShopify(lookups) {
     const day = new Date(r["Day"]).getTime();
     const ageDays = (lastTs - day) / (1000 * 60 * 60 * 24);
     const units = num(r["Net items sold"]);
-    if (!byCode[code]) byCode[code] = { sales7d: 0, sales30d: 0, sales60d: 0, sales90d: 0 };
+    // D5: sales14d (0-14d) added so data.js can compute MAX(30d,14d) velocity
+    // for the website/D2C leg (folds into the Amazon channel per R-FBA).
+    if (!byCode[code]) byCode[code] = { sales7d: 0, sales14d: 0, sales30d: 0, sales60d: 0, sales90d: 0 };
     if (ageDays <= 7)  byCode[code].sales7d  += units;
+    if (ageDays <= 14) byCode[code].sales14d += units;
     if (ageDays <= 30) byCode[code].sales30d += units;
     if (ageDays <= 60) byCode[code].sales60d += units;
     if (ageDays <= 90) byCode[code].sales90d += units;
+  }
+  // Derive a `monthly` ladder (trailing-30d sums, MOST-RECENT FIRST) from the
+  // 30/60/90 aging so data.js can compute max-trailing-MoM growth (§3.5).
+  // Shopify gives 3 months → 2 usable MoMs. R-NEGATIVES: diffs not clamped.
+  for (const code of Object.keys(byCode)) {
+    const d = byCode[code];
+    const s30 = Number.isFinite(d.sales30d) ? d.sales30d : 0;
+    const s60 = Number.isFinite(d.sales60d) ? d.sales60d : 0;
+    const s90 = Number.isFinite(d.sales90d) ? d.sales90d : 0;
+    d.monthly = [s30, s60 - s30, s90 - s60];
   }
   console.log(`  date range: ${dates[0]} → ${lastDate} (${dates.length} days)`);
   console.log(`  mapped SKUs: ${Object.keys(byCode).length}`);

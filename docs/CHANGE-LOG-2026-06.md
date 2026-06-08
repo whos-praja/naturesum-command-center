@@ -71,10 +71,61 @@ components, adjustable leads) ✓ · O4 total value (all locations, no double-co
 old included) ✓ · O5 smaller reqs ✓ · O6 durability (browser ingestion, latest
 audit auto-detect, fail-loud) ✓.
 
+## Lead-auditor pass 2 (2026-06, code-level fixes)
+Confirmed code-level bugs fixed; model/conceptual concerns (M1–M9) left for the
+founder report. Build + load clean; all reported conformance items still hold;
+total value moved ₹72.32L → ₹72.62L (the +₹0.30L is the now-counted Flipkart
+multi-pack stock — P1-8 — not an inflation).
+
+- **P0-1 growth never max-trailing-MoM** — the bundled agency/shopify artifacts
+  lacked `monthly[]` (and `sales14d`/`sales90d`), so `maxMoMGrowth()` got null and
+  silently fell to single-MoM. Regenerated both bundles via the parsers' current
+  output; added a committed generator `scripts/build-bundled-agency.cjs` (offline
+  twin of `processAgencyDailyLogTab`) so the agency bundle can't drift again.
+  NSSB100 amazon growth −18.2 (single-MoM) → +13.5 (max-MoM).
+- **P0-2 forecast fake trend** (`PageInventory.jsx` ForecastTab) — replaced the
+  hardcoded `trendForIdx[idx]` array (keyed by row index) with the SKU's real
+  growth factor `1 + (centralWhGrowth ?? growth)/100`.
+- **P0-3 component consumption on movement velocity** (`data.js`
+  `centralWhComponents`) — recomputed consumption/daysCover/reorder/blocks from
+  the SALES-based per-SKU velocity (Σ sku.velocity × perPack) instead of the
+  engine's Daily-Movement `sales30`. Kills spurious reorders (NSSBPR 34d→111d,
+  NSPKGSBP500 4d→16d, NSMLPR 41d→1053d). Defensive `consumption ≥ 0` clamp added
+  to BOTH engine twins (P2-3 — NSPKGDBP500 −1.033 → 0).
+- **P1-1 dashboard reorder count** (`PageInventory.jsx`) — `materialsToReorder`
+  now derives from `D.centralWh.components.filter(reorder && constrains)` (same
+  engine source as the Suppliers tab), not the legacy flat-30d warehouseBreakdown
+  path. Resolves the dashboard-vs-Suppliers contradiction (P2-2).
+- **P1-2 Flipkart modal velocity / days-of-cover** — use
+  `sku.channelVelocity.flipkart` (MAX(30,14)) instead of 30d-only; MoM kept on
+  the pure 30d basis; relabeled "max(30,14)".
+- **P1-3 Blinkit modal per-WH + avg /d velocity** — `blkPerWhVelocity` and the
+  summary "avg /d" now use MAX(30d,15d) (added per-WH `sales15d` in data.js);
+  relabeled "max(30,15)".
+- **P1-4 RunwayTab current-mode growth** — current mode no longer applies the
+  growth factor to displayed runway (§3.5: current = current pace); growth is
+  reserved for the custom what-if.
+- **P1-5/P1-6 Shopify sales14d + monthly[]** — added to the offline
+  `import-marketplace-data.cjs` parseShopify and regenerated
+  `realMarketplaceData.js` (stock snapshots byte-identical; only shopify gained
+  the fields). shopify velocityWindow now max(30,14) on all SKUs, not 30d-only.
+- **P1-7 NSACDT30 in agency bundle** — added the `acacia catechu → NSACDT30`
+  alias to the live + offline agency name maps; NSACDT30 now carries real agency
+  velocity (1.0 fallback → 1.3/d) + growth.
+- **P1-8 Flipkart multi-pack fold (R-MULTIPACK)** — `parseFlipkart` (live +
+  offline) strips `*N`, resolves the base SKU, folds N× units/sales into it.
+  NSSBDB100 FK live 74 → 150, sales30d 59 → 121. (Blinkit native is name/UoM
+  snapshot with no `*N` rows — no change needed there; agency Blinkit already
+  folds multipacks.)
+- **P3-7 stale rebuild default** — `build-central-wh.cjs` no longer defaults to
+  the stale "(2).xlsx"; it resolves the latest "Naturesum Live Inventory*.xlsx"
+  by mtime and fails loud if none is found.
+
 ## Still open / maintenance
 - Engine twins (`centralWhEngine.js` + `build-central-wh.cjs`) are duplicate
   logic — keep in sync.
 - Juice air pouch treated as non-constraining (air-wrap) — flag if that's wrong.
 - Component inbound/PO sheet not yet modelled (deplete-only) — add when ready.
 - Cascade "total runway = Infinity when WH residual velocity = 0 and a channel
-  has 0 velocity" — defensible; optional redefinition pending.
+  has 0 velocity" — defensible; optional redefinition pending (P2-4 — the Sim/
+  RunwayTab still coerce that Infinity to 0d for true zero-demand SKUs).

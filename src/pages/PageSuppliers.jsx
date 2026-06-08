@@ -213,7 +213,11 @@ const PageSuppliers = () => {
 function componentReorderCount(D) {
   const list = D?.centralWhComponents;
   if (!Array.isArray(list)) return 0;
-  return list.filter(c => c && c.reorder).length;
+  // D1: non-constraining components (cartons, juice air pouches — "quickly
+  // arranged") are excluded from the reorder count so this badge matches the
+  // dashboard's `reorder && constrains` filter (P2-2 — no dashboard-vs-Suppliers
+  // contradiction). They still render in the table, just not counted as needed.
+  return list.filter(c => c && c.reorder && c.constrains !== false).length;
 }
 
 // Human-readable reorder timing from reorderByDays (+ optional ISO date).
@@ -246,7 +250,9 @@ function ComponentReorderTab({ D }) {
     );
   }
 
-  const reorderNow = list.filter(c => c.reorder).length;
+  // D1/P2-2: exclude non-constraining (cartons, juice air pouches) so the
+  // tab badge agrees with the dashboard's constraining-only reorder count.
+  const reorderNow = list.filter(c => c.reorder && c.constrains !== false).length;
 
   return (
     <Card

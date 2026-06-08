@@ -188,18 +188,36 @@ export async function parseBlinkit(file, _opts = {}) {
   return byCode;
 }
 
+// Resolve a marketplace SKU that may carry a multi-pack suffix ("NSSBDB100g*2")
+// to its base canonical code + the pack multiplier (R-MULTIPACK). Each multi-pack
+// unit ships N base-SKU units, so its stock/sales fold into the base × N. Returns
+// { code, multiplier } or null when neither the suffixed nor the base resolves.
+function resolveFkMultipack(rawSku) {
+  const sku = String(rawSku || "").trim();
+  if (!sku) return null;
+  if (byFkSku[sku]) return { code: byFkSku[sku], multiplier: 1 }; // exact match first
+  const m = sku.match(/^(.+?)\s*\*\s*(\d+)$/);
+  if (m) {
+    const base = m[1].trim();
+    const code = byFkSku[base];
+    if (code) return { code, multiplier: parseInt(m[2], 10) || 1 };
+  }
+  return null;
+}
+
 // ─── 4. Flipkart current inventory (CSV) ────────────────────
 export async function parseFlipkart(file, _opts = {}) {
   const txt = await fileToText(file);
   const rows = parseCsv(txt);
   const byCode = {};
+  // Additive quantity fields fold N× from a multi-pack row into the base SKU.
+  const QTY_FIELDS = ["live", "sales7d", "sales14d", "sales30d", "sales60d", "sales90d",
+    "reservedOrders", "reservedInt", "damaged", "transferIncoming"];
   for (const r of rows) {
-    const sku = String(r["SKU"] || "").trim();
-    const code = byFkSku[sku];
-    if (!code) continue;
-    byCode[code] = {
-      warehouseId: r["Warehouse Id"],
-      sellingPrice: num(r["Flipkart Selling Price"]),
+    const hit = resolveFkMultipack(r["SKU"]);
+    if (!hit) continue;
+    const { code, multiplier } = hit;
+    const qty = {
       live: num(r["Live on Website"]),
       sales7d: num(r["Sales 7D"]),
       sales14d: num(r["Sales 14D"]),
@@ -210,9 +228,21 @@ export async function parseFlipkart(file, _opts = {}) {
       reservedInt: num(r["Reserved for Internal Processing"]),
       damaged: num(r["Damaged"]),
       transferIncoming: num(r["B2B Receiving"]) + num(r["Transfers Receiving"]),
-      isFAssured: String(r["F Assured Badge"] || "").toLowerCase() === "yes",
-      fulfilmentType: r["Fulfilment Type"],
     };
+    if (!byCode[code]) {
+      byCode[code] = { warehouseId: r["Warehouse Id"], sellingPrice: num(r["Flipkart Selling Price"]),
+        live: 0, sales7d: 0, sales14d: 0, sales30d: 0, sales60d: 0, sales90d: 0,
+        reservedOrders: 0, reservedInt: 0, damaged: 0, transferIncoming: 0,
+        isFAssured: String(r["F Assured Badge"] || "").toLowerCase() === "yes",
+        fulfilmentType: r["Fulfilment Type"] };
+    } else if (multiplier === 1) {
+      // A later exact-match (base) row carries the canonical metadata.
+      byCode[code].warehouseId = r["Warehouse Id"] || byCode[code].warehouseId;
+      if (num(r["Flipkart Selling Price"])) byCode[code].sellingPrice = num(r["Flipkart Selling Price"]);
+      if (String(r["F Assured Badge"] || "").toLowerCase() === "yes") byCode[code].isFAssured = true;
+      byCode[code].fulfilmentType = byCode[code].fulfilmentType || r["Fulfilment Type"];
+    }
+    for (const f of QTY_FIELDS) byCode[code][f] += qty[f] * multiplier;
   }
   return byCode;
 }
@@ -298,7 +328,11 @@ const AGENCY_NAME_MAP = {
   "sea buckthorn juice 500ml":    "NSSBJ500",
   "moringa powder 100g":          "NSMP100",
   "moringa powder 250g":          "NSMP250",
-  // "acacia catechu" intentionally unmapped — founder to confirm SKU
+  // Acacia Catechu = the Diabetes Care Tea (NSACDT30, marketplace MSKU
+  // DI-TE-1-A). Mapped so the agency Amazon/FK/Blinkit velocity + growth carry
+  // it; previously unmapped → NSACDT30 fell back to the 1.0/d orders proxy
+  // flagged "30d-only" and its growth degraded (P1-7).
+  "acacia catechu":               "NSACDT30",
 };
 
 function normalizeAgencyName(s) {
