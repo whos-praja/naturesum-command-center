@@ -1341,7 +1341,21 @@ const NSData = (function () {
     // direct-WH-sales lane isn't cleanly isolable from the exports without
     // double-counting the website demand already folded into the Amazon channel
     // — see M6 note in docs/CHANGE-LOG; revisit if a clean direct lane lands).
-    const cwhSellable = (cwh.fgStock || 0) + alloc.producible;
+    const freshSellable = (cwh.fgStock || 0) + alloc.producible;
+    const oldUnits = next.centralWhOldStock || 0;
+    // M4 (founder clarification, 2026-06) — a SKU whose FRESH stock is gone but
+    // whose OLD stock is still ACTIVELY SELLING is NOT dead/discontinued: those
+    // old batches are the live inventory and the line WILL be restocked (e.g. the
+    // dry-berries — selling old stock now, fresh berries on order later). So count
+    // the old stock as the available WH cover here, so runway + reorder are REAL
+    // and the founder gets a timely reorder alert. (The general "old excluded from
+    // runway/producible/value-only" rule still holds for SKUs that have fresh
+    // stock, or have old stock but NO demand — genuinely dead stock.)
+    const oldStockSelling = freshSellable <= 0 && oldUnits > 0 && totalSalesVel > 0;
+    next.oldStockSelling = oldStockSelling;
+    const cwhSellable = freshSellable > 0
+      ? freshSellable
+      : (oldStockSelling ? oldUnits : freshSellable);
     const cascadeHeadline = computeCascade({
       whStock: cwhSellable,
       whBaseVelocity: 0,
@@ -1362,12 +1376,6 @@ const NSData = (function () {
       ? Math.round(cascadeHeadline.totalRunway)
       : (cwhSellable <= 0 ? 0 : null);
     next.runway = next.centralWhRunway;
-    // M4 — "old stock only" SKUs: 0 sellable, 0 producible, but old (unsellable)
-    // stock on hand. Per founder these dry-berry lines were a compromise sale and
-    // are now discontinued — keep 0 sellable, but DON'T raise a reorder alarm or
-    // count them as "running out" (there's nothing to restock). Old stock still
-    // shows in total value.
-    next.oldStockOnly = cwhSellable <= 0 && (next.centralWhOldStock || 0) > 0;
     // Status — HARD zero-sellable guard first (fixes the green-stockout bug R7),
     // then thresholds against the NETWORK runway, amber from the tunable param.
     const amberDays = readParam("amberRunwayDays") || 30;
@@ -1383,20 +1391,19 @@ const NSData = (function () {
     // looks healthy: its marketplace buffers mask a warehouse that can't be
     // refilled. Don't let it read green — escalate to amber (watch) and flag it
     // so the UI can caption "can't replenish · WH cover below lead". The raw/SFG
-    // PO itself is surfaced separately on the component-reorder tab.
+    // PO itself is surfaced separately on the component-reorder tab. Excludes
+    // old-stock-selling SKUs (already red + reorder + their own caption).
     next.thinUnmakeable =
-      !next.oldStockOnly
-      && alloc.producible <= 0
+      alloc.producible <= 0
       && next.centralWhRunwayWhOnly != null
       && next.centralWhRunwayWhOnly <= next.leadTime;
     if (next.thinUnmakeable && next.runwayStatus === "green") next.runwayStatus = "amber";
-    // Reorder = network runway shorter than the replenishment lead time, OR out
-    // of sellable cover — UNLESS the SKU is discontinued (old-stock-only), which
-    // has nothing to reorder. Raw-PO timing lives on the component-reorder tab.
-    next.reorder = !next.oldStockOnly && (
+    // Reorder = out of sellable cover OR network runway shorter than the
+    // replenishment lead time. Old-stock-selling SKUs reorder normally (founder:
+    // they ARE being restocked). Raw-PO timing also lives on the component tab.
+    next.reorder =
       cwhSellable <= 0
-      || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime)
-    );
+      || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime);
     // M5 — flag when the forward growth used for reorder/forecast hit the +75%
     // cap, so the UI can explain why (the peak-window velocity is already
     // aggressive; the growth uplift is capped to avoid double-counting the same

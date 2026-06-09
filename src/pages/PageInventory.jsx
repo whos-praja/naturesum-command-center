@@ -1106,9 +1106,10 @@ const UnifiedStockTab = ({ inventory }) => {
   //     SKU, missed the real shared bottleneck, and false-flagged zero-stock
   //     lines). Non-constraining (cartons/air pouches) are excluded from the
   //     headline alert — they're quickly arranged and never block production.
-  // M4 — discontinued "old stock only" SKUs (0 sellable, not being restocked)
-  // are excluded: they're not "running out", there's nothing to reorder.
-  const skusRunningOut = inventory.filter(s => s.runwayStatus === "red" && !s.oldStockOnly).length;
+  // Red SKUs that need action. (M4 clarification — old-stock-selling SKUs like
+  // the dry-berries ARE counted: they're genuinely running low on fresh stock
+  // and WILL be restocked, so the founder needs the alert.)
+  const skusRunningOut = inventory.filter(s => s.runwayStatus === "red").length;
   const materialsToReorder = (D.centralWh?.components || [])
     .filter(c => c.reorder && c.constrains).length;
   const hasCriticalAlerts = skusRunningOut > 0;
@@ -2353,11 +2354,19 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                   <dd>{runwayStr}</dd>
                   <dt title="If every marketplace vanished and the central warehouse alone served all demand. Worst-case floor, not the headline.">WH-only runway (worst case)</dt>
                   <dd className="muted">{whOnlyStr}</dd>
-                  {sku.thinUnmakeable && (
+                  {sku.thinUnmakeable && !sku.oldStockSelling && (
                     <>
                       <dt style={{ color: "var(--warning)" }}>⚠ Can't replenish</dt>
                       <dd className="muted" style={{ color: "var(--warning)", fontSize: 11 }}>
                         Producible 0 (raw/SFG exhausted) and WH-only cover is below the {sku.leadTime}-day lead — the network looks healthy only because marketplace buffers mask a warehouse that can't be refilled. Order raw/SFG (see component reorder).
+                      </dd>
+                    </>
+                  )}
+                  {sku.oldStockSelling && (
+                    <>
+                      <dt style={{ color: "var(--warning)" }}>Selling through old stock</dt>
+                      <dd className="muted" style={{ fontSize: 11 }}>
+                        No fresh FG — the runway above is cover from the remaining old stock ({D.fmtN(sku.centralWhOldStock)} units), which is still selling. Not discontinued: reorder fresh raw to rebuild stock (lead {sku.leadTime}d).
                       </dd>
                     </>
                   )}

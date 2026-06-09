@@ -142,10 +142,19 @@ implementation:
   (incl. juice tube/label → closes the engine BOM gap, M8). Rows carry
   `shared`/`sharedWith`/`fullCapacity`; Materials breakdown shows the allocated
   capacity + "also used by".
-- **M4 — old dry-berry stays 0 sellable + discontinued.** `oldStockOnly` flag →
-  reorder=false, excluded from `skusRunningOut`. Engine twins now deplete the OLD
-  bucket for post-audit ship-outs (no phantom negatives) — `negative_stock` 4→1
-  (surviving NSSBJ500 −1 is a real over-ship). Old value tracked (₹13.94 L).
+- **M4 — old dry-berry = ACTIVE old-stock-selling (NOT discontinued).** Founder
+  clarification: the dry-berry lines have no FRESH stock, but the OLD batches are
+  the LIVE selling inventory (~42 units/day) and fresh raw WILL be reordered. So
+  when a SKU has 0 fresh stock but old stock that's still selling (velocity > 0),
+  the old stock is counted as the WH cover: runway = real old-stock cover, reorder
+  fires normally, included in `skusRunningOut`. (The general "old excluded from
+  runway/producible/value-only" rule still holds for SKUs that have fresh stock,
+  or old stock with NO demand — genuinely dead stock.) Flagged `oldStockSelling`
+  with a "selling through old stock · reorder fresh raw" caption. Engine twins
+  deplete the OLD bucket for post-audit ship-outs (no phantom negatives) —
+  `negative_stock` 4→1 (surviving NSSBJ500 −1 is a real over-ship). Result:
+  NSSBDB250/500 red + reorder (41/45 d < 50 d lead), NSSBDB100 amber watch
+  (53 d, can't replenish). Old value tracked (₹13.94 L).
 - **M5 — growth clamp +200% → +75% (`GROWTH_CAP`).** Velocity already uses the
   peak (30,14) window, so the forward uplift is capped to avoid double-counting
   the surge. `growthCapped` flag + a "capped +75%" Forecast chip + popover note.
@@ -174,10 +183,11 @@ clean. It found **4 surface/consistency gaps**; 3 fixed, 1 deferred to founder:
   net 52 green but producible 0 / WH-only 19 / +65% growth). New `thinUnmakeable`
   flag escalates green→amber (producible 0 && WH-only ≤ lead) with a drill caption.
   Catches NSACDT30 + NSSBJ300.
-- **ISSUE 4 (NEEDS FOUNDER SIGN-OFF)** — the 3 discontinued dry-berry SKUs carry
-  live cross-marketplace demand (~42 units/day) with thin buffers yet, per M4, are
-  silent on reorder. This is M4 as ruled, but the tool is intentionally quiet on
-  real ongoing sales — confirm intended.
+- **ISSUE 4 (RESOLVED by founder)** — the 3 dry-berry SKUs carry live
+  cross-marketplace demand (~42 units/day). Founder confirmed they are NOT
+  discontinued (fresh raw will be reordered), so the M4 "silent/discontinued"
+  behaviour was reversed: old-stock-selling SKUs now count their old stock as
+  cover and fire reorder normally (see corrected M4 above).
 
 ## Still open / maintenance
 - Engine twins (`centralWhEngine.js` + `build-central-wh.cjs`) are duplicate
