@@ -172,10 +172,10 @@ export const FORMULA_REFERENCE = [
   },
   {
     id: "runway",
-    name: "Per-row runway",
-    expression: "runway = round( centralWhFG ÷ totalSalesVelocity )\n  totalSalesVelocity = Σ per-channel MAX(30d, 14d) sales rate\n  sellable(FG + producible) ≤ 0 → 0   ·   sellable > 0 but velocity = 0 → null (no sales signal)",
-    plain: "Days the central-WH finished goods last at the company's TOTAL SALES velocity (sum of the per-channel MAX(30d,14d) sales rates), NOT warehouse movement — bulk replenishment shipments out of the WH are not consumption. Numerator is WH finished goods only (old stock is excluded — never sellable). Runway is 0 (and the row is red) when sellable stock (FG + producible) ≤ 0; null when there IS sellable stock but no sales signal at all (shows amber, not a false runway).",
-    where: "src/data.js · centralWhRunway / runway",
+    name: "Per-row runway (network cascade)",
+    expression: "HEADLINE runway = network cascade (computeCascade): each marketplace drains its OWN buffer at its sales velocity first; as a channel empties its demand falls back to the WH; runway = the day the central WH itself hits zero.\n  WH stock fed in = sellable = FG + producible (M2)\n  WH-only worst case = round( sellable ÷ totalSalesVelocity )   (kept as a labelled floor)\n  sellable ≤ 0 → 0   ·   no demand anywhere → null (no sales signal)",
+    plain: "M1 — the headline runway is the NETWORK cascade, not a flat divide. The old number (WH FG ÷ Σ all-channel velocity) assumed the warehouse served 100% of every channel's demand from day 0, which double-counted the stock the marketplaces already hold and flagged healthy SKUs red. The cascade instead drains each marketplace's own buffer first and only loads the WH as channels die — so a SKU with healthy FBA/Flipkart/Blinkit stock reads green even if the WH alone is thin. The WH stock counted is sellable = FG + producible (what we can ship OR pack now). A 'WH-only (worst case)' line — what runway would be if every marketplace vanished — is shown beneath as a floor. Runway is 0 (red) when sellable ≤ 0; null (amber) when there's stock but no sales signal. Old stock is excluded (never sellable). Velocity is SALES, not warehouse movement.",
+    where: "src/data.js · centralWhRunway (computeCascade) / centralWhRunwayWhOnly",
   },
   {
     id: "runwayStatus",
@@ -201,16 +201,16 @@ export const FORMULA_REFERENCE = [
   {
     id: "growth",
     name: "MoM growth (max trailing)",
-    expression: "growth = max( monthOverMonth SALES rates )    (up to 3 MoMs from up to 4 months), clamp [−100%, +200%]",
-    plain: "Forward growth = the MAX of the trailing month-over-month SALES growth rates (up to 3, computed from up to 4 months of sales) — plan for the highest growth seen so you don't under-stock. Fewer months → fewer MoMs; <2 months → 0. Each channel uses its OWN sales source (not warehouse movement). Clamped to −100%…+200% so a near-zero base can't make the ratio explode. Growth drives the FORWARD reorder projection; displayed runway stays at the current sales pace.",
+    expression: "growth = max( monthOverMonth SALES rates )    (up to 3 MoMs from up to 4 months), clamp [−100%, +75%]",
+    plain: "Forward growth = the MAX of the trailing month-over-month SALES growth rates (up to 3, computed from up to 4 months of sales) — plan for the highest growth seen so you don't under-stock. Fewer months → fewer MoMs; <2 months → 0. Each channel uses its OWN sales source (not warehouse movement). Clamped to −100%…+75% (M5): the velocity already uses the PEAK of the 30- and 14-day windows, so the growth uplift is capped at +75% to avoid ordering twice for the same short-term surge (the old +200% cap compounded the spike). SKUs hitting the cap show a 'capped +75%' note. Growth drives the FORWARD reorder projection; displayed runway stays at the current sales pace.",
     where: "src/data.js · channelGrowth / centralWhGrowth",
   },
   {
     id: "producibleFG",
     name: "Producible FG (BOM cap)",
-    expression: "producibleFG = min over CONSTRAINING components of floor(component qty / units-per-pack)\n  CONSTRAINING = all BOM components EXCEPT the easily-arranged set (cartons NSPKGCB100/250, juice air pouches NSPKGJB300/500)",
-    plain: "The slowest GENUINE constraint (raw/SFG input or a real packaging component) caps how many additional FG packs we could pack today. Each capacity = floor(component qty / units-per-pack). Cartons and juice air-pouches are EXCLUDED (D1) — they're quickly arranged, so they never cap producible or become the bottleneck. Old stock does not count toward producible. Sourced from the central-WH engine, which applies the same exclusion.",
-    where: "src/data.js · warehouseBreakdown.producibleFG (NON_CONSTRAINING filter)",
+    expression: "producibleFG = min over CONSTRAINING components of floor(ALLOCATED component qty / units-per-pack)\n  CONSTRAINING = all BOM components EXCEPT the easily-arranged set (cartons NSPKGCB100/250, juice air pouches NSPKGJB300/500)\n  shared input → allocated by demand share = (SKU velocity × per-pack) ÷ Σ across consuming SKUs",
+    plain: "The slowest GENUINE constraint (raw/SFG input or a real packaging component) caps how many additional FG packs we could pack today. Each capacity = floor(component qty / units-per-pack). Cartons and juice air-pouches are EXCLUDED (D1) — they're quickly arranged, so they never cap producible or become the bottleneck. Old stock does not count. M3 — when an input is SHARED across SKUs (e.g. Moringa raw feeds both 100 g and 250 g), its stock is ALLOCATED across them by demand share before the cap, so the per-SKU producibles are realistic and don't double-claim the same pool (no more '1000 + 400 from 100 kg'). Shared rows are marked 'shared' in the Materials breakdown with the allocated capacity.",
+    where: "src/data.js · warehouseBreakdown.producibleFG (M3 constrained allocation)",
   },
   {
     id: "maxFg",
@@ -286,8 +286,8 @@ export const FORMULA_REFERENCE = [
   {
     id: "channelMomGrowth",
     name: "Per-channel MoM growth",
-    expression: "growth = clamp((sales30d − prior30) / prior30 × 100, −100, +200)\n  where prior30 = sales60d − sales30d",
-    plain: "Each cell shows ITS OWN channel's MoM. Sources: Amazon → Agency AMZ tab. Shopify → Shopify CSV. Flipkart → FK Seller Hub. Blinkit → Agency Blinkit tab (native lacks 60d). Central WH = aggregate across all channels.",
+    expression: "growth = max trailing MoM SALES rate, clamp [−100, +75]   (falls back to single-MoM (sales30d − prior30)/prior30 when <2 monthly buckets)\n  where prior30 = sales60d − sales30d",
+    plain: "Each cell shows ITS OWN channel's MoM — the MAX of the trailing month-over-month sales rates (M5 cap +75%). Sources: Amazon → Agency AMZ tab. Shopify → Shopify CSV. Flipkart → FK Seller Hub. Blinkit → Agency Blinkit tab (native lacks 60d). Central WH = aggregate across all channels.",
     where: "src/data.js · channelGrowth",
   },
   {

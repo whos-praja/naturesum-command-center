@@ -394,7 +394,7 @@ function parseAudit(wb, state) {
   state.anchorSheet = detected.name;
   state.anchorDate  = detected.date;
   const ANCHOR_DATE = detected.date;
-  const { flags, ledger, newFG, oldFG, newComp, oldComp, fixedAssets, consumables } = state;
+  const { flags, ledger, newFG, oldFG, newComp, oldComp, compRowOccurrences, fixedAssets, consumables } = state;
 
   const grid = XLSX.utils.sheet_to_json(wb.Sheets[detected.name], { header: 1, defval: "", raw: true });
 
@@ -452,6 +452,11 @@ function parseAudit(wb, state) {
     // SFG / RM / PKG — classify into BOM component | fixed asset | consumable.
     const ref = COMPONENT_ALIASES[nm];
     if (ref) {
+      // Track every audit row mapping to this ref → FLAG duplicate lines (same
+      // material under two sections) instead of silently summing (mirror CJS).
+      const occ = (compRowOccurrences[ref] || (compRowOccurrences[ref] = []));
+      occ.push({ section, name: bRaw, qty: cq.qty });
+      if (occ.length === 2) flags.duplicate_component_rows.push({ ref, rows: occ.slice() });
       if (isOld) oldComp[ref] = (oldComp[ref] || 0) + cq.qty;
       else       newComp[ref] = (newComp[ref] || 0) + cq.qty;
       continue;
@@ -592,9 +597,28 @@ function computeBalances(state) {
     const sign = (e.txn === "produce" || e.txn === "produce_sfg" || e.txn === "return_in") ? +1 : -1;
     balance[e.code] = (balance[e.code] || 0) + sign * e.qty;
   }
-  // Flag negatives
+  // M4 — absorb FG ship-out overshoot into the OLD bucket, THEN flag negatives.
+  // When a finished-good's NEW/sellable balance rolls below 0 after the audit, it
+  // means OLD stock was physically shipped (per founder: the dry-berry lines were
+  // a compromise sale of old stock and are now discontinued). Deplete oldFG by
+  // the shortfall so (a) the displayed old-stock + value reflect reality and
+  // (b) we don't raise a phantom negative-stock data-quality flag. Only flag a
+  // genuine negative when BOTH new and old are exhausted (a true over-ship).
   for (const [code, q] of Object.entries(balance)) {
-    if (q < 0) flags.negative_stock.push({ code, qty: q });
+    if (q >= 0) continue;
+    const isFG = SKU_CODES.has(code);
+    const oldAvail = isFG ? Math.max(0, state.oldFG[code] || 0) : 0;
+    if (isFG && oldAvail > 0) {
+      const shortfall = -q;
+      const fromOld = Math.min(shortfall, oldAvail);
+      state.oldFG[code] = oldAvail - fromOld;     // old stock was sold → deplete it
+      balance[code] = q + fromOld;                // move toward 0 (clamped ≥0 at display)
+      if (balance[code] < -1e-9) {
+        flags.negative_stock.push({ code, qty: balance[code], note: "new+old exhausted" });
+      }
+    } else {
+      flags.negative_stock.push({ code, qty: q });
+    }
   }
   return balance;
 }
@@ -845,11 +869,13 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
       unparsed_quantities: [],
       negative_stock: [],
       bom_gaps: [],
+      duplicate_component_rows: [],   // same material under two audit sections
       offline_marketing_spike: [],   // founder: flag unusual offline/marketing outflow
       notes: [],
     },
     ledger: [],
     newFG, oldFG, newComp, oldComp,
+    compRowOccurrences: {},          // ref → [{ section, name, qty }] (duplicate-row flag)
     fixedAssets: [],
     consumables: [],
     // Back-compat aliases the metric code reads from (mirror the CJS twin).
@@ -914,6 +940,7 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
       manualReview: state.flags.manual_review.length,
       negativeStock: state.flags.negative_stock.length,
       bomGaps: state.flags.bom_gaps.length,
+      duplicateComponentRows: state.flags.duplicate_component_rows.length,
       offlineMarketingSpike: state.flags.offline_marketing_spike.length,
       detail: state.flags,
     },

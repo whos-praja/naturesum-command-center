@@ -18,6 +18,13 @@ import { REAL_MARKETPLACE_DATA as BUNDLED_MP, REAL_DATA_SNAPSHOT_DATE } from "./
 // shape) override this on a per-SKU/per-channel basis.
 import { BUNDLED_AGENCY_DATA } from "./bundledAgencyData.js";
 const BUNDLED_AGENCY = BUNDLED_AGENCY_DATA.byCode || {};
+// Parallel-cascade runway model (lib/runwayCascade.js). Used to compute the
+// HEADLINE central-WH runway (founder M1): marketplaces drain their own buffers
+// first, the WH backstops, total runway = day the WH itself hits zero. Replaces
+// the old flat "WH FG ÷ Σ all-channel velocity" which double-counted demand and
+// flagged network-healthy SKUs RED. The flat number is kept as a labelled
+// "WH-only (if all marketplaces vanished)" worst-case line.
+import { computeCascade } from "./lib/runwayCascade.js";
 
 // Central warehouse engine output (scripts/build-central-wh.cjs). Source of
 // truth for: FG stock, producible cap, binding component, depletion velocity
@@ -93,13 +100,23 @@ const REAL_MARKETPLACE_DATA = new Proxy({}, {
   getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
 });
 
+// ── Growth cap (founder rule M5, 2026-06) ────────────────────────────────
+// Velocity already uses the PEAK of (30d,14d). Multiplying that peak by an
+// unbounded max-MoM growth double-counts the same surge → systematic
+// over-ordering (many SKUs pinned at the old +200% cap). Founder ruling:
+// keep the safety stack but cap the forward growth uplift at +75%, and show a
+// note in the UI explaining when/why the cap is applied. Downside floor stays
+// -100% (a SKU can't decline more than 100%).
+const GROWTH_CAP = 75;          // max +% MoM uplift (was 200; founder M5)
+const GROWTH_FLOOR = -100;
+
 // ── MAX-MoM growth (founder rule, 2026-06) ───────────────────────────────
 // From a monthly sales array [m0,m1,m2,m3] (MOST-RECENT FIRST), compute the
 // consecutive month-over-month growth rate ((m[i]-m[i+1])/m[i+1]*100) for each
 // adjacent pair whose PRIOR month (m[i+1]) is > 0, and return the MAX of those
 // rates (plan for the highest growth seen → don't under-stock). Clamped to
-// [-100, +200]. Returns null when fewer than 2 usable months exist, so callers
-// can fall back to the existing single-MoM number.
+// [-100, +75] (M5). Returns null when fewer than 2 usable months exist, so
+// callers can fall back to the existing single-MoM number.
 // SAFE FALLBACK: tolerates null/undefined/non-array/NaN entries → null, never
 // throws and never emits NaN/Infinity.
 function maxMoMGrowth(monthly) {
@@ -116,7 +133,7 @@ function maxMoMGrowth(monthly) {
     if (best == null || rate > best) best = rate;
   }
   if (best == null) return null;
-  return Math.max(-100, Math.min(200, best));
+  return Math.max(GROWTH_FLOOR, Math.min(GROWTH_CAP, best));
 }
 
 const NSData = (function () {
@@ -499,9 +516,10 @@ const NSData = (function () {
     NSACDT30:  { amazon: 31,  shopify: 0,   flipkart: 1,  blinkit: 0   },
   };
 
-  // MoM revenue growth (Shopify CSV: May 2026 / April 2026). Capped at ±200%
-  // because some SKUs went from near-zero base → display would explode.
-  const cap = (v) => Math.max(-100, Math.min(200, v));
+  // MoM revenue growth (Shopify CSV: May 2026 / April 2026). Capped at the
+  // founder's +75% growth cap (M5) — some SKUs went from a near-zero base so
+  // the raw rate would explode and over-order.
+  const cap = (v) => Math.max(GROWTH_FLOOR, Math.min(GROWTH_CAP, v));
   const MOM_GROWTH = {
     NSMP100: 0,            NSMP250: 0,
     NSSB100:   cap(1497.3),  NSSB250: -46.2,  NSSB500: 0,
@@ -618,7 +636,7 @@ const NSData = (function () {
     };
   }
 
-  const inventory = skus.map((s) => {
+  const inv0 = skus.map((s) => {
     const opsRaw = SKU_OPERATIONS[s.code] || { fg: 0, vel: 0, leadTime: 25 };
     // ⚠️ Legacy `nitin` warehouse-FG synth path REMOVED (FIX-SPEC, 2026-06).
     // It was a SECOND, conflicting warehouse source (Nitin's 5-May daily sheet)
@@ -1007,12 +1025,12 @@ const NSData = (function () {
     //
     // Returns null when there's no data signal — UI shows "—" instead
     // of a stale stub (per founder: honest > silent fakery).
-    const clamp = (v) => Math.max(-100, Math.min(200, v));
+    const clamp = (v) => Math.max(GROWTH_FLOOR, Math.min(GROWTH_CAP, v));
     const growthFromBuckets = (cur30, prev30) => {
       if (cur30 == null && prev30 == null) return null;
       const c = cur30 || 0, p = prev30 || 0;
       if (c === 0 && p === 0) return null;
-      if (p === 0 && c > 0)  return 200;   // zero-baseline cap
+      if (p === 0 && c > 0)  return GROWTH_CAP;   // zero-baseline → cap at +75% (M5)
       if (c === 0 && p > 0)  return -100;  // stopped
       if (p > 0)             return clamp(((c - p) / p) * 100);
       return null; // negative prior (heavy returns) — undefined growth
@@ -1161,7 +1179,85 @@ const NSData = (function () {
       // SP is TBD — UI should fall back to MRP for those.
       pricing:     SKU_PRICING[s.code] || { sp: price, mrp: price },
     };
-  }).map((sku) => {
+  });
+
+  // ── M3 — CONSTRAINED ALLOCATION of shared inputs across SKUs ───────────────
+  // The engine's producible is a per-SKU MAX: each SKU independently claims
+  // floor(componentStock / perPack). When SKUs share a physical pool (Moringa
+  // raw NSMLPR feeds NSMP100 AND NSMP250; SB powder raw feeds 3 SKUs; juice pulp
+  // feeds 2; face-oil raw feeds 2), those claims OVERLAP — the reported
+  // producibles aren't simultaneously achievable (NSMP100 1000 + NSMP250 400
+  // would need 200 kg from a 100 kg pool). Founder ruling M3: allocate each
+  // shared constraining input across its consuming SKUs BY DEMAND SHARE (sales
+  // velocity × per-pack draw), then producible = min over the SKU's allocated
+  // component caps. Non-shared components are unchanged (single consumer → full
+  // pool). Uses the COMPLETE BOM from SKU_RECIPE (incl. juice tube/label), which
+  // also closes the engine's juice-BOM gap (M8). Velocity lives at THIS layer
+  // (the engine has no sales signal), so the allocation must happen here.
+  const allocatedProducible = {};
+  {
+    const velByCode = Object.fromEntries(inv0.map((s) => [s.code, Math.max(0, s.velocity || 0)]));
+    // CONSTRAINING component ref → [{ code, perPack }] consuming it
+    const consumers = {};
+    for (const s of inv0) {
+      const wb = s.warehouseBreakdown || {};
+      const rows = [wb.inputs?.sfg, wb.inputs?.rm, ...(wb.inputs?.pkg || [])].filter(Boolean);
+      for (const r of rows) {
+        if (!r.constrains) continue;                          // cartons / air pouches never bind
+        const perPack = r.perPack ?? r.unitsPerPack ?? 0;
+        if (!(perPack > 0)) continue;
+        (consumers[r.refCode] ||= []).push({ code: s.code, perPack });
+      }
+    }
+    // allocated pack-equivalent cap per (code, ref)
+    const capByCode = {};
+    for (const [ref, list] of Object.entries(consumers)) {
+      const stock = Math.max(0, compStock(ref));
+      if (list.length === 1) {                                // sole consumer → full pool
+        const { code, perPack } = list[0];
+        (capByCode[code] ||= {})[ref] = Math.floor(stock / perPack);
+        continue;
+      }
+      // SHARED pool → split by demand weight = velocity × perPack (units of the
+      // shared input drawn per day). No demand anywhere → equal split.
+      const weights = list.map(({ code, perPack }) => Math.max(0, (velByCode[code] || 0) * perPack));
+      const totalW = weights.reduce((a, b) => a + b, 0);
+      list.forEach(({ code, perPack }, i) => {
+        const share = totalW > 0 ? weights[i] / totalW : 1 / list.length;
+        (capByCode[code] ||= {})[ref] = Math.floor((stock * share) / perPack);
+      });
+    }
+    // producible per SKU = min over its constraining allocated caps; annotate
+    // the breakdown rows so the Materials tab shows the realistic (allocated)
+    // capacity + a "shared" marker instead of an overlapping total.
+    for (const s of inv0) {
+      const caps = capByCode[s.code] || {};
+      const refs = Object.keys(caps);
+      let min = Infinity, binding = null;
+      for (const ref of refs) { if (caps[ref] < min) { min = caps[ref]; binding = ref; } }
+      const producible = Math.max(0, Number.isFinite(min) ? min : 0);
+      allocatedProducible[s.code] = { producible, binding, caps };
+      const wb = s.warehouseBreakdown;
+      if (wb) {
+        wb.producibleFG = producible;
+        wb.bindingComponent = binding;
+        const rows = [wb.inputs?.sfg, wb.inputs?.rm, ...(wb.inputs?.pkg || [])].filter(Boolean);
+        for (const r of rows) {
+          if (caps[r.refCode] == null) continue;
+          const isShared = (consumers[r.refCode] || []).length > 1;
+          r.shared = isShared;
+          if (isShared) {
+            r.sharedWith = (consumers[r.refCode] || []).map((c) => c.code).filter((c) => c !== s.code);
+            r.fullCapacity = r.capacityReal;                  // un-allocated, for reference
+            r.capacity = caps[r.refCode];                     // realistic allocated cap
+            r.capacityReal = caps[r.refCode];
+          }
+        }
+      }
+    }
+  }
+
+  const inventory = inv0.map((sku) => {
     // ── CENTRAL WH OVERLAY — apply numbers from the build-central-wh
     //    engine (rolls forward from the 5-May audit + Production matrix +
     //    Daily Movement of FG). Per spec docs/central-wh-spec.md, these
@@ -1177,6 +1273,10 @@ const NSData = (function () {
     // what the WH buffer actually drains at — NOT warehouse movement.
     const cv = sku.channelVelocity || {};
     const totalSalesVel = (cv.amazon || 0) + (cv.flipkart || 0) + (cv.blinkit || 0);
+    // M3 allocation result for this SKU (constrained, non-overlapping producible).
+    // SAFE FALLBACK to the engine's value if the allocation pass somehow missed it.
+    const alloc = allocatedProducible[sku.code]
+      || { producible: Math.max(0, cwh.producible || 0), binding: cwh.binding || null };
 
     const next = {
       ...sku,
@@ -1184,14 +1284,17 @@ const NSData = (function () {
       // marketplace stocks (amazonFBA, flipkart.live, blinkit feeders) are
       // untouched — they come from their own exports.
       stock: { ...sku.stock, warehouse: cwh.fgStock },
-      // Builder block — feeds the Materials breakdown popover.
+      // Builder block — feeds the Materials breakdown popover. producibleFG /
+      // bindingComponent come from the M3 constrained allocation (already
+      // written onto sku.warehouseBreakdown), NOT the engine's overlapping
+      // per-SKU max — so shared-raw SKUs don't double-claim the same pool.
       warehouseBreakdown: {
         ...sku.warehouseBreakdown,
         fg: cwh.fgStock,
         oldStock: cwh.oldStock || 0,   // shown in modal, excluded from runway
-        producibleFG: cwh.producible,
-        bindingComponent: cwh.binding,
-        bindingMissing: cwh.binding && CWH_COMP[cwh.binding]?.stock === 0,
+        producibleFG: alloc.producible,
+        bindingComponent: alloc.binding,
+        bindingMissing: alloc.binding && CWH_COMP[alloc.binding]?.stock === 0,
       },
       // Old (non-fresh) FG — surfaced in the material-breakdown modal.
       centralWhOldStock: cwh.oldStock || 0,
@@ -1226,16 +1329,47 @@ const NSData = (function () {
     // Recompute totalStock using the new WH stock.
     next.totalStock = (next.stock.warehouse || 0) + (next.stock.amazonFBA || 0)
                     + (next.stock.flipkart  || 0) + (next.stock.blinkit    || 0);
-    // Central-WH runway = WH FG ÷ total SALES velocity (NOT depletion).
-    // Sellable cover = FG + producible (what we can ship/pack now).
-    const cwhSellable = (cwh.fgStock || 0) + (cwh.producible || 0);
-    next.centralWhRunway = cwhSellable <= 0
-      ? 0
-      : (totalSalesVel > 0 ? Math.round((cwh.fgStock || 0) / totalSalesVel) : null);
+    // ── M1/M2 — HEADLINE central-WH runway = NETWORK CASCADE ──────────────────
+    // Sellable cover = FG + producible (what we can ship OR pack now, M2). The
+    // headline runway is the parallel cascade (lib/runwayCascade.js): each
+    // marketplace drains its OWN buffer at its sales velocity first; as channels
+    // die their demand falls back to the central WH; total runway = the day the
+    // WH itself hits zero. This replaces the old flat "FG ÷ Σ all-channel
+    // velocity", which assumed the WH served 100% of every channel's demand from
+    // day 0 (double-counting the buffers the marketplaces already hold) and so
+    // flagged network-healthy SKUs RED. whBaseVelocity stays 0 (the minor
+    // direct-WH-sales lane isn't cleanly isolable from the exports without
+    // double-counting the website demand already folded into the Amazon channel
+    // — see M6 note in docs/CHANGE-LOG; revisit if a clean direct lane lands).
+    const cwhSellable = (cwh.fgStock || 0) + alloc.producible;
+    const cascadeHeadline = computeCascade({
+      whStock: cwhSellable,
+      whBaseVelocity: 0,
+      channels: (sku.cascade?.channels || []).map((c) => ({ ...c })),
+    });
+    // Keep the cascade inputs the RunwayTab / Simulator read consistent with the
+    // headline (real WH sellable stock, not the ops.fg stub used before overlay).
+    next.cascade = { whStock: cwhSellable, whBaseVelocity: 0, channels: sku.cascade?.channels || [] };
+    // M7 — the flat "WH-only" number kept as a labelled worst-case line
+    // (what the runway would be if every marketplace vanished and the WH alone
+    // served all demand). NOT the headline.
+    next.centralWhRunwayWhOnly = totalSalesVel > 0
+      ? Math.round(cwhSellable / totalSalesVel)
+      : null;
+    // Headline: finite cascade → round it; Infinite (no demand) with stock →
+    // null ("no sales signal" → amber); no sellable stock → 0 (red).
+    next.centralWhRunway = Number.isFinite(cascadeHeadline.totalRunway)
+      ? Math.round(cascadeHeadline.totalRunway)
+      : (cwhSellable <= 0 ? 0 : null);
     next.runway = next.centralWhRunway;
-    // Status — HARD zero-sellable guard first (fixes the green-stockout
-    // bug R7), then thresholds against the displayed runway, amber from
-    // the tunable param (R21).
+    // M4 — "old stock only" SKUs: 0 sellable, 0 producible, but old (unsellable)
+    // stock on hand. Per founder these dry-berry lines were a compromise sale and
+    // are now discontinued — keep 0 sellable, but DON'T raise a reorder alarm or
+    // count them as "running out" (there's nothing to restock). Old stock still
+    // shows in total value.
+    next.oldStockOnly = cwhSellable <= 0 && (next.centralWhOldStock || 0) > 0;
+    // Status — HARD zero-sellable guard first (fixes the green-stockout bug R7),
+    // then thresholds against the NETWORK runway, amber from the tunable param.
     const amberDays = readParam("amberRunwayDays") || 30;
     next.runwayStatus =
         cwhSellable <= 0 ? "red"
@@ -1243,10 +1377,22 @@ const NSData = (function () {
       : next.centralWhRunway <= next.leadTime ? "red"
       : next.centralWhRunway < amberDays ? "amber"
       : "green";
-    // Reorder = sales-based: out of cover, or runway shorter than the
-    // replenishment lead time. (Fixes engine reorder=false on stockout, R12.)
-    next.reorder = cwhSellable <= 0
-      || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime);
+    // Reorder = network runway shorter than the replenishment lead time, OR out
+    // of sellable cover — UNLESS the SKU is discontinued (old-stock-only), which
+    // has nothing to reorder. Raw-PO timing lives on the component-reorder tab.
+    next.reorder = !next.oldStockOnly && (
+      cwhSellable <= 0
+      || (next.centralWhRunway != null && next.centralWhRunway <= next.leadTime)
+    );
+    // M5 — flag when the forward growth used for reorder/forecast hit the +75%
+    // cap, so the UI can explain why (the peak-window velocity is already
+    // aggressive; the growth uplift is capped to avoid double-counting the same
+    // surge). growthCap exposed for the note text.
+    next.growthCap = GROWTH_CAP;
+    next.growthCapped = (() => {
+      const g = sku.channelGrowth?.warehouse ?? sku.growth ?? 0;
+      return Number.isFinite(g) && g >= GROWTH_CAP;
+    })();
 
     // ── D4 — per-SKU TOTAL stock value (all locations × SP, each unit once) ──
     // stockValue stays FG-only (WH finished goods × SP) per spec; totalValue is

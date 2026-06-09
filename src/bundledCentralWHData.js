@@ -251,7 +251,7 @@ export const CENTRAL_WH_DATA = {
       "price": 390,
       "leadDays": 50,
       "fgStock": 0,
-      "oldStock": 247,
+      "oldStock": 246,
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
@@ -292,7 +292,7 @@ export const CENTRAL_WH_DATA = {
       "price": 690,
       "leadDays": 50,
       "fgStock": 0,
-      "oldStock": 441,
+      "oldStock": 438,
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
@@ -334,7 +334,7 @@ export const CENTRAL_WH_DATA = {
       "price": 1150,
       "leadDays": 50,
       "fgStock": 0,
-      "oldStock": 664,
+      "oldStock": 655,
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
@@ -1468,8 +1468,9 @@ export const CENTRAL_WH_DATA = {
     "unmappedComponents": 27,
     "unparsedQuantities": 0,
     "manualReview": 0,
-    "negativeStock": 4,
+    "negativeStock": 1,
     "bomGaps": 5,
+    "duplicateComponentRows": 1,
     "offlineMarketingSpike": 0,
     "detail": {
       "unmapped_names": [
@@ -1648,18 +1649,6 @@ export const CENTRAL_WH_DATA = {
         {
           "code": "NSSBJ500",
           "qty": -1
-        },
-        {
-          "code": "NSSBDB500",
-          "qty": -9
-        },
-        {
-          "code": "NSSBDB250",
-          "qty": -3
-        },
-        {
-          "code": "NSSBDB100",
-          "qty": -1
         }
       ],
       "bom_gaps": [
@@ -1682,6 +1671,23 @@ export const CENTRAL_WH_DATA = {
         {
           "ref": "NSPKGJLBL500",
           "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
+        }
+      ],
+      "duplicate_component_rows": [
+        {
+          "ref": "NSSBOR",
+          "rows": [
+            {
+              "section": "SFG",
+              "name": "SB Oil",
+              "qty": 2.8
+            },
+            {
+              "section": "RM",
+              "name": "SB Oil",
+              "qty": 2.8
+            }
+          ]
         }
       ],
       "offline_marketing_spike": [],

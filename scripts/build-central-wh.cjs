@@ -320,6 +320,9 @@ const oldFG = {};     // code → qty ('(old)' stock — shown, NOT counted in r
 // but old tracked separately for the modal.
 const newComp = {};  // ref → qty
 const oldComp = {};   // ref → qty
+// Track every audit row that maps to a component ref → FLAG duplicate lines
+// (same material under two sections) instead of silently summing them.
+const compRowOccurrences = {};   // ref → [{ section, name, qty }]
 // Non-BOM audit lines, split into the two display buckets.
 const fixedAssets   = [];  // { name, qty, unit }
 const consumables   = [];  // { name, qty, unit } — cartons, stickers, tape...
@@ -469,7 +472,9 @@ function parseAudit() {
     if (ref) {
       // Track every audit row that maps to this ref so we can FLAG duplicate
       // lines (same material under two sections) instead of silently summing.
-      (compRowOccurrences[ref] || (compRowOccurrences[ref] = [])).push({ section, name: bRaw, qty: cq.qty });
+      const occ = (compRowOccurrences[ref] || (compRowOccurrences[ref] = []));
+      occ.push({ section, name: bRaw, qty: cq.qty });
+      if (occ.length === 2) flags.duplicate_component_rows.push({ ref, rows: occ.slice() });
       if (isOld) oldComp[ref] = (oldComp[ref] || 0) + cq.qty;
       else       newComp[ref] = (newComp[ref] || 0) + cq.qty;
       continue;
@@ -587,9 +592,28 @@ function computeBalances() {
     const sign = (e.txn === "produce" || e.txn === "produce_sfg" || e.txn === "return_in") ? +1 : -1;
     balance[e.code] = (balance[e.code] || 0) + sign * e.qty;
   }
-  // Flag negatives
+  // M4 — absorb FG ship-out overshoot into the OLD bucket, THEN flag negatives.
+  // When a finished-good's NEW/sellable balance rolls below 0 after the audit, it
+  // means OLD stock was physically shipped (per founder: the dry-berry lines were
+  // a compromise sale of old stock and are now discontinued). Deplete oldFG by
+  // the shortfall so (a) the displayed old-stock + value reflect reality and
+  // (b) we don't raise a phantom negative-stock flag. Only flag a genuine
+  // negative when BOTH new and old are exhausted (a true over-ship).
   for (const [code, q] of Object.entries(balance)) {
-    if (q < 0) flags.negative_stock.push({ code, qty: q });
+    if (q >= 0) continue;
+    const isFG = SKU_CODES.has(code);
+    const oldAvail = isFG ? Math.max(0, oldFG[code] || 0) : 0;
+    if (isFG && oldAvail > 0) {
+      const shortfall = -q;
+      const fromOld = Math.min(shortfall, oldAvail);
+      oldFG[code] = oldAvail - fromOld;           // old stock was sold → deplete it
+      balance[code] = q + fromOld;                // move toward 0 (clamped ≥0 at display)
+      if (balance[code] < -1e-9) {
+        flags.negative_stock.push({ code, qty: balance[code], note: "new+old exhausted" });
+      }
+    } else {
+      flags.negative_stock.push({ code, qty: q });
+    }
   }
   return balance;
 }
@@ -871,6 +895,7 @@ export const CENTRAL_WH_DATA = ${JSON.stringify({
     manualReview: flags.manual_review.length,
     negativeStock: flags.negative_stock.length,
     bomGaps: flags.bom_gaps.length,
+    duplicateComponentRows: flags.duplicate_component_rows.length,
     offlineMarketingSpike: flags.offline_marketing_spike.length,
     detail: flags,
   },

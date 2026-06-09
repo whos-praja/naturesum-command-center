@@ -1103,7 +1103,9 @@ const UnifiedStockTab = ({ inventory }) => {
   //     SKU, missed the real shared bottleneck, and false-flagged zero-stock
   //     lines). Non-constraining (cartons/air pouches) are excluded from the
   //     headline alert — they're quickly arranged and never block production.
-  const skusRunningOut = inventory.filter(s => s.runwayStatus === "red").length;
+  // M4 — discontinued "old stock only" SKUs (0 sellable, not being restocked)
+  // are excluded: they're not "running out", there's nothing to reorder.
+  const skusRunningOut = inventory.filter(s => s.runwayStatus === "red" && !s.oldStockOnly).length;
   const materialsToReorder = (D.centralWh?.components || [])
     .filter(c => c.reorder && c.constrains).length;
   const hasCriticalAlerts = skusRunningOut > 0;
@@ -2327,6 +2329,11 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
             const runwayStr = runwayDays == null
               ? "—"
               : runwayDays >= 999 ? "999+ days" : `${runwayDays} days`;
+            // M7 — WH-only worst-case line (if every marketplace vanished and the
+            // WH alone served all demand). The headline above is the network cascade.
+            const whOnlyStr = sku.centralWhRunwayWhOnly == null
+              ? "—"
+              : sku.centralWhRunwayWhOnly >= 999 ? "999+ days" : `${sku.centralWhRunwayWhOnly} days`;
             const growthValue = sku.centralWhGrowth ?? sku.growth;
             const growthStr = growthValue == null
               ? "—"
@@ -2338,8 +2345,10 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                   <dd>{D.fmtINR(fgValue)}</dd>
                   <dt>Rolling daily velocity <FormulaIcon formulaId="velocity" skuCode={sku.code} skuField="velocity" currentValue={velStr}/></dt>
                   <dd>{velStr}</dd>
-                  <dt>Runway (central warehouse FG) <FormulaIcon formulaId="runway" currentValue={runwayStr}/></dt>
+                  <dt>Network runway (cascade) <FormulaIcon formulaId="runway" currentValue={runwayStr}/></dt>
                   <dd>{runwayStr}</dd>
+                  <dt title="If every marketplace vanished and the central warehouse alone served all demand. Worst-case floor, not the headline.">WH-only runway (worst case)</dt>
+                  <dd className="muted">{whOnlyStr}</dd>
                   <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
                   <dd>{sku.leadTime} days</dd>
                   <dt>MoM growth <FormulaIcon formulaId="growth" skuCode={sku.code} skuField="growth" currentValue={growthStr}/></dt>
@@ -3676,8 +3685,9 @@ const ForecastTab = ({ inventory, days, setDays }) => {
   // aggregate, mirroring the Simulator/Runway tabs), NOT a hardcoded array keyed
   // by row index. The old `trendForIdx` lied: a declining SKU at index 6 got
   // ×1.45 (massive over-order) and a fast mover at index 9 got ×0.66. Growth is
-  // already clamped to [−100, +200]% in data.js, so trend ∈ [0, 3]. SAFE: a
-  // missing/NaN growth → factor 1 (no projection).
+  // clamped to [−100, +75]% in data.js (M5 — the velocity already uses the peak
+  // window, so the growth uplift is capped at +75% to avoid double-counting the
+  // same surge), so trend ∈ [0, 1.75]. SAFE: a missing/NaN growth → factor 1.
   const trendForSku = (s) => {
     const g = s.centralWhGrowth ?? s.growth ?? 0;
     const factor = 1 + (Number.isFinite(g) ? g : 0) / 100;
@@ -3826,6 +3836,15 @@ const ForecastTab = ({ inventory, days, setDays }) => {
                   </td>
                   <td className="num mat-cell">
                     <Delta value={s.trendPct}/>
+                    {s.growthCapped && (
+                      <div
+                        className="muted"
+                        style={{ fontSize: 9.5, marginTop: 2, color: "var(--warning)" }}
+                        title={`Month-over-month growth exceeded +${s.growthCap ?? 75}%, so the forward projection is capped at +${s.growthCap ?? 75}%. The velocity already uses the peak of the 30- and 14-day windows; capping the growth uplift avoids ordering twice for the same short-term surge.`}
+                      >
+                        capped +{s.growthCap ?? 75}%
+                      </div>
+                    )}
                   </td>
                   <td className="num mat-cell">
                     <div className="mat-cell-num">{D.fmtN(s.forecast)}</div>
