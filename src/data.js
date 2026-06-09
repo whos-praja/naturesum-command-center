@@ -1377,6 +1377,19 @@ const NSData = (function () {
       : next.centralWhRunway <= next.leadTime ? "red"
       : next.centralWhRunway < amberDays ? "amber"
       : "green";
+    // ISSUE 3 (verification) — a SKU that CANNOT be replenished right now
+    // (producible 0 — its raw/SFG is exhausted) whose WH-ONLY cover is already
+    // below the lead time is genuinely at risk even when the network cascade
+    // looks healthy: its marketplace buffers mask a warehouse that can't be
+    // refilled. Don't let it read green — escalate to amber (watch) and flag it
+    // so the UI can caption "can't replenish · WH cover below lead". The raw/SFG
+    // PO itself is surfaced separately on the component-reorder tab.
+    next.thinUnmakeable =
+      !next.oldStockOnly
+      && alloc.producible <= 0
+      && next.centralWhRunwayWhOnly != null
+      && next.centralWhRunwayWhOnly <= next.leadTime;
+    if (next.thinUnmakeable && next.runwayStatus === "green") next.runwayStatus = "amber";
     // Reorder = network runway shorter than the replenishment lead time, OR out
     // of sellable cover — UNLESS the SKU is discontinued (old-stock-only), which
     // has nothing to reorder. Raw-PO timing lives on the component-reorder tab.

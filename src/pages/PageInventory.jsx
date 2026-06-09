@@ -584,7 +584,7 @@ const AmazonFcModal = ({ sku, onClose }) => {
   const shopPrev30 = shopAt200 ? Math.max(0, (shopAt200.sales60d || 0) - (shopAt200.sales30d || 0)) : null;
   const shopCur30  = shopAt200?.sales30d ?? null;
   const growthCapNote =
-    growthValue === 200  ? (shopPrev30 === 0 ? "zero baseline · prior 30d = 0" : "capped at +200% (actual growth > cap)") :
+    growthValue === 75   ? (shopPrev30 === 0 ? "zero baseline · prior 30d = 0" : "capped at +75% (actual growth > cap · M5)") :
     growthValue === -100 ? (shopCur30 === 0  ? "stopped · current 30d = 0"      : "capped at −100%") :
                            null;
 
@@ -989,7 +989,7 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
 //      against the simpler marketplace cells).
 //   2. Runway pill + per-channel velocity + MoM growth chip (when velocity > 0)
 // Runway color tier: <14d red, <30d amber, otherwise neutral.
-const PlatformCell = ({ units, runwayUnits, breakdown, breakdownLabel, velocity, growth }) => {
+const PlatformCell = ({ units, runwayUnits, breakdown, breakdownLabel, velocity, growth, runwayOverride, tierOverride }) => {
   const D = NSData;
   // Velocity floor — anything below this hides the runway pill (rounds to
   // 0.0/d on display anyway). Tunable from the ⚙ Settings modal.
@@ -999,15 +999,18 @@ const PlatformCell = ({ units, runwayUnits, breakdown, breakdownLabel, velocity,
                                                               // returns outpacing sales
   // Runway basis: by default the displayed `units`, but a cell can pass a
   // separate `runwayUnits` when the stock hero and the runway denominator
-  // legitimately differ. The Warehouse cell does this: hero = FG + Producible
-  // (what we COULD ship/pack), but runway = FG ÷ velocity per GROUND-TRUTH §3.5
-  // (producible needs a production run, so it is NOT instantly-shippable cover).
-  // Keeping the cell runway on FG-only also makes it agree with the SKU-level
-  // `s.runway` that drives the row status colour / reorder alert — otherwise the
-  // cell pill (incl. producible) contradicted the red/amber status (FG-only).
+  // legitimately differ. A cell may ALSO pass `runwayOverride` (+ `tierOverride`)
+  // to display a pre-computed runway/colour instead of deriving units÷velocity —
+  // the Warehouse cell does this so its pill shows the NETWORK CASCADE runway
+  // (M1) and therefore agrees with the row status, rather than a FG-only number
+  // that would contradict the green/amber/red pill on the same row.
   const runwayBasis = runwayUnits != null ? runwayUnits : units;
-  const runway = hasPositiveVel ? Math.round(runwayBasis / velocity) : null;
-  const tier = runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "";
+  const runway = runwayOverride !== undefined
+    ? runwayOverride
+    : (hasPositiveVel ? Math.round(runwayBasis / velocity) : null);
+  const tier = tierOverride !== undefined
+    ? tierOverride
+    : (runway == null ? "" : runway < 14 ? " crit" : runway < 30 ? " warn" : "");
   // Bug #7 — render the growth chip independently of velocity. A SKU with
   // 0 sales today can still have a meaningful growth signal (e.g. just
   // relaunched at +200%, or stopped at −100%) and the founder needs to see it.
@@ -1431,7 +1434,8 @@ const UnifiedStockTab = ({ inventory }) => {
                   <td className="num mat-cell">
                     <PlatformCell
                       units={maxFg}
-                      runwayUnits={fg}
+                      runwayOverride={s.centralWhRunway}
+                      tierOverride={s.runwayStatus === "red" ? " crit" : s.runwayStatus === "amber" ? " warn" : ""}
                       breakdown={
                         <>
                           <span className="pf-cell-bd-num">{D.fmtN(fg)}</span>
@@ -1440,7 +1444,7 @@ const UnifiedStockTab = ({ inventory }) => {
                           <span className="pf-cell-bd-tag">producible</span>
                         </>
                       }
-                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}${s.centralWhBinding ? ` (binding component: ${s.centralWhBinding})` : ""}. Runway = packed FG ${D.fmtN(fg)} ÷ ${vel.warehouse}/d (producible needs a production run, excluded from cover).`}
+                      breakdownLabel={`Total (WH) ${D.fmtN(maxFg)} = Produced FG ${D.fmtN(fg)} + Producible FG ${D.fmtN(producible)}${s.centralWhBinding ? ` (binding component: ${s.centralWhBinding})` : ""}. Runway shown = NETWORK cascade ${s.centralWhRunway != null ? s.centralWhRunway + "d" : "—"} (marketplaces drain their own buffer first, WH backstops). WH-only worst case = ${s.centralWhRunwayWhOnly != null ? s.centralWhRunwayWhOnly + "d" : "—"} (sellable ${D.fmtN(maxFg)} ÷ ${vel.warehouse}/d).`}
                       velocity={vel.warehouse}
                       growth={s.centralWhGrowth ?? channelGrowth.warehouse}
                     />
@@ -2349,6 +2353,14 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
                   <dd>{runwayStr}</dd>
                   <dt title="If every marketplace vanished and the central warehouse alone served all demand. Worst-case floor, not the headline.">WH-only runway (worst case)</dt>
                   <dd className="muted">{whOnlyStr}</dd>
+                  {sku.thinUnmakeable && (
+                    <>
+                      <dt style={{ color: "var(--warning)" }}>⚠ Can't replenish</dt>
+                      <dd className="muted" style={{ color: "var(--warning)", fontSize: 11 }}>
+                        Producible 0 (raw/SFG exhausted) and WH-only cover is below the {sku.leadTime}-day lead — the network looks healthy only because marketplace buffers mask a warehouse that can't be refilled. Order raw/SFG (see component reorder).
+                      </dd>
+                    </>
+                  )}
                   <dt>Supplier lead time <FormulaIcon formulaId="leadTime" skuCode={sku.code} skuField="leadTime" currentValue={`${sku.leadTime} days`}/></dt>
                   <dd>{sku.leadTime} days</dd>
                   <dt>MoM growth <FormulaIcon formulaId="growth" skuCode={sku.code} skuField="growth" currentValue={growthStr}/></dt>
@@ -2548,8 +2560,22 @@ const SimulatorTab = ({ inventory }) => {
       // component's own value from COMPONENT_LEAD_TIMES (SIM-016-DATA), falls
       // back to the SKU's lead time if unmapped.
       inputKind:    wb.kind || "raw",
-      inputQty:     (wb.inputs?.sfg || wb.inputs?.rm)?.qty ?? 0,
-      inputName:    (wb.inputs?.sfg || wb.inputs?.rm)?.name || "—",
+      // M3 (ISSUE 2) — for a SHARED raw/SFG pool, seed the SKU's ALLOCATED share
+      // (capacity × perPack), NOT the full pool, so the simulator baseline
+      // producible matches the M1/M3 headline instead of silently re-claiming the
+      // whole pool (e.g. Moringa 80 kg → 800 packs, not 100 kg → 1000).
+      inputQty:     (() => {
+        const r = wb.inputs?.sfg || wb.inputs?.rm;
+        if (!r) return 0;
+        return r.shared
+          ? Math.round((r.capacity || 0) * (r.perPack || 1) * 1000) / 1000
+          : (r.qty ?? 0);
+      })(),
+      inputName:    (() => {
+        const r = wb.inputs?.sfg || wb.inputs?.rm;
+        if (!r) return "—";
+        return r.shared ? `${r.name} (allocated share)` : (r.name || "—");
+      })(),
       inputUnit:    (wb.inputs?.sfg || wb.inputs?.rm)?.unit || "units",
       inputPerPack: (wb.inputs?.sfg || wb.inputs?.rm)?.perPack || 1,
       inputLead:    (wb.inputs?.sfg || wb.inputs?.rm)?.leadTime ?? s.leadTime ?? 21,
