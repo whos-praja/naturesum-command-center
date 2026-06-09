@@ -121,6 +121,64 @@ multi-pack stock — P1-8 — not an inflation).
   the stale "(2).xlsx"; it resolves the latest "Naturesum Live Inventory*.xlsx"
   by mtime and fails loud if none is found.
 
+## Model-level fixes (M1–M8) — founder rulings, 2026-06
+
+The first-principles verification (`docs/VERIFICATION-2026-07.md`) surfaced 8
+MODEL-level concerns (not arithmetic) that needed founder judgement. Rulings +
+implementation:
+
+- **M1/M2/M7 — headline runway = NETWORK CASCADE.** `computeCascade` (imported
+  into data.js) now drives `centralWhRunway`: marketplaces drain their own buffer
+  first, the WH backstops, runway = the day the WH itself hits zero. WH stock fed
+  in = sellable = FG + producible (M2). The old flat `FG ÷ Σ all-channel velocity`
+  is kept as a labelled `centralWhRunwayWhOnly` "WH-only worst case" line. Fixed
+  network-healthy SKUs reading RED (NSSB100 47-flat-red → 173-network-green / 94
+  WH-only). Drill modal + the `runway` formula popover relabelled.
+- **M3 — producible = CONSTRAINED ALLOCATION of shared inputs by demand share.**
+  A shared pool (Moringa raw → NSMP100+NSMP250; SB powder raw → 3 SKUs; juice pulp
+  → 2; face-oil raw → 2) is split across consumers by `velocity × perPack`, then
+  producible = min over allocated caps. Moringa 100 kg → NSMP100 800 + NSMP250 80
+  (= 100 kg) instead of the impossible 1000 + 400. Uses the full SKU_RECIPE BOM
+  (incl. juice tube/label → closes the engine BOM gap, M8). Rows carry
+  `shared`/`sharedWith`/`fullCapacity`; Materials breakdown shows the allocated
+  capacity + "also used by".
+- **M4 — old dry-berry stays 0 sellable + discontinued.** `oldStockOnly` flag →
+  reorder=false, excluded from `skusRunningOut`. Engine twins now deplete the OLD
+  bucket for post-audit ship-outs (no phantom negatives) — `negative_stock` 4→1
+  (surviving NSSBJ500 −1 is a real over-ship). Old value tracked (₹13.94 L).
+- **M5 — growth clamp +200% → +75% (`GROWTH_CAP`).** Velocity already uses the
+  peak (30,14) window, so the forward uplift is capped to avoid double-counting
+  the surge. `growthCapped` flag + a "capped +75%" Forecast chip + popover note.
+- **M6 — `whBaseVelocity` kept 0 deliberately.** The minor direct-WH-sales lane
+  isn't cleanly isolable from the exports without double-counting the website
+  demand already folded into the Amazon channel. Documented; revisit if a clean
+  direct lane lands.
+
+Fixed a pre-existing crash in the offline twin (`compRowOccurrences` referenced
+but never declared) — completed the duplicate-component-row flag in BOTH twins.
+
+## Adversarial verification of M1–M8 (independent re-derivation)
+
+A 6-agent workflow re-derived every number from the raw workbook (not the tool's
+output). **All core PO-driving numbers reproduced to the unit** — FG roll-forward,
+cascade runway + WH-only line, demand-share allocation, OLD-bucket depletion,
++75% cap, ₹72.49 L total; 0 invariant violations across 14 SKUs; build/runtime
+clean. It found **4 surface/consistency gaps**; 3 fixed, 1 deferred to founder:
+
+- **ISSUE 1 (fixed)** — Unified Stock WH cell showed FG÷vel (15d amber) while the
+  row + modal showed the cascade (117d green). The cell now shows the network
+  runway + row status (`runwayOverride`/`tierOverride` on PlatformCell).
+- **ISSUE 2 (fixed)** — Simulator baseline re-seeded the FULL shared pool → sim
+  producible 1000 vs headline 800. Now seeds the allocated share (80 kg → 800).
+- **ISSUE 3 (fixed)** — cascade greened a can't-replenish, WH-thin SKU (NSACDT30:
+  net 52 green but producible 0 / WH-only 19 / +65% growth). New `thinUnmakeable`
+  flag escalates green→amber (producible 0 && WH-only ≤ lead) with a drill caption.
+  Catches NSACDT30 + NSSBJ300.
+- **ISSUE 4 (NEEDS FOUNDER SIGN-OFF)** — the 3 discontinued dry-berry SKUs carry
+  live cross-marketplace demand (~42 units/day) with thin buffers yet, per M4, are
+  silent on reorder. This is M4 as ruled, but the tool is intentionally quiet on
+  real ongoing sales — confirm intended.
+
 ## Still open / maintenance
 - Engine twins (`centralWhEngine.js` + `build-central-wh.cjs`) are duplicate
   logic — keep in sync.
