@@ -6,12 +6,12 @@
  * DO NOT hand-edit. Regenerate via:
  *   node scripts/build-central-wh.cjs <path-to-xlsx>
  *
- * Anchor: 2026-06-05 (audit sheet "Audit 050626"). As-of: 2026-06-08.
+ * Anchor: 2026-06-05 (audit sheet "Audit 050626"). As-of: 2026-06-11.
  */
 export const CENTRAL_WH_DATA = {
   "anchorDate": "2026-06-05",
   "anchorSheet": "Audit 050626",
-  "asOf": "2026-06-08",
+  "asOf": "2026-06-11",
   "config": {
     "MERGE_OLD_SB500": true,
     "RANGE_RULE": "first",
@@ -66,17 +66,17 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": 7.167,
-      "depletion30": 7.167,
-      "runwayDays": 13,
-      "momGrowth": 200,
+      "sales30": 3.833,
+      "depletion30": 3.833,
+      "runwayDays": 24,
+      "momGrowth": 13.9,
       "stockValue": 24115,
       "monthly": [
-        215,
-        1
+        115,
+        101
       ],
       "worstComp": "NSMLPR",
-      "worstCoverDays": 140,
+      "worstCoverDays": 261,
       "reorder": true
     },
     "NSMP250": {
@@ -116,16 +116,17 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": 6.9,
-      "depletion30": 6.9,
-      "runwayDays": 9,
-      "momGrowth": 200,
+      "sales30": 3.567,
+      "depletion30": 3.567,
+      "runwayDays": 18,
+      "momGrowth": 7,
       "stockValue": 32175,
       "monthly": [
-        207
+        107,
+        100
       ],
       "worstComp": "NSMLPR",
-      "worstCoverDays": 58,
+      "worstCoverDays": 112,
       "reorder": true
     },
     "NSSB100": {
@@ -134,43 +135,43 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 450,
       "leadDays": 50,
-      "fgStock": 649,
+      "fgStock": 1161,
       "oldStock": 124,
-      "producible": 651,
-      "totalAvail": 1300,
+      "producible": 3776,
+      "totalAvail": 4937,
       "binding": "NSPKGSBP100",
       "bomDetail": [
         {
           "ref": "NSSBPR",
           "perPack": 0.1,
-          "stock": 910.7,
-          "cap": 9107,
+          "stock": 710.8000000000001,
+          "cap": 7108,
           "constrains": true,
           "untracked": false
         },
         {
           "ref": "NSPKGSBP100",
           "perPack": 1,
-          "stock": 651,
-          "cap": 651,
+          "stock": 3776,
+          "cap": 3776,
           "constrains": true,
           "untracked": false
         }
       ],
-      "sales30": 23.367,
-      "depletion30": 23.367,
-      "runwayDays": 28,
-      "momGrowth": 75.7,
-      "stockValue": 292050,
+      "sales30": 16.233,
+      "depletion30": 16.233,
+      "runwayDays": 72,
+      "momGrowth": -31.7,
+      "stockValue": 522450,
       "monthly": [
-        701,
-        399,
-        413,
-        4
+        487,
+        713,
+        423,
+        6
       ],
       "worstComp": "NSPKGSBP100",
-      "worstCoverDays": 28,
-      "reorder": true
+      "worstCoverDays": 233,
+      "reorder": false
     },
     "NSSB250": {
       "code": "NSSB250",
@@ -178,42 +179,42 @@ export const CENTRAL_WH_DATA = {
       "variant": "250 g",
       "price": 750,
       "leadDays": 50,
-      "fgStock": 652,
+      "fgStock": 706,
       "oldStock": 218,
-      "producible": 670,
-      "totalAvail": 1322,
+      "producible": 400,
+      "totalAvail": 1106,
       "binding": "NSPKGSBP250",
       "bomDetail": [
         {
           "ref": "NSSBPR",
           "perPack": 0.25,
-          "stock": 910.7,
-          "cap": 3642,
+          "stock": 710.8000000000001,
+          "cap": 2843,
           "constrains": true,
           "untracked": false
         },
         {
           "ref": "NSPKGSBP250",
           "perPack": 1,
-          "stock": 670,
-          "cap": 670,
+          "stock": 400,
+          "cap": 400,
           "constrains": true,
           "untracked": false
         }
       ],
-      "sales30": 43.4,
-      "depletion30": 43.4,
-      "runwayDays": 15,
-      "momGrowth": 191.3,
-      "stockValue": 489000,
+      "sales30": 37.3,
+      "depletion30": 37.3,
+      "runwayDays": 19,
+      "momGrowth": 54.3,
+      "stockValue": 529500,
       "monthly": [
-        1302,
-        447,
-        526,
-        10
+        1119,
+        725,
+        521,
+        16
       ],
       "worstComp": "NSPKGSBP250",
-      "worstCoverDays": 15,
+      "worstCoverDays": 11,
       "reorder": true
     },
     "NSSB500": {
@@ -222,42 +223,42 @@ export const CENTRAL_WH_DATA = {
       "variant": "500 g",
       "price": 1350,
       "leadDays": 50,
-      "fgStock": 111,
+      "fgStock": 221,
       "oldStock": 17,
-      "producible": 113,
-      "totalAvail": 224,
-      "binding": "NSPKGSBP500",
+      "producible": 1421,
+      "totalAvail": 1642,
+      "binding": "NSSBPR",
       "bomDetail": [
         {
           "ref": "NSSBPR",
           "perPack": 0.5,
-          "stock": 910.7,
-          "cap": 1821,
+          "stock": 710.8000000000001,
+          "cap": 1421,
           "constrains": true,
           "untracked": false
         },
         {
           "ref": "NSPKGSBP500",
           "perPack": 1,
-          "stock": 113,
-          "cap": 113,
+          "stock": 1599,
+          "cap": 1599,
           "constrains": true,
           "untracked": false
         }
       ],
-      "sales30": 27.3,
-      "depletion30": 27.3,
-      "runwayDays": 4,
+      "sales30": 25.067,
+      "depletion30": 25.067,
+      "runwayDays": 9,
       "momGrowth": 200,
-      "stockValue": 149850,
+      "stockValue": 298350,
       "monthly": [
-        819,
-        96,
-        219,
-        2
+        752,
+        240,
+        228,
+        6
       ],
-      "worstComp": "NSPKGSBP500",
-      "worstCoverDays": 4,
+      "worstComp": "NSSBPR",
+      "worstCoverDays": 57,
       "reorder": true
     },
     "NSSBDB100": {
@@ -266,10 +267,10 @@ export const CENTRAL_WH_DATA = {
       "variant": "100 g",
       "price": 390,
       "leadDays": 50,
-      "fgStock": 0,
-      "oldStock": 246,
+      "fgStock": 1,
+      "oldStock": 247,
       "producible": 0,
-      "totalAvail": 0,
+      "totalAvail": 1,
       "binding": "NSSBDBR",
       "bomDetail": [
         {
@@ -289,15 +290,16 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": 3.867,
-      "depletion30": 3.867,
+      "sales30": 3.733,
+      "depletion30": 3.733,
       "runwayDays": 0,
-      "momGrowth": -82.8,
-      "stockValue": 0,
+      "momGrowth": -69.1,
+      "stockValue": 390,
       "monthly": [
-        116,
-        673,
-        323
+        112,
+        363,
+        631,
+        4
       ],
       "worstComp": "NSSBDBR",
       "worstCoverDays": 0,
@@ -335,12 +337,12 @@ export const CENTRAL_WH_DATA = {
       "sales30": 4.467,
       "depletion30": 4.467,
       "runwayDays": 0,
-      "momGrowth": -66.6,
+      "momGrowth": -5.6,
       "stockValue": 0,
       "monthly": [
         134,
-        401,
-        307,
+        142,
+        566,
         1
       ],
       "worstComp": "NSSBDBR",
@@ -354,7 +356,7 @@ export const CENTRAL_WH_DATA = {
       "price": 1150,
       "leadDays": 50,
       "fgStock": 0,
-      "oldStock": 655,
+      "oldStock": 652,
       "producible": 0,
       "totalAvail": 0,
       "binding": "NSSBDBR",
@@ -376,15 +378,16 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": -1.033,
-      "depletion30": -1.033,
+      "sales30": -0.933,
+      "depletion30": -0.933,
       "runwayDays": null,
       "momGrowth": -100,
       "stockValue": 0,
       "monthly": [
-        -31,
-        1659,
-        281
+        -28,
+        1439,
+        497,
+        4
       ],
       "worstComp": null,
       "worstCoverDays": null,
@@ -396,10 +399,10 @@ export const CENTRAL_WH_DATA = {
       "variant": "300 ml",
       "price": 690,
       "leadDays": 50,
-      "fgStock": 565,
+      "fgStock": 596,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 565,
+      "totalAvail": 596,
       "binding": "NSSBJPLP",
       "bomDetail": [
         {
@@ -421,16 +424,16 @@ export const CENTRAL_WH_DATA = {
         {
           "ref": "NSPKGJB300",
           "perPack": 1,
-          "stock": 910,
-          "cap": 910,
+          "stock": 861,
+          "cap": 861,
           "constrains": true,
           "untracked": false
         },
         {
           "ref": "NSPKGJTUB300",
           "perPack": 1,
-          "stock": 1826,
-          "cap": 1826,
+          "stock": 1777,
+          "cap": 1777,
           "constrains": true,
           "untracked": false
         },
@@ -443,13 +446,13 @@ export const CENTRAL_WH_DATA = {
           "untracked": true
         }
       ],
-      "sales30": 10.567,
-      "depletion30": 10.567,
+      "sales30": 11.167,
+      "depletion30": 11.167,
       "runwayDays": 53,
-      "momGrowth": -14.6,
-      "stockValue": 389850,
+      "momGrowth": -9.7,
+      "stockValue": 411240,
       "monthly": [
-        317,
+        335,
         371
       ],
       "worstComp": "NSSBJPLP",
@@ -462,10 +465,10 @@ export const CENTRAL_WH_DATA = {
       "variant": "500 ml",
       "price": 1100,
       "leadDays": 50,
-      "fgStock": 0,
+      "fgStock": 7,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 0,
+      "totalAvail": 7,
       "binding": "NSSBJPLP",
       "bomDetail": [
         {
@@ -509,14 +512,14 @@ export const CENTRAL_WH_DATA = {
           "untracked": true
         }
       ],
-      "sales30": 24.967,
-      "depletion30": 24.967,
+      "sales30": 24.667,
+      "depletion30": 24.667,
       "runwayDays": 0,
-      "momGrowth": 121.6,
-      "stockValue": 0,
+      "momGrowth": 118.3,
+      "stockValue": 7700,
       "monthly": [
-        749,
-        338
+        740,
+        339
       ],
       "worstComp": "NSSBJPLP",
       "worstCoverDays": 0,
@@ -528,17 +531,17 @@ export const CENTRAL_WH_DATA = {
       "variant": "15 ml",
       "price": 1075,
       "leadDays": 50,
-      "fgStock": 105,
+      "fgStock": 74,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 105,
+      "totalAvail": 74,
       "binding": "NSPKGBOB15",
       "bomDetail": [
         {
           "ref": "NSSBOR",
           "perPack": 0.015,
-          "stock": 5.6,
-          "cap": 373,
+          "stock": 2.8,
+          "cap": 186,
           "constrains": true,
           "untracked": false
         },
@@ -575,13 +578,13 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": 0.167,
-      "depletion30": 0.167,
-      "runwayDays": 630,
-      "momGrowth": 66.7,
-      "stockValue": 112875,
+      "sales30": 0.2,
+      "depletion30": 0.2,
+      "runwayDays": 370,
+      "momGrowth": 100,
+      "stockValue": 79550,
       "monthly": [
-        5,
+        6,
         3,
         1
       ],
@@ -595,17 +598,17 @@ export const CENTRAL_WH_DATA = {
       "variant": "30 ml",
       "price": 1580,
       "leadDays": 50,
-      "fgStock": 30,
+      "fgStock": 1,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 30,
+      "totalAvail": 1,
       "binding": "NSPKGBOBT30",
       "bomDetail": [
         {
           "ref": "NSSBOR",
           "perPack": 0.03,
-          "stock": 5.6,
-          "cap": 186,
+          "stock": 2.8,
+          "cap": 93,
           "constrains": true,
           "untracked": false
         },
@@ -646,10 +649,11 @@ export const CENTRAL_WH_DATA = {
       "depletion30": 0,
       "runwayDays": null,
       "momGrowth": -100,
-      "stockValue": 47400,
+      "stockValue": 1580,
       "monthly": [
         1,
-        16
+        8,
+        8
       ],
       "worstComp": null,
       "worstCoverDays": null,
@@ -692,7 +696,8 @@ export const CENTRAL_WH_DATA = {
       "monthly": [
         80,
         9,
-        249
+        245,
+        4
       ],
       "worstComp": "NSJOF100",
       "worstCoverDays": 36,
@@ -704,10 +709,10 @@ export const CENTRAL_WH_DATA = {
       "variant": "30 sachets",
       "price": 975,
       "leadDays": 20,
-      "fgStock": 25,
+      "fgStock": 26,
       "oldStock": 0,
       "producible": 0,
-      "totalAvail": 25,
+      "totalAvail": 26,
       "binding": "NSACDSF30",
       "bomDetail": [
         {
@@ -735,16 +740,16 @@ export const CENTRAL_WH_DATA = {
           "untracked": false
         }
       ],
-      "sales30": 1.733,
-      "depletion30": 1.733,
-      "runwayDays": 14,
-      "momGrowth": 100,
-      "stockValue": 24375,
+      "sales30": 1.533,
+      "depletion30": 1.533,
+      "runwayDays": 17,
+      "momGrowth": 48.4,
+      "stockValue": 25350,
       "monthly": [
-        52,
-        26,
-        97,
-        2
+        46,
+        31,
+        93,
+        6
       ],
       "worstComp": "NSACDSF30",
       "worstCoverDays": 0,
@@ -760,8 +765,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 25,
       "stock": 100,
       "oldStock": 0,
-      "consumption": 2.442,
-      "daysCover": 41,
+      "consumption": 1.275,
+      "daysCover": 78,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -776,10 +781,10 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "KG",
       "leadDays": 50,
-      "stock": 910.7,
+      "stock": 710.8000000000001,
       "oldStock": 0,
-      "consumption": 26.837,
-      "daysCover": 34,
+      "consumption": 23.482,
+      "daysCover": 30,
       "reorder": true,
       "constrains": true,
       "untracked": false,
@@ -797,7 +802,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 50,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 0.987,
+      "consumption": 1.024,
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
@@ -816,7 +821,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 50,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 15.654,
+      "consumption": 15.684,
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
@@ -832,10 +837,10 @@ export const CENTRAL_WH_DATA = {
       "type": "RM",
       "unit": "Ltr",
       "leadDays": 50,
-      "stock": 5.6,
+      "stock": 2.8,
       "oldStock": 0,
       "consumption": 0.003,
-      "daysCover": 2236,
+      "daysCover": 933,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -866,7 +871,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 20,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 51.99,
+      "consumption": 45.99,
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
@@ -883,8 +888,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 2935,
       "oldStock": 0,
-      "consumption": 7.167,
-      "daysCover": 410,
+      "consumption": 3.833,
+      "daysCover": 766,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -898,8 +903,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 2934,
       "oldStock": 0,
-      "consumption": 6.9,
-      "daysCover": 425,
+      "consumption": 3.567,
+      "daysCover": 823,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -913,7 +918,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 7.167,
+      "consumption": 3.833,
       "daysCover": 0,
       "reorder": true,
       "constrains": false,
@@ -928,7 +933,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 6.9,
+      "consumption": 3.567,
       "daysCover": 0,
       "reorder": true,
       "constrains": false,
@@ -941,10 +946,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 651,
+      "stock": 3776,
       "oldStock": 0,
-      "consumption": 23.367,
-      "daysCover": 28,
+      "consumption": 16.233,
+      "daysCover": 233,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -958,11 +963,11 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 670,
+      "stock": 400,
       "oldStock": 0,
-      "consumption": 43.4,
-      "daysCover": 15,
-      "reorder": false,
+      "consumption": 37.3,
+      "daysCover": 11,
+      "reorder": true,
       "constrains": true,
       "untracked": false,
       "blocks": [
@@ -975,16 +980,14 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 113,
+      "stock": 1599,
       "oldStock": 0,
-      "consumption": 27.3,
-      "daysCover": 4,
-      "reorder": true,
+      "consumption": 25.067,
+      "daysCover": 64,
+      "reorder": false,
       "constrains": true,
       "untracked": false,
-      "blocks": [
-        "NSSB500"
-      ]
+      "blocks": []
     },
     "NSPKGDBP100": {
       "ref": "NSPKGDBP100",
@@ -994,7 +997,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 3.867,
+      "consumption": 3.733,
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
@@ -1043,7 +1046,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 10.567,
+      "consumption": 11.167,
       "daysCover": null,
       "reorder": false,
       "constrains": true,
@@ -1056,10 +1059,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 910,
+      "stock": 861,
       "oldStock": 0,
-      "consumption": 10.567,
-      "daysCover": 86,
+      "consumption": 11.167,
+      "daysCover": 77,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1071,10 +1074,10 @@ export const CENTRAL_WH_DATA = {
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
-      "stock": 1826,
+      "stock": 1777,
       "oldStock": 0,
-      "consumption": 10.567,
-      "daysCover": 173,
+      "consumption": 11.167,
+      "daysCover": 159,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1088,7 +1091,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 10.567,
+      "consumption": 11.167,
       "daysCover": null,
       "reorder": false,
       "constrains": true,
@@ -1103,7 +1106,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 24.967,
+      "consumption": 24.667,
       "daysCover": null,
       "reorder": false,
       "constrains": true,
@@ -1118,8 +1121,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 1000,
       "oldStock": 0,
-      "consumption": 24.967,
-      "daysCover": 40,
+      "consumption": 24.667,
+      "daysCover": 41,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1135,8 +1138,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 2022,
       "oldStock": 0,
-      "consumption": 24.967,
-      "daysCover": 81,
+      "consumption": 24.667,
+      "daysCover": 82,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1150,7 +1153,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 24.967,
+      "consumption": 24.667,
       "daysCover": null,
       "reorder": false,
       "constrains": true,
@@ -1165,8 +1168,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 375,
       "oldStock": 0,
-      "consumption": 0.167,
-      "daysCover": 2246,
+      "consumption": 0.2,
+      "daysCover": 1875,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1180,7 +1183,7 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 0,
       "oldStock": 0,
-      "consumption": 0.167,
+      "consumption": 0.2,
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
@@ -1229,8 +1232,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 1503,
       "oldStock": 0,
-      "consumption": 0.167,
-      "daysCover": 9000,
+      "consumption": 0.2,
+      "daysCover": 7515,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1244,8 +1247,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 876,
       "oldStock": 0,
-      "consumption": 0.167,
-      "daysCover": 5246,
+      "consumption": 0.2,
+      "daysCover": 4380,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1274,8 +1277,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 37550,
       "oldStock": 0,
-      "consumption": 51.99,
-      "daysCover": 722,
+      "consumption": 45.99,
+      "daysCover": 816,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1289,8 +1292,8 @@ export const CENTRAL_WH_DATA = {
       "leadDays": 14,
       "stock": 2507,
       "oldStock": 0,
-      "consumption": 1.733,
-      "daysCover": 1447,
+      "consumption": 1.533,
+      "daysCover": 1635,
       "reorder": false,
       "constrains": true,
       "untracked": false,
@@ -1531,9 +1534,9 @@ export const CENTRAL_WH_DATA = {
     "unmappedComponents": 25,
     "unparsedQuantities": 0,
     "manualReview": 0,
-    "negativeStock": 1,
+    "negativeStock": 3,
     "bomGaps": 4,
-    "duplicateComponentRows": 2,
+    "duplicateComponentRows": 0,
     "fuzzyMatched": 1,
     "offlineMarketingSpike": 0,
     "detail": {
@@ -1694,8 +1697,16 @@ export const CENTRAL_WH_DATA = {
       "unparsed_quantities": [],
       "negative_stock": [
         {
-          "code": "NSSBJ500",
-          "qty": -1
+          "code": "NSSBJPLP",
+          "qty": -14.7
+        },
+        {
+          "code": "NSPKGJBOT300",
+          "qty": -49
+        },
+        {
+          "code": "NSPKGJLBL300",
+          "qty": -49
         }
       ],
       "bom_gaps": [
@@ -1716,38 +1727,7 @@ export const CENTRAL_WH_DATA = {
           "note": "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row"
         }
       ],
-      "duplicate_component_rows": [
-        {
-          "ref": "NSSBOR",
-          "rows": [
-            {
-              "section": "SFG",
-              "name": "SB Oil",
-              "qty": 2.8
-            },
-            {
-              "section": "RM",
-              "name": "SB Oil",
-              "qty": 2.8
-            }
-          ]
-        },
-        {
-          "ref": "NSPKGJB500",
-          "rows": [
-            {
-              "section": "PKG",
-              "name": "Large Air pouch for juice(500 ml)",
-              "qty": 0
-            },
-            {
-              "section": "PKG",
-              "name": "Air pouches (500ML)",
-              "qty": 1000
-            }
-          ]
-        }
-      ],
+      "duplicate_component_rows": [],
       "fuzzy_matched": [
         {
           "source": "production-sfg",

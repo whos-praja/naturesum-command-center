@@ -231,6 +231,9 @@ const COMPONENT_ALIASES_RAW = {
   // refs are UNTRACKED, never phantom-zero-bound.
   "juice containers (package) 300ml":           "NSPKGJTUB300",
   "juice containers (package) 500ml":           "NSPKGJTUB500",
+  // File (7) renamed the tube rows to the canonical name — keep BOTH spellings.
+  "juice tube 300 ml":                          "NSPKGJTUB300",
+  "juice tube 500 ml":                          "NSPKGJTUB500",
   // Juice AIR POUCHES — real packing components with tracked stock
   // ("Air pouches (300ML)" 910 / "(500ML)" 1000). The 0-stock "Large Air
   // pouch for juice(500 ml)" row maps to the same ref (duplicate flag fires).
