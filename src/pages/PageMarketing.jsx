@@ -1,275 +1,530 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Icon, Delta, Card, Sparkline, BarChart, Progress, ChannelPill } from "../components/Shared.jsx";
+import { useState, useMemo } from "react";
+import { Card, Progress } from "../components/Shared.jsx";
 import NSData from "../data.js";
+import { mergedFacts, monthsIn, channelsIn } from "../lib/businessStore.js";
+import { computeCM } from "../lib/cmEngine.js";
 
-// Module 5 — Marketing & Advertising
+/**
+ * PageMarketing — Business Performance module §9 (Marketing & Ads).
+ *
+ * REAL DATA ONLY. Reads mergedFacts() (bundled May-2026 baseline ⊕ uploads)
+ * and computes the CM chain via computeCM. Every figure is derived; the old
+ * fabricated Google/Meta/creative stubs are deleted. No NaN/Infinity is ever
+ * rendered (SAFE fallbacks throughout; the engine guarantees finite output).
+ *
+ * What this page surfaces (spec §9 PageMarketing):
+ *   1. Spend by CHANNEL — direct (product-attributed) vs allocated
+ *      (channel-total override − direct, spread by revenue) split shown.
+ *   2. Per-SKU spend + ROAS/ACOS — ROAS = attributed channel revenue ÷ spend,
+ *      ACOS = spend ÷ revenue. Attribution windows labelled honestly.
+ *   3. Breakeven-ACOS flag — breakeven ACOS = the cell's CM2% (margin left to
+ *      pay for ads). ACOS > CM2% ⇒ the marginal ad rupee is loss-making (red).
+ *   4. Zero-sale spend list — cells with ad spend but no units (wasted spend).
+ *   5. Ad → CM3 bridge per channel — CM2 −adSpend = CM3, channel by channel.
+ *
+ * ATTRIBUTION HONESTY (spec §3 / §11): the fact store carries each cell's own
+ * channel netRev and its DIRECT product-attributed ad spend. There is no
+ * separate "attributed conversion revenue" field, so ROAS/ACOS use the cell's
+ * channel netRev as the revenue basis — this is the order-date attributed
+ * revenue for that SKU on that channel, the closest honest measure available.
+ * The window each platform reports on differs (Amazon SP ≈ 14-day, Flipkart
+ * PLA = report window, Google = its own conversion window); we caption that
+ * rather than pretend a single unified window.
+ */
+
+const ANCHOR_MONTH = "2026-05";
+
+// Channel display metadata (colour + label). Derived from the facts channel
+// set, NEVER hardcoded as the authoritative list — this only decorates whatever
+// channels actually appear. Unknown channels fall back to a neutral style.
+const CH_META = {
+  amazon:   { label: "Amazon",   color: "#E47911", adSource: "Amazon SP (per-ASIN daily)", window: "≈14-day SP attribution" },
+  flipkart: { label: "Flipkart", color: "#2874F0", adSource: "Flipkart PLA (per-SKU)",      window: "FK PLA report window" },
+  blinkit:  { label: "Blinkit",  color: "#F8CB46", adSource: "Snell channel total (Blinkit)", window: "channel total, no per-SKU split" },
+  website:  { label: "Website",  color: "#5E8E3E", adSource: "Google product-wise + Meta", window: "Google/Meta conversion window" },
+};
+const chMeta = (ch) => CH_META[ch] || { label: ch, color: "#8E8A7E", adSource: "—", window: "—" };
 
 const PageMarketing = () => {
   const D = NSData;
-  const [tab, setTab] = useState("blended");
 
-  const total = {
-    spend: D.adAccounts.google.spendMTD + D.adAccounts.meta.spendMTD,
-    rev: D.adAccounts.google.revAttrib + D.adAccounts.meta.revAttrib,
-    impressions: D.adAccounts.google.impressions + D.adAccounts.meta.impressions,
-    clicks: D.adAccounts.google.clicks + D.adAccounts.meta.clicks,
-    conv: D.adAccounts.google.conversions + D.adAccounts.meta.conversions,
-  };
-  total.roas = total.rev / total.spend;
-  total.cac = total.spend / total.conv;
-  total.ctr = (total.clicks / total.impressions) * 100;
+  // ── Live read model + compute ────────────────────────────────────────────
+  // mergedFacts is read once per render; computeCM is pure. useMemo keys on the
+  // facts identity + month so cost-input edits elsewhere are picked up on the
+  // next render without a manual refresh button.
+  const facts = useMemo(() => mergedFacts(), []);
+  const months = monthsIn(facts);
+  const [month, setMonth] = useState(months.includes(ANCHOR_MONTH) ? ANCHOR_MONTH : (months[months.length - 1] || ANCHOR_MONTH));
+
+  const cm = useMemo(() => computeCM({ facts, month }), [facts, month]);
+
+  // Channels present, ordered with the ones we have metadata for first.
+  const channels = useMemo(() => {
+    const present = channelsIn(facts).filter((ch) => cm.byChannel[ch]);
+    const order = ["amazon", "flipkart", "blinkit", "website"];
+    return [...present].sort((a, b) => {
+      const ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }, [facts, cm]);
+
+  const skuName = (code) => D.skus.find((s) => s.code === code)?.name || code;
+  const skuVariant = (code) => D.skus.find((s) => s.code === code)?.variant || "";
+
+  // ── Company spend rollup (direct vs allocated) ───────────────────────────
+  // adSpend total = Σ each channel's resolved spend (direct + allocated). The
+  // "allocated" slice = channel total override − direct (spec §3/§6). Where no
+  // channel-total override is set, allocated is 0 and total == Σ direct.
+  const spendByChannel = useMemo(() => {
+    return channels.map((ch) => {
+      const alloc = cm.adAllocation[ch] || { direct: 0, total: 0, unattributed: 0, unallocated: 0 };
+      const roll = cm.byChannel[ch] || {};
+      const spend = num(roll.adSpend);                  // direct + allocated landed on cells
+      const direct = num(alloc.direct);
+      const allocated = Math.max(0, spend - direct);    // revenue-spread share that landed
+      return {
+        ch,
+        netRev: num(roll.netRev),
+        spend,
+        direct,
+        allocated,
+        unallocated: num(alloc.unallocated),            // override spend that couldn't be split
+        cm2: roll.cm2,
+        cm3: roll.cm3,
+        cm2Pct: roll.pcts?.cm2 ?? null,
+      };
+    });
+  }, [channels, cm]);
+
+  const totalSpend = spendByChannel.reduce((a, c) => a + c.spend, 0);
+  const totalRev = spendByChannel.reduce((a, c) => a + c.netRev, 0);
+  const blendedRoas = totalSpend > 0 ? totalRev / totalSpend : null;
+  const blendedAcos = totalRev > 0 ? totalSpend / totalRev : null;
+
+  // ── Per-SKU × channel ad rows (from the CM3 matrix) ──────────────────────
+  // Each matrix cell carries netRev, units, adSpend, cm3, cm3Pct. We layer in
+  // the cell's CM2% (breakeven ACOS) by re-deriving from bySku.byChannel, which
+  // the engine exposes per cell. Only cells with ad spend OR sales are listed.
+  const adRows = useMemo(() => {
+    const rows = [];
+    for (const code of Object.keys(cm.matrix)) {
+      for (const ch of Object.keys(cm.matrix[code])) {
+        const m = cm.matrix[code][ch];
+        const cell = cm.bySku[code]?.byChannel?.[ch] || {};
+        const spend = num(m.adSpend);
+        const rev = num(m.netRev);
+        const units = num(m.units);
+        if (spend <= 0 && rev <= 0) continue;           // nothing to show
+        const roas = spend > 0 ? rev / spend : null;    // null = no spend on this cell
+        const acos = spend > 0 ? (rev > 0 ? spend / rev : null) : null; // null rev → undefined ACOS
+        const breakevenAcos = cell.pcts?.cm2 ?? null;   // CM2% = margin available for ads
+        // Loss-making flag: ACOS exceeds breakeven (spends more per ₹ than the
+        // margin left after COGS+fees). Only meaningful when both are known and
+        // the cell actually has spend.
+        const losing =
+          spend > 0 && acos != null && breakevenAcos != null && breakevenAcos > 0 && acos > breakevenAcos;
+        rows.push({
+          code, ch, spend, rev, units,
+          roas, acos, breakevenAcos,
+          cm3: m.cm3, cm3Pct: m.cm3Pct,
+          losing,
+          noCogs: cell.coverage?.cogs === false || cell.cm2 == null,
+          zeroSale: spend > 0 && units <= 0,
+        });
+      }
+    }
+    // Sort: biggest spend first (where the money goes).
+    rows.sort((a, b) => b.spend - a.spend);
+    return rows;
+  }, [cm]);
+
+  const spentRows = adRows.filter((r) => r.spend > 0);
+  const zeroSaleRows = adRows.filter((r) => r.zeroSale);
+  const losingRows = spentRows.filter((r) => r.losing);
+
+  // Channel-total ad spend that exists in an override but couldn't be wired to
+  // SKUs (0-revenue channel). Surfaced as a coverage caveat, never dropped.
+  const unallocatedTotal = spendByChannel.reduce((a, c) => a + c.unallocated, 0);
+
+  // Blinkit-style caveat: a channel that has SKU sales but ZERO resolved ad
+  // spend, while we know from the spec a Snell channel total exists but isn't
+  // wired as an override yet. We detect it structurally: sales but spend 0.
+  const noSpendChannels = spendByChannel.filter((c) => c.netRev > 0 && c.spend <= 0);
 
   return (
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Marketing & Advertising</div>
-          <div className="page-sub">Google Ads · Meta Ads · attribution → Shopify · marketplace halo noted</div>
+          <div className="page-title">Marketing &amp; Advertising</div>
+          <div className="page-sub">
+            Ad spend → CM3 · per-SKU ROAS / ACOS · breakeven-ACOS flags · {fmtMonth(month)}
+          </div>
         </div>
         <div className="actions">
-          <div className="seg">
-            <button>Today</button><button>7D</button><button className="active">MTD</button><button>QTD</button>
-          </div>
-          <button className="btn"><Icon name="download" size={13}/>Export</button>
+          {months.length > 1 && (
+            <div className="seg">
+              {months.map((m) => (
+                <button key={m} className={m === month ? "active" : ""} onClick={() => setMonth(m)}>
+                  {fmtMonth(m)}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
       <div className="note" style={{ marginBottom: 14 }}>
-        <strong style={{ color: "var(--info)" }}>Attribution scope:</strong>&nbsp;
-        Google/Meta ROAS shown here attributes only to Shopify revenue (via UTM). Marketplace revenue likely sees a halo lift but is not directly attributable — see "halo correlation" panel below.
+        <strong style={{ color: "var(--info)" }}>Attribution basis:</strong>&nbsp;
+        ROAS / ACOS use each SKU&apos;s own channel net revenue (order-date attributed) against its
+        platform-reported ad spend. Windows differ per platform — Amazon SP ≈14-day, Flipkart PLA report
+        window, Google/Meta their own conversion windows — so these are channel-native, not a single
+        unified attribution. <strong style={{ color: "var(--ink-2)" }}>Breakeven ACOS = CM2%</strong> (the
+        margin left after COGS + platform fees); spending above it loses money per ad rupee.
       </div>
 
-      <div className="tabs">
-        <button className={tab === "blended" ? "active" : ""} onClick={() => setTab("blended")}>Blended view</button>
-        <button className={tab === "google" ? "active" : ""} onClick={() => setTab("google")}>Google Ads</button>
-        <button className={tab === "meta" ? "active" : ""} onClick={() => setTab("meta")}>Meta Ads</button>
-        <button className={tab === "halo" ? "active" : ""} onClick={() => setTab("halo")}>Halo & correlation</button>
+      {/* ── Headline spend KPIs ─────────────────────────────────────────── */}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 14 }}>
+        <Card title="Total ad spend">
+          <div className="stat-num lg">{D.fmtINR(totalSpend)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>
+            across {channels.length} channel{channels.length === 1 ? "" : "s"} · {fmtMonth(month)}
+          </div>
+        </Card>
+        <Card title="Attributed net revenue">
+          <div className="stat-num lg">{D.fmtINR(totalRev)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>channel net revenue (basis for ROAS)</div>
+        </Card>
+        <Card title="Blended ROAS">
+          <div className="stat-num lg">{blendedRoas == null ? "—" : blendedRoas.toFixed(2) + "×"}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>net revenue ÷ ad spend</div>
+        </Card>
+        <Card title="Blended ACOS">
+          <div className="stat-num lg">{blendedAcos == null ? "—" : (blendedAcos * 100).toFixed(1) + "%"}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>ad spend ÷ net revenue</div>
+        </Card>
       </div>
 
-      {tab === "blended" && (
-        <>
-          <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", marginBottom: 14 }}>
-            <Card title="Total spend MTD"><div className="stat-num lg">{D.fmtINR(total.spend)}</div><div className="muted" style={{ fontSize: 11.5 }}><Delta value={8.4} suffix="vs last mo"/></div></Card>
-            <Card title="Attrib revenue"><div className="stat-num lg">{D.fmtINR(total.rev)}</div><div className="muted" style={{ fontSize: 11.5 }}>Shopify · UTM-tagged</div></Card>
-            <Card title="Blended ROAS"><div className="stat-num lg">{total.roas.toFixed(2)}×</div><div className="muted" style={{ fontSize: 11.5 }}>Target 3.20× · <Delta value={6.2}/></div></Card>
-            <Card title="Blended CAC"><div className="stat-num lg">₹{D.fmtN(Math.round(total.cac))}</div><div className="muted" style={{ fontSize: 11.5 }}><Delta value={-4.2}/></div></Card>
-            <Card title="Spend mix"><div className="stat-num lg">46/54</div><div className="muted" style={{ fontSize: 11.5 }}>Google / Meta</div></Card>
-          </div>
-
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 14 }}>
-            <PlatformCard name="Google Ads" data={D.adAccounts.google} color="#4285F4"/>
-            <PlatformCard name="Meta Ads"   data={D.adAccounts.meta}   color="#1877F2"/>
-          </div>
-
-          <Card title="Spend vs revenue · last 30 days" sub="Daily, blended">
-            <SpendRevenueChart/>
-          </Card>
-        </>
+      {/* ── Coverage caveats (honest gaps) ──────────────────────────────── */}
+      {(noSpendChannels.length > 0 || unallocatedTotal > 0) && (
+        <div className="note" style={{ marginBottom: 14, borderColor: "var(--warning)" }}>
+          <strong style={{ color: "var(--warning)" }}>Ad-coverage caveats:</strong>&nbsp;
+          {noSpendChannels.length > 0 && (
+            <>
+              {noSpendChannels.map((c) => chMeta(c.ch).label).join(", ")} {noSpendChannels.length === 1 ? "has" : "have"} sales
+              but no ad spend wired in this baseline ({noSpendChannels.map((c) => chMeta(c.ch).adSource).join("; ")} not yet
+              loaded as a channel-total override) — its ROAS / ACOS read as no-spend, not as zero spend.&nbsp;
+            </>
+          )}
+          {unallocatedTotal > 0 && (
+            <>
+              {D.fmtINR(unallocatedTotal)} of channel-total ad spend could not be allocated to SKUs (zero-revenue channel)
+              and is held aside, not silently dropped.
+            </>
+          )}
+        </div>
       )}
 
-      {tab === "google" && (
-        <>
-          <PlatformDetail platform="Google Ads" data={D.adAccounts.google} color="#4285F4" budget={D.adAccounts.google.budget}/>
-          <Card title="Campaigns · Google Ads" sub="Account · campaign · product level" padded={false}>
-            <table className="table">
-              <thead>
-                <tr><th>Campaign</th><th>Status</th><th className="num">Spend</th><th className="num">ROAS</th><th className="num">CAC</th><th className="num">Conv</th><th>Performance</th></tr>
-              </thead>
-              <tbody>
-                {D.googleCampaigns.map((c, i) => (
-                  <tr key={i}>
-                    <td>{c.name}</td>
-                    <td><span className={"badge " + (c.status === "Active" ? "green" : "amber") + " dot"}>{c.status}</span></td>
-                    <td className="num">{D.fmtINR(c.spend)}</td>
-                    <td className="num"><span style={{ color: c.roas >= 3 ? "var(--success)" : c.roas >= 2 ? "var(--warning)" : "var(--critical)" }}>{c.roas.toFixed(2)}×</span></td>
-                    <td className="num">₹{D.fmtN(c.cac)}</td>
-                    <td className="num">{D.fmtN(c.conv)}</td>
-                    <td style={{ width: 160 }}><Progress value={c.roas * 20} color={c.roas >= 3 ? "green" : c.roas >= 2 ? "amber" : "red"}/></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </>
+      {/* ── Spend by channel: direct vs allocated split ─────────────────── */}
+      <Card
+        title="Spend by channel"
+        sub="Direct (product-attributed) vs allocated (channel total − direct, spread by revenue)"
+        padded={false}
+        style={{ marginBottom: 14 }}
+      >
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th className="num">Net revenue</th>
+              <th className="num">Direct spend</th>
+              <th className="num">Allocated</th>
+              <th className="num">Total spend</th>
+              <th className="num">ROAS</th>
+              <th className="num">ACOS</th>
+              <th style={{ width: 150 }}>Spend share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {spendByChannel.map((c) => {
+              const roas = c.spend > 0 ? c.netRev / c.spend : null;
+              const acos = c.netRev > 0 && c.spend > 0 ? c.spend / c.netRev : null;
+              const share = totalSpend > 0 ? (c.spend / totalSpend) * 100 : 0;
+              return (
+                <tr key={c.ch}>
+                  <td>
+                    <span className="badge" style={pillStyle(c.ch)}>{chMeta(c.ch).label}</span>
+                    <div className="sku" style={{ marginTop: 3 }}>{chMeta(c.ch).window}</div>
+                  </td>
+                  <td className="num">{D.fmtINR(c.netRev)}</td>
+                  <td className="num">{D.fmtINR(c.direct)}</td>
+                  <td className="num">
+                    {c.allocated > 0 ? D.fmtINR(c.allocated) : <span className="muted">—</span>}
+                  </td>
+                  <td className="num">{D.fmtINR(c.spend)}</td>
+                  <td className="num">{roas == null ? <span className="muted">—</span> : roas.toFixed(2) + "×"}</td>
+                  <td className="num">{acos == null ? <span className="muted">—</span> : (acos * 100).toFixed(1) + "%"}</td>
+                  <td>
+                    <Progress value={share} color="brand"/>
+                    <div className="sku" style={{ marginTop: 2 }}>{share.toFixed(0)}%</div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {spendByChannel.length > 0 && (
+            <tfoot>
+              <tr style={{ fontWeight: 600 }}>
+                <td>Total</td>
+                <td className="num">{D.fmtINR(totalRev)}</td>
+                <td className="num">{D.fmtINR(spendByChannel.reduce((a, c) => a + c.direct, 0))}</td>
+                <td className="num">{D.fmtINR(spendByChannel.reduce((a, c) => a + c.allocated, 0))}</td>
+                <td className="num">{D.fmtINR(totalSpend)}</td>
+                <td className="num">{blendedRoas == null ? "—" : blendedRoas.toFixed(2) + "×"}</td>
+                <td className="num">{blendedAcos == null ? "—" : (blendedAcos * 100).toFixed(1) + "%"}</td>
+                <td/>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </Card>
+
+      {/* ── Ad → CM3 bridge per channel ─────────────────────────────────── */}
+      <Card
+        title="Ad → CM3 bridge"
+        sub="CM2 (after COGS + platform fees) − ad spend = CM3. The decision layer for delist / ad-pullback."
+        padded={false}
+        style={{ marginBottom: 14 }}
+      >
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th className="num">CM2</th>
+              <th className="num">− Ad spend</th>
+              <th className="num">= CM3</th>
+              <th className="num">CM3 %</th>
+              <th>Bridge</th>
+            </tr>
+          </thead>
+          <tbody>
+            {spendByChannel.map((c) => {
+              const roll = cm.byChannel[c.ch] || {};
+              const cm2 = roll.cm2;
+              const cm3 = roll.cm3;
+              const cm3Pct = roll.pcts?.cm3 ?? null;
+              return (
+                <tr key={c.ch}>
+                  <td><span className="badge" style={pillStyle(c.ch)}>{chMeta(c.ch).label}</span></td>
+                  <td className="num">{cm2 == null ? <span className="muted">—</span> : D.fmtINR(cm2)}</td>
+                  <td className="num" style={{ color: c.spend > 0 ? "var(--critical)" : undefined }}>
+                    {c.spend > 0 ? "−" + D.fmtINR(c.spend).replace("−", "") : <span className="muted">₹0</span>}
+                  </td>
+                  <td className="num" style={{ color: cm3Color(cm3) }}>
+                    {cm3 == null ? <span className="muted">—</span> : D.fmtINR(cm3)}
+                  </td>
+                  <td className="num" style={{ color: cm3Color(cm3) }}>
+                    {cm3Pct == null ? <span className="muted">—</span> : fmtPct(cm3Pct)}
+                  </td>
+                  <td style={{ width: 220 }}>
+                    <Cm2ToCm3Bridge cm2={cm2} adSpend={c.spend} cm3={cm3}/>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr style={{ fontWeight: 600 }}>
+              <td>Company</td>
+              <td className="num">{cm.company.cm2 == null ? "—" : D.fmtINR(cm.company.cm2)}</td>
+              <td className="num" style={{ color: "var(--critical)" }}>
+                {totalSpend > 0 ? "−" + D.fmtINR(totalSpend).replace("−", "") : "₹0"}
+              </td>
+              <td className="num" style={{ color: cm3Color(cm.company.cm3) }}>
+                {cm.company.cm3 == null ? "—" : D.fmtINR(cm.company.cm3)}
+              </td>
+              <td className="num" style={{ color: cm3Color(cm.company.cm3) }}>
+                {cm.company.pcts?.cm3 == null ? "—" : fmtPct(cm.company.pcts.cm3)}
+              </td>
+              <td/>
+            </tr>
+          </tfoot>
+        </table>
+      </Card>
+
+      {/* ── Loss-making cells callout (ACOS > breakeven) ────────────────── */}
+      {losingRows.length > 0 && (
+        <Card
+          title="Losing money per ad rupee"
+          sub="ACOS exceeds breakeven ACOS (CM2%) — every marginal ad rupee here erodes contribution."
+          action={<span className="badge red dot">{losingRows.length}</span>}
+          padded={false}
+          style={{ marginBottom: 14 }}
+        >
+          <table className="table">
+            <thead>
+              <tr>
+                <th>SKU</th>
+                <th>Channel</th>
+                <th className="num">Ad spend</th>
+                <th className="num">ACOS</th>
+                <th className="num">Breakeven (CM2%)</th>
+                <th className="num">CM3</th>
+              </tr>
+            </thead>
+            <tbody>
+              {losingRows.map((r, i) => (
+                <tr key={i}>
+                  <td>{skuName(r.code)}<div className="sku">{r.code} · {skuVariant(r.code)}</div></td>
+                  <td><span className="badge" style={pillStyle(r.ch)}>{chMeta(r.ch).label}</span></td>
+                  <td className="num">{D.fmtINR(r.spend)}</td>
+                  <td className="num" style={{ color: "var(--critical)" }}>{r.acos == null ? "—" : (r.acos * 100).toFixed(0) + "%"}</td>
+                  <td className="num">{r.breakevenAcos == null ? "—" : (r.breakevenAcos * 100).toFixed(0) + "%"}</td>
+                  <td className="num" style={{ color: cm3Color(r.cm3) }}>{r.cm3 == null ? "—" : D.fmtINR(r.cm3)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       )}
 
-      {tab === "meta" && (
-        <>
-          <PlatformDetail platform="Meta Ads" data={D.adAccounts.meta} color="#1877F2" budget={D.adAccounts.meta.budget}/>
-          <Card title="Top creatives · last 30 days" sub="By ROAS · Meta Ads" style={{ marginBottom: 14 }} padded={false}>
-            <table className="table">
-              <thead><tr><th>Creative</th><th>Format</th><th className="num">Spend</th><th className="num">ROAS</th><th className="num">CAC</th><th className="num">CTR</th><th className="num">Thumb-stop</th></tr></thead>
-              <tbody>
-                {[
-                  { id: "BIO-V3", desc: "Biotin · UGC testimonial 15s", fmt: "Reel", spend: 84000, roas: 5.21, cac: 268, ctr: 2.4, ts: 38 },
-                  { id: "WHEY-S2", desc: "Whey Choc · scoop scroll-stopper", fmt: "Static", spend: 162000, roas: 4.84, cac: 312, ctr: 1.8, ts: 24 },
-                  { id: "MUL-V1", desc: "Multivit · 'why I switched' founder VO", fmt: "Reel", spend: 124000, roas: 4.42, cac: 348, ctr: 2.1, ts: 32 },
-                  { id: "ASH-S1", desc: "Ashwagandha · 'sleep better' carousel", fmt: "Carousel", spend: 78000, roas: 3.14, cac: 412, ctr: 1.4, ts: 18 },
-                  { id: "PROT-V2", desc: "Plant Protein · launch hero reel", fmt: "Reel", spend: 218000, roas: 1.86, cac: 712, ctr: 1.2, ts: 14 },
-                ].map(c => (
-                  <tr key={c.id}>
-                    <td>
-                      <div style={{ display: "flex", gap: 9, alignItems: "center" }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 4, background: "linear-gradient(135deg,#E5EEE7,#B9D0BF)", display: "grid", placeItems: "center", color: "var(--brand)", fontFamily: "var(--mono)", fontSize: 10 }}>{c.id}</div>
-                        <div>
-                          <div>{c.desc}</div>
-                          <div className="sku">#{c.id}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{c.fmt}</td>
-                    <td className="num">{D.fmtINR(c.spend)}</td>
-                    <td className="num"><span style={{ color: c.roas >= 3 ? "var(--success)" : c.roas >= 2 ? "var(--warning)" : "var(--critical)" }}>{c.roas.toFixed(2)}×</span></td>
-                    <td className="num">₹{D.fmtN(c.cac)}</td>
-                    <td className="num">{c.ctr.toFixed(1)}%</td>
-                    <td className="num">{c.ts}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
-          <Card title="Campaigns · Meta Ads" padded={false}>
-            <table className="table">
-              <thead>
-                <tr><th>Campaign</th><th>Status</th><th className="num">Spend</th><th className="num">ROAS</th><th className="num">CAC</th><th className="num">Conv</th><th>Performance</th></tr>
-              </thead>
-              <tbody>
-                {D.metaCampaigns.map((c, i) => (
-                  <tr key={i}>
-                    <td>{c.name}</td>
-                    <td><span className={"badge " + (c.status === "Active" ? "green" : "amber") + " dot"}>{c.status}</span></td>
-                    <td className="num">{D.fmtINR(c.spend)}</td>
-                    <td className="num"><span style={{ color: c.roas >= 3 ? "var(--success)" : c.roas >= 2 ? "var(--warning)" : "var(--critical)" }}>{c.roas.toFixed(2)}×</span></td>
-                    <td className="num">₹{D.fmtN(c.cac)}</td>
-                    <td className="num">{D.fmtN(c.conv)}</td>
-                    <td style={{ width: 160 }}><Progress value={c.roas * 20} color={c.roas >= 3 ? "green" : c.roas >= 2 ? "amber" : "red"}/></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </>
-      )}
-
-      {tab === "halo" && (
-        <>
-          <Card title="Halo correlation" sub="Did marketplace revenue move with ad spend? Context, not attribution.">
-            <SpendRevenueChart halo/>
-            <div className="note" style={{ marginTop: 14 }}>
-              <strong style={{ color: "var(--info)" }}>How to read:</strong>&nbsp;
-              The two lines often move together — strong evidence ads lift marketplace sales — but the platforms (Amazon, Flipkart, Blinkit) don't expose source attribution. Treat this as a directional signal, not a ROAS calculation. To formalise, consider an MTA tool (Northbeam / Rockerbox).
+      {/* ── Zero-sale spend list (wasted ad rupees) ─────────────────────── */}
+      <Card
+        title="Zero-sale ad spend"
+        sub="Cells with ad spend but no units sold this month — fully wasted spend."
+        action={<span className={"badge " + (zeroSaleRows.length ? "red" : "green") + " dot"}>{zeroSaleRows.length}</span>}
+        padded={false}
+        style={{ marginBottom: 14 }}
+      >
+        {zeroSaleRows.length === 0 ? (
+          <div className="card-body">
+            <div className="muted" style={{ fontSize: 12.5 }}>
+              No zero-sale ad spend this month — every SKU×channel that received ad budget converted at least one unit.
             </div>
-          </Card>
-        </>
-      )}
-    </div>
-  );
-};
+          </div>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr><th>SKU</th><th>Channel</th><th className="num">Ad spend (wasted)</th></tr>
+            </thead>
+            <tbody>
+              {zeroSaleRows.map((r, i) => (
+                <tr key={i}>
+                  <td>{skuName(r.code)}<div className="sku">{r.code} · {skuVariant(r.code)}</div></td>
+                  <td><span className="badge" style={pillStyle(r.ch)}>{chMeta(r.ch).label}</span></td>
+                  <td className="num" style={{ color: "var(--critical)" }}>{D.fmtINR(r.spend)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
-const PlatformCard = ({ name, data, color }) => {
-  const D = NSData;
-  const pacing = (data.spendMTD / data.budget) * 100;
-  return (
-    <Card title={name}
-      action={<span className="badge" style={{ background: color + "22", color, borderColor: color + "55" }}>Live</span>}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-        <div>
-          <div className="stat-label">Spend MTD</div>
-          <div className="stat-num lg">{D.fmtINR(data.spendMTD)}</div>
-          <div className="muted" style={{ fontSize: 11 }}>of {D.fmtINR(data.budget)} budget</div>
-          <Progress value={pacing} color={pacing > 100 ? "amber" : "brand"}/>
-        </div>
-        <div>
-          <div className="stat-label">ROAS</div>
-          <div className="stat-num lg">{data.roas.toFixed(2)}×</div>
-          <div className="muted" style={{ fontSize: 11 }}>CAC ₹{data.cac} · {D.fmtN(data.conversions)} conv</div>
-        </div>
-        <div>
-          <div className="stat-label">Impressions</div>
-          <div className="mono" style={{ fontSize: 14 }}>{(data.impressions/1000000).toFixed(2)}M</div>
-        </div>
-        <div>
-          <div className="stat-label">Clicks · CTR</div>
-          <div className="mono" style={{ fontSize: 14 }}>{D.fmtN(data.clicks)} · {((data.clicks/data.impressions)*100).toFixed(2)}%</div>
-        </div>
-      </div>
-    </Card>
-  );
-};
-
-const PlatformDetail = ({ platform, data, color, budget }) => {
-  const D = NSData;
-  const pacing = (data.spendMTD / budget) * 100;
-  return (
-    <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", marginBottom: 14 }}>
-      <Card title={platform + " · spend MTD"}>
-        <div className="stat-num lg">{D.fmtINR(data.spendMTD)}</div>
-        <div className="muted" style={{ fontSize: 11.5 }}>vs ₹{(budget/100000).toFixed(0)}L budget</div>
-        <div style={{ marginTop: 6 }}><Progress value={pacing} color={pacing > 110 ? "amber" : "brand"}/></div>
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
-          {pacing > 100 ? `Overpacing ${(pacing-100).toFixed(0)}%` : `Underpacing ${(100-pacing).toFixed(0)}%`}
+      {/* ── Per-SKU × channel ROAS / ACOS table ─────────────────────────── */}
+      <Card
+        title="Per-SKU ad performance"
+        sub="ROAS, ACOS and breakeven-ACOS per SKU × channel. Red ACOS = above breakeven (loss-making)."
+        padded={false}
+      >
+        <table className="table">
+          <thead>
+            <tr>
+              <th>SKU</th>
+              <th>Channel</th>
+              <th className="num">Units</th>
+              <th className="num">Net revenue</th>
+              <th className="num">Ad spend</th>
+              <th className="num">ROAS</th>
+              <th className="num">ACOS</th>
+              <th className="num">Breakeven</th>
+              <th className="num">CM3</th>
+              <th className="num">CM3 %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {spentRows.length === 0 && (
+              <tr><td colSpan={10} className="muted" style={{ padding: 16, fontSize: 12.5 }}>
+                No ad spend recorded for {fmtMonth(month)}.
+              </td></tr>
+            )}
+            {spentRows.map((r, i) => (
+              <tr key={i}>
+                <td>
+                  {skuName(r.code)}
+                  <div className="sku">
+                    {r.code} · {skuVariant(r.code)}
+                    {r.noCogs && <span className="badge amber" style={{ marginLeft: 6, fontSize: 9 }}>no COGS</span>}
+                  </div>
+                </td>
+                <td><span className="badge" style={pillStyle(r.ch)}>{chMeta(r.ch).label}</span></td>
+                <td className="num">{r.units <= 0 ? <span style={{ color: "var(--critical)" }}>0</span> : D.fmtN(r.units)}</td>
+                <td className="num">{D.fmtINR(r.rev)}</td>
+                <td className="num">{D.fmtINR(r.spend)}</td>
+                <td className="num">{r.roas == null ? <span className="muted">—</span> : r.roas.toFixed(2) + "×"}</td>
+                <td className="num" style={{ color: r.losing ? "var(--critical)" : undefined }}>
+                  {r.acos == null ? <span className="muted">—</span> : (r.acos * 100).toFixed(0) + "%"}
+                </td>
+                <td className="num">
+                  {r.breakevenAcos == null ? <span className="muted">—</span> : (r.breakevenAcos * 100).toFixed(0) + "%"}
+                </td>
+                <td className="num" style={{ color: cm3Color(r.cm3) }}>{r.cm3 == null ? <span className="muted">—</span> : D.fmtINR(r.cm3)}</td>
+                <td className="num" style={{ color: cm3Color(r.cm3) }}>{r.cm3Pct == null ? <span className="muted">—</span> : fmtPct(r.cm3Pct)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="card-body" style={{ paddingTop: 10 }}>
+          <div className="muted" style={{ fontSize: 11 }}>
+            ROAS = net revenue ÷ ad spend · ACOS = ad spend ÷ net revenue · Breakeven ACOS = CM2% (margin after COGS +
+            platform fees). Ad source per channel: {channels.map((ch) => `${chMeta(ch).label} → ${chMeta(ch).adSource}`).join(" · ")}.
+          </div>
         </div>
       </Card>
-      <Card title="ROAS"><div className="stat-num lg">{data.roas.toFixed(2)}×</div><div className="muted" style={{ fontSize: 11.5 }}><Delta value={6.1}/> vs last mo</div></Card>
-      <Card title="CAC"><div className="stat-num lg">₹{D.fmtN(data.cac)}</div><div className="muted" style={{ fontSize: 11.5 }}><Delta value={-3.4}/></div></Card>
-      <Card title="Impressions"><div className="stat-num lg">{(data.impressions/1000000).toFixed(2)}M</div><div className="muted" style={{ fontSize: 11.5 }}>{D.fmtN(data.clicks)} clicks</div></Card>
-      <Card title="Conversions"><div className="stat-num lg">{D.fmtN(data.conversions)}</div><div className="muted" style={{ fontSize: 11.5 }}>CTR {((data.clicks/data.impressions)*100).toFixed(2)}% · CVR {((data.conversions/data.clicks)*100).toFixed(2)}%</div></Card>
     </div>
   );
 };
 
-const SpendRevenueChart = ({ halo }) => {
-  const w = 1080, h = 220;
-  const pad = { l: 50, r: 60, t: 14, b: 26 };
-  const innerW = w - pad.l - pad.r;
-  const innerH = h - pad.t - pad.b;
-  const days = 30;
-  // mock series
-  const spend = [62,68,71,74,78,72,76,82,85,88,92,90,86,84,89,94,96,98,102,100,104,108,112,110,108,116,120,118,122,128];
-  const revShop = [248,272,284,300,316,288,308,332,348,364,388,372,348,336,372,396,412,428,444,432,464,488,512,500,488,532,556,548,572,608];
-  const revMP = [820,860,872,896,912,884,908,948,964,988,1024,1004,968,944,996,1040,1064,1092,1124,1100,1148,1196,1240,1212,1188,1268,1308,1284,1336,1416];
-
-  const max1 = Math.max(...spend);
-  const max2 = halo ? Math.max(...revMP) : Math.max(...revShop);
-
-  const xFor = i => pad.l + (i / (days - 1)) * innerW;
-  const y1For = v => pad.t + innerH - (v / max1) * innerH;
-  const y2For = v => pad.t + innerH - (v / max2) * innerH;
-
-  const path = (data, yFn) => data.map((v, i) => (i === 0 ? "M" : "L") + xFor(i).toFixed(1) + "," + yFn(v).toFixed(1)).join(" ");
-
+// ── Mini horizontal bridge: CM2 → −ad → CM3 (proportional bars). ───────────
+// SAFE: returns an empty cell when CM2 is unknown (no-COGS channel). Never
+// produces NaN widths — all widths clamp into [0,100].
+const Cm2ToCm3Bridge = ({ cm2, adSpend, cm3 }) => {
+  if (cm2 == null) return <span className="muted" style={{ fontSize: 11 }}>—</span>;
+  const c2 = num(cm2);
+  const ad = num(adSpend);
+  const denom = Math.max(Math.abs(c2), Math.abs(c2) + ad, 1);
+  const cm2W = clampPct((Math.max(0, c2) / denom) * 100);
+  const adW = clampPct((ad / denom) * 100);
+  const negative = (cm3 != null && cm3 < 0) || c2 <= 0;
   return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
-      {[0, 0.25, 0.5, 0.75, 1].map((t, i) => (
-        <line key={i} x1={pad.l} x2={w - pad.r} y1={pad.t + innerH * t} y2={pad.t + innerH * t} stroke="var(--border-soft)"/>
-      ))}
-      {/* spend bars */}
-      {spend.map((v, i) => {
-        const bh = (v / max1) * innerH;
-        return <rect key={i} x={xFor(i) - 8} y={pad.t + innerH - bh} width="16" height={bh} fill="var(--ink-3)" opacity="0.18" rx="1"/>;
-      })}
-      {/* primary revenue line */}
-      <path d={path(halo ? revMP : revShop, y2For)} fill="none" stroke={halo ? "var(--warning)" : "var(--brand)"} strokeWidth="1.8"/>
-      {halo && (
-        <path d={path(revShop, y2For)} fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeDasharray="3 3"/>
-      )}
-      {/* y axes */}
-      <text x={pad.l - 8} y={pad.t + 4} fontSize="10" textAnchor="end" fill="var(--ink-3)" fontFamily="var(--mono)">spend</text>
-      <text x={w - pad.r + 8} y={pad.t + 4} fontSize="10" textAnchor="start" fill="var(--ink-3)" fontFamily="var(--mono)">revenue</text>
-      {/* x */}
-      {[0, 7, 14, 21, 28].map(d => <text key={d} x={xFor(d)} y={h - 8} fontSize="10" textAnchor="middle" fill="var(--ink-3)" fontFamily="var(--mono)">{`D${d+1}`}</text>)}
-      {/* legend */}
-      <g transform={`translate(${pad.l + 8}, ${pad.t + 12})`}>
-        <rect x="0" y="-4" width="14" height="8" fill="var(--ink-3)" opacity="0.18" rx="1"/>
-        <text x="20" y="2" fontSize="10" fill="var(--ink-2)">Ad spend</text>
-        <line x1="84" y1="0" x2="98" y2="0" stroke={halo ? "var(--warning)" : "var(--brand)"} strokeWidth="1.8"/>
-        <text x="102" y="3" fontSize="10" fill="var(--ink-2)">{halo ? "Marketplace revenue" : "Shopify (attributed)"}</text>
-        {halo && <><line x1="240" y1="0" x2="254" y2="0" stroke="var(--brand)" strokeWidth="1.8" strokeDasharray="3 3"/><text x="258" y="3" fontSize="10" fill="var(--ink-2)">Shopify (attributed)</text></>}
-      </g>
-    </svg>
+    <div style={{ display: "flex", height: 9, borderRadius: 3, overflow: "hidden", background: "var(--border-soft)" }}>
+      <div style={{ width: cm2W + "%", background: negative ? "var(--warning)" : "var(--brand)" }}/>
+      <div style={{ width: adW + "%", background: "var(--critical)", opacity: 0.7 }}/>
+    </div>
   );
 };
 
+// ── helpers (NaN-free formatting) ──────────────────────────────────────────
+function num(n) { const v = Number(n); return Number.isFinite(v) ? v : 0; }
+function clampPct(p) { const v = Number(p); return Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0; }
+function fmtPct(frac) {
+  const v = Number(frac);
+  if (!Number.isFinite(v)) return "—";
+  return (v >= 0 ? "" : "−") + Math.abs(v * 100).toFixed(1) + "%";
+}
+function cm3Color(v) {
+  if (v == null || !Number.isFinite(Number(v))) return undefined;
+  return Number(v) < 0 ? "var(--critical)" : "var(--success)";
+}
+function pillStyle(ch) {
+  const color = chMeta(ch).color;
+  return { background: color + "22", color, borderColor: color + "55" };
+}
+function fmtMonth(m) {
+  // "2026-05" → "May 2026". SAFE on malformed input.
+  const parts = String(m || "").split("-");
+  if (parts.length !== 2) return String(m || "—");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const mi = Number(parts[1]) - 1;
+  return (names[mi] || parts[1]) + " " + parts[0];
+}
 
 export default PageMarketing;

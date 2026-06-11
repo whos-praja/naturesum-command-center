@@ -1,306 +1,577 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Icon, Delta, Card, Sparkline, BarChart, Progress, ChannelPill } from "../components/Shared.jsx";
+import { useState, useMemo } from "react";
+import { Delta, Card } from "../components/Shared.jsx";
 import NSData from "../data.js";
+import { mergedFacts, channelsIn, monthsIn } from "../lib/businessStore.js";
+import { computeCM } from "../lib/cmEngine.js";
 
-// Module 2 — Sales & Revenue Intelligence
+/**
+ * PageSales — Business Performance §9 (Sales & Revenue Intelligence).
+ *
+ * Real data only. Reads the durable fact store via mergedFacts() (bundled May-26
+ * baseline ⊕ any uploads) and runs the pure CM engine (computeCM) for the active
+ * month. Every channel/SKU list is DERIVED from the facts (channelsIn / engine
+ * rollups) — never hardcoded — so a new channel or SKU appears with no code edit.
+ *
+ * HONESTY (spec §11): revenue is shown on a NET basis and labelled as such;
+ * absent sources read as "no data", never 0; no NaN/Infinity is ever rendered.
+ * Growth is genuinely single-month for the marketplaces (only May-26 in the fact
+ * store), so NO fabricated MoM number is shown — instead the page surfaces the
+ * Monarch 13-month WEBSITE conversion-value trend (real history carried in
+ * meta.bySource["monarch-web"].monarchWebHistory) as the one true growth series,
+ * and frames the rest as a single-month snapshot until a 2nd month lands.
+ *
+ * Returns: the fact store nets Amazon returns OUT of Amazon revenue/units (spec
+ * §11) and Flipkart's negative settlement rows auto-net into BIA; both are
+ * surfaced from the per-cell returnsUnits/returnsValue fields. Website/Blinkit
+ * carry no return facts in the May baseline → shown as "not in source", not 0.
+ */
+
+// Display metadata per fact-store channel. The fact-store channel set is the
+// authority (channelsIn); this map is presentation-only (label + colour). An
+// unknown channel SAFELY falls back to a neutral style + its raw id.
+const CH_META = {
+  amazon:   { name: "Amazon",   short: "AMZ", color: "#E47911" },
+  flipkart: { name: "Flipkart", short: "FK",  color: "#2874F0" },
+  blinkit:  { name: "Blinkit",  short: "BLK", color: "#F8CB46" },
+  website:  { name: "Website",  short: "WEB", color: "#5E8E3E" },
+};
+const chMeta = (ch) => CH_META[ch] || { name: ch, short: ch.slice(0, 3).toUpperCase(), color: "#9CA098" };
+
+// Pretty month label "2026-05" → "May 2026".
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function fmtMonth(ym) {
+  const [y, m] = String(ym || "").split("-");
+  const mi = parseInt(m, 10) - 1;
+  return mi >= 0 && mi < 12 && y ? `${MONTHS[mi]} ${y}` : (ym || "—");
+}
+
+// SKU display name from the canonical code (reuses the inventory SKU table).
+const SKU_NAME = Object.fromEntries(
+  NSData.skus.map((s) => [s.code, `${s.name} · ${s.variant}`])
+);
+const skuName = (code) => SKU_NAME[code] || code;
+
+// % of a fraction (0..1) → "12.3%"; null-safe → "—".
+const pctStr = (frac) => (frac == null || !Number.isFinite(frac) ? "—" : (frac * 100).toFixed(1) + "%");
 
 const PageSales = () => {
   const D = NSData;
-  const [range, setRange] = useState("30d");
-  const [sort, setSort] = useState("revenue");
-  const [trajectory, setTrajectory] = useState("current");
-  const [growthInput, setGrowthInput] = useState(15);
 
-  const ranges = [
-    { id: "today", label: "Today" }, { id: "yday", label: "Yesterday" },
-    { id: "7d", label: "Last 7D" }, { id: "30d", label: "Last 30D" }, { id: "custom", label: "Custom" }
-  ];
+  // Live read model: bundled baseline ⊕ uploaded overrides.
+  const facts = useMemo(() => mergedFacts(), []);
+  const months = useMemo(() => monthsIn(facts), [facts]);
+  // Active month = latest month present (single-month today; future-proof).
+  const month = months[months.length - 1] || "2026-05";
 
-  const sorted = [...D.skuSales].sort((a, b) => {
-    if (sort === "revenue") return b.revenue30 - a.revenue30;
-    if (sort === "growth") return b.growth - a.growth;
-    if (sort === "returns") return b.returnRate - a.returnRate;
-    return 0;
-  });
+  const cm = useMemo(() => computeCM({ facts, month }), [facts, month]);
+  const channels = useMemo(() => channelsIn(facts).filter((c) => cm.byChannel[c]), [facts, cm]);
 
-  // projection
-  const mtdRunRate = D.revenueMTD / 21 * 31;
-  const projected = trajectory === "current" ? mtdRunRate : D.revenueMTDLast * (1 + growthInput / 100);
+  // Returns facts per channel (from per-cell returnsUnits/returnsValue, summed
+  // for the active month). Channels with no return facts → null (not 0).
+  const returnsByChannel = useMemo(() => {
+    const out = {};
+    for (const key of Object.keys(facts.monthly || {})) {
+      const [m, ch] = key.split("|");
+      if (m !== month) continue;
+      const cell = facts.monthly[key] || {};
+      const ru = Number(cell.returnsUnits) || 0;
+      const rv = Number(cell.returnsValue) || 0;
+      if (!out[ch]) out[ch] = { units: 0, value: 0, hasData: false };
+      out[ch].units += ru;
+      out[ch].value += rv;
+      if (ru || rv) out[ch].hasData = true;
+    }
+    return out;
+  }, [facts, month]);
+
+  // Source-meta passthroughs (provenance the engine doesn't carry).
+  const bySource = facts.meta?.bySource || {};
+  const monarchHistory = bySource["monarch-web"]?.monarchWebHistory || null;
+  const mcfUnits = bySource["amazon-orders"]?.mcf?.totalUnits ?? null;
+  const fkCashback = bySource["fk-sales"]?.flipkartCashback || null;
+
+  const company = cm.company;
+  const multiMonth = months.length >= 2;
+
+  // Active channel for the SKU breakdown table (default first present channel).
+  const [skuChannel, setSkuChannel] = useState(channels[0] || "amazon");
+  const activeSkuChannel = cm.byChannel[skuChannel] ? skuChannel : channels[0];
+  const [skuSort, setSkuSort] = useState("netRev");
+
+  // Channel-mix metric toggle.
+  const [mixMetric, setMixMetric] = useState("netRev"); // netRev | units
 
   return (
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Sales & Revenue Intelligence</div>
-          <div className="page-sub">Multi-channel performance · projections · returns</div>
+          <div className="page-title">Sales &amp; Revenue Intelligence</div>
+          <div className="page-sub">
+            Net revenue · channel &amp; SKU breakdown · returns — {fmtMonth(month)}
+          </div>
         </div>
         <div className="actions">
-          <div className="seg">
-            {ranges.map(r => (
-              <button key={r.id} className={range === r.id ? "active" : ""} onClick={() => setRange(r.id)}>{r.label}</button>
-            ))}
-          </div>
-          <button className="btn"><Icon name="download" size={13}/>Export</button>
+          <span className="badge" title="Revenue basis: net of GST and returns. Authoritative monthly facts from each channel's native export.">
+            Net basis · {fmtMonth(month)}
+          </span>
         </div>
       </div>
 
-      {/* Channel cards */}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", marginBottom: 16 }}>
-        {D.channels.map(c => {
-          const live = c.id !== "instamart";
-          const rev = live ? (D.pnl.revenue[c.id] || 0) : 0;
-          const units = live ? Math.round(rev / 420) : 0;
-          const orders = live ? Math.round(units * 0.86) : 0;
-          const aov = orders ? Math.round(rev / orders) : 0;
-          const returnRate = live ? [3.4, 2.1, 4.8, 1.9][D.channels.indexOf(c)] || 2.4 : 0;
-          const delta = live ? [12.4, 8.1, -3.2, 28.6][D.channels.indexOf(c)] || 4.4 : 0;
+      {/* Single-month framing — no fabricated growth when only one month exists. */}
+      {!multiMonth && (
+        <div className="note" style={{ marginBottom: 16 }}>
+          <strong>Single-month snapshot.</strong>&nbsp;The fact store currently holds one
+          month ({fmtMonth(month)}). Month-over-month growth needs ≥2 months and is
+          intentionally <em>not</em> fabricated here. The one real growth series we
+          carry — the website's 13-month conversion-value history (Monarch) — is shown
+          in the Growth section below.
+        </div>
+      )}
+
+      {/* ── Company headline + channel revenue/units cards ── */}
+      <div className="grid" style={{ gridTemplateColumns: `repeat(${channels.length + 1}, 1fr)`, marginBottom: 16 }}>
+        {/* Company total */}
+        <div className="card">
+          <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--border-soft)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="badge brand">TOTAL</span>
+            </div>
+            <div className="mono" style={{ fontSize: 19, marginTop: 8, fontWeight: 500 }}>
+              {D.fmtINR(company.netRev)}
+            </div>
+            <div className="muted" style={{ fontSize: 11 }}>Net revenue · all channels</div>
+          </div>
+          <div style={{ padding: "10px 14px", fontSize: 11.5, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
+            <div className="muted">Units</div><div className="mono text-right">{D.fmtN(company.units)}</div>
+            <div className="muted">AOV (net)</div><div className="mono text-right">{company.units ? "₹" + D.fmtN(Math.round(company.netRev / company.units)) : "—"}</div>
+            <div className="muted">CM3</div>
+            <div className="mono text-right" style={{ color: company.cm3 < 0 ? "var(--critical)" : "var(--ink)" }}>{D.fmtINR(company.cm3)}</div>
+            <div className="muted">CM3 %</div><div className="mono text-right">{pctStr(company.pcts.cm3)}</div>
+          </div>
+        </div>
+
+        {/* One card per channel present in the facts */}
+        {channels.map((ch) => {
+          const c = cm.byChannel[ch];
+          const meta = chMeta(ch);
+          const aov = c.units ? Math.round(c.netRev / c.units) : null;
           return (
-            <div key={c.id} className="card" style={{ opacity: live ? 1 : 0.55 }}>
+            <div key={ch} className="card">
               <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid var(--border-soft)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span className="badge" style={{ background: c.color + "22", color: c.color, borderColor: c.color + "55" }}>{c.short}</span>
-                  {live && <Delta value={delta}/>}
+                  <span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.short}</span>
+                  <span className="muted mono" style={{ fontSize: 10.5 }}>{((c.netRev / (company.netRev || 1)) * 100).toFixed(0)}% mix</span>
                 </div>
                 <div className="mono" style={{ fontSize: 19, marginTop: 8, fontWeight: 500 }}>
-                  {live ? D.fmtINR(rev) : "—"}
+                  {D.fmtINR(c.netRev)}
                 </div>
-                <div className="muted" style={{ fontSize: 11 }}>{c.name} · MTD</div>
+                <div className="muted" style={{ fontSize: 11 }}>{meta.name} · net rev</div>
               </div>
               <div style={{ padding: "10px 14px", fontSize: 11.5, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
-                <div className="muted">Orders</div><div className="mono text-right">{live ? D.fmtN(orders) : "—"}</div>
-                <div className="muted">Units</div><div className="mono text-right">{live ? D.fmtN(units) : "—"}</div>
-                <div className="muted">AOV</div><div className="mono text-right">{live ? "₹" + D.fmtN(aov) : "—"}</div>
-                <div className="muted">Return rate</div><div className="mono text-right">{live ? returnRate.toFixed(1) + "%" : "—"}</div>
+                <div className="muted">Units</div><div className="mono text-right">{D.fmtN(c.units)}</div>
+                <div className="muted">AOV (net)</div><div className="mono text-right">{aov != null ? "₹" + D.fmtN(aov) : "—"}</div>
+                <div className="muted">CM3</div>
+                <div className="mono text-right" style={{ color: c.cm3 != null && c.cm3 < 0 ? "var(--critical)" : "var(--ink)" }}>
+                  {c.cm3 == null ? "—" : D.fmtINR(c.cm3)}
+                </div>
+                <div className="muted">CM3 %</div><div className="mono text-right">{pctStr(c.pcts.cm3)}</div>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Projection chart */}
-      <Card title="Revenue projection · current month" sub="Rolling 30-day velocity vs target vs last month"
+      {/* ── Channel mix ── */}
+      <Card
+        title="Channel mix"
+        sub={`Share of ${mixMetric === "netRev" ? "net revenue" : "units"} · ${fmtMonth(month)}`}
         action={
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <div className="seg">
-              <button className={trajectory === "current" ? "active" : ""} onClick={() => setTrajectory("current")}>Current trajectory</button>
-              <button className={trajectory === "custom" ? "active" : ""} onClick={() => setTrajectory("custom")}>Custom trajectory</button>
-            </div>
-            {trajectory === "custom" && (
-              <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11.5 }}>
-                <span className="muted">Growth</span>
-                <input className="txt" style={{ width: 56 }} value={growthInput} onChange={e => setGrowthInput(parseFloat(e.target.value) || 0)}/>
-                <span className="muted">% over last month</span>
-              </div>
-            )}
+          <div className="seg">
+            <button className={mixMetric === "netRev" ? "active" : ""} onClick={() => setMixMetric("netRev")}>Revenue</button>
+            <button className={mixMetric === "units" ? "active" : ""} onClick={() => setMixMetric("units")}>Units</button>
           </div>
         }
-        style={{ marginBottom: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 24, alignItems: "stretch" }}>
-          <div>
-            <ProjectionChart projected={projected} target={D.revenueMTDTarget} lastMonth={D.revenueMTDLast} mtd={D.revenueMTD}/>
-          </div>
-          <div style={{ borderLeft: "1px solid var(--border-soft)", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 12, justifyContent: "center" }}>
-            <div>
-              <div className="stat-label">MTD actual</div>
-              <div className="mono" style={{ fontSize: 18, fontWeight: 500 }}>{D.fmtINR(D.revenueMTD)}</div>
-            </div>
-            <div>
-              <div className="stat-label">Projected EOM</div>
-              <div className="mono" style={{ fontSize: 22, fontWeight: 500, color: projected >= D.revenueMTDTarget ? "var(--success)" : "var(--warning)" }}>
-                {D.fmtINR(projected)}
-              </div>
-              <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
-                {((projected / D.revenueMTDTarget) * 100).toFixed(0)}% of target · {((projected - D.revenueMTDLast)/D.revenueMTDLast*100).toFixed(1)}% vs last month
-              </div>
-            </div>
-            <div>
-              <div className="stat-label">Gap to target</div>
-              <div className="mono" style={{ fontSize: 16, color: "var(--critical)" }}>
-                {D.fmtINR(D.revenueMTDTarget - projected)}
-              </div>
-              <div className="muted" style={{ fontSize: 11.5 }}>
-                {trajectory === "current" ? "Need ~15% lift to close gap" : "Custom growth applied uniformly"}
-              </div>
-            </div>
-          </div>
-        </div>
+        style={{ marginBottom: 16 }}
+      >
+        <ChannelMix cm={cm} channels={channels} metric={mixMetric} D={D} />
       </Card>
 
-      {/* SKU breakdown */}
-      <Card title="SKU breakdown · last 30 days" sub={`${sorted.length} active SKUs`}
+      {/* ── SKU breakdown per channel ── */}
+      <Card
+        title="SKU breakdown by channel"
+        sub={`Net revenue · units · CM3 — ${chMeta(activeSkuChannel).name} · ${fmtMonth(month)}`}
         action={
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <div className="seg">
-              <button className={sort === "revenue" ? "active" : ""} onClick={() => setSort("revenue")}>Revenue</button>
-              <button className={sort === "growth" ? "active" : ""} onClick={() => setSort("growth")}>Growth</button>
-              <button className={sort === "returns" ? "active" : ""} onClick={() => setSort("returns")}>Returns</button>
+              {channels.map((ch) => (
+                <button key={ch} className={activeSkuChannel === ch ? "active" : ""} onClick={() => setSkuChannel(ch)}>
+                  {chMeta(ch).short}
+                </button>
+              ))}
             </div>
-            <button className="btn sm"><Icon name="filter" size={12}/>Filters</button>
+            <div className="seg">
+              <button className={skuSort === "netRev" ? "active" : ""} onClick={() => setSkuSort("netRev")}>Revenue</button>
+              <button className={skuSort === "units" ? "active" : ""} onClick={() => setSkuSort("units")}>Units</button>
+              <button className={skuSort === "cm3" ? "active" : ""} onClick={() => setSkuSort("cm3")}>CM3</button>
+            </div>
           </div>
         }
         padded={false}
-        style={{ marginBottom: 16 }}>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>Variant</th>
-              <th className="num">Revenue 30d</th>
-              <th className="num">Units</th>
-              <th className="num">AOV</th>
-              <th className="num">Growth</th>
-              <th className="num">Returns</th>
-              <th>Channel mix</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(s => {
-              const total = s.revenue30;
-              return (
-                <tr key={s.code}>
-                  <td>
-                    <div style={{ display: "flex", flexDirection: "column" }}>
-                      <span>{s.name}</span>
-                      <span className="sku">{s.code}</span>
-                    </div>
-                  </td>
-                  <td className="muted">{s.variant}</td>
-                  <td className="num">{D.fmtINR(s.revenue30)}</td>
-                  <td className="num">{D.fmtN(s.units30)}</td>
-                  <td className="num">₹{D.fmtN(s.aov)}</td>
-                  <td className="num"><Delta value={s.growth}/></td>
-                  <td className="num">
-                    <span style={{ color: s.returnRate > 3 ? "var(--critical)" : s.returnRate > 2 ? "var(--warning)" : "var(--ink)" }}>
-                      {s.returnRate.toFixed(1)}%
-                    </span>
-                  </td>
-                  <td style={{ minWidth: 180 }}>
-                    <div style={{ display: "flex", height: 10, borderRadius: 3, overflow: "hidden", border: "1px solid var(--border-soft)" }}>
-                      {D.channels.filter(c => s.splits[c.id]).map(c => (
-                        <div key={c.id} title={c.name + ": " + D.fmtINR(s.splits[c.id])} style={{ width: ((s.splits[c.id] || 0) / total * 100) + "%", background: c.color }}/>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        style={{ marginBottom: 16 }}
+      >
+        <SkuBreakdownTable cm={cm} channel={activeSkuChannel} sort={skuSort} D={D} />
       </Card>
 
-      {/* Returns intelligence */}
-      <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr" }}>
-        <Card title="Returns intelligence" sub="By SKU & channel · last 30 days">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <div>
-              <div className="stat-label">Highest return rate</div>
-              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                {[...D.skuSales].sort((a,b)=>b.returnRate-a.returnRate).slice(0,5).map(s => (
-                  <div key={s.code} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 12 }}>{s.name}</span>
-                    <Progress value={s.returnRate * 10} max={50} color={s.returnRate > 3 ? "red" : s.returnRate > 2 ? "amber" : "brand"}/>
-                    <span className="mono" style={{ fontSize: 11, width: 40, textAlign: "right" }}>{s.returnRate.toFixed(1)}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <div className="stat-label">Top return reasons · last 30d</div>
-              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                {[
-                  { reason: "Lumpy / doesn't mix", pct: 28, sku: "Plant Protein, Whey Choc 2K" },
-                  { reason: "Taste / smell off", pct: 22, sku: "Collagen, Omega-3" },
-                  { reason: "Damaged in transit", pct: 18, sku: "—" },
-                  { reason: "Not as described", pct: 12, sku: "Biotin" },
-                  { reason: "Wrong product", pct: 8, sku: "—" },
-                  { reason: "Other", pct: 12, sku: "—" },
-                ].map((r, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ flex: 1, fontSize: 12 }}>{r.reason}</span>
-                    <span className="muted" style={{ fontSize: 10.5, flex: "0 0 auto" }}>{r.sku}</span>
-                    <span className="mono" style={{ fontSize: 11, width: 32, textAlign: "right" }}>{r.pct}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </Card>
+      {/* ── Growth ── */}
+      <Card
+        title="Growth"
+        sub="Website 13-month conversion-value trend (Monarch) · marketplaces are single-month"
+        style={{ marginBottom: 16 }}
+      >
+        <GrowthSection history={monarchHistory} activeMonth={month} multiMonth={multiMonth} D={D} />
+      </Card>
 
-        <Card title="Return rate trend · all SKUs" sub="last 12 weeks">
-          <div className="stat-num lg">2.6%</div>
-          <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}><Delta value={-0.3} suffix="vs prev 12w"/></div>
-          <hr className="hr"/>
-          <BarChart data={[2.1, 2.3, 2.2, 2.4, 2.8, 2.6, 2.5, 2.7, 3.1, 2.9, 2.7, 2.6]} w={300} h={100} color="var(--warning)"
-            labels={["W1","","","W4","","","W7","","","W10","","W12"]}/>
-          <div className="note" style={{ marginTop: 10 }}>
-            <strong>Insight:</strong>&nbsp;Plant Protein driving recent spike. Check formulation feedback before next batch.
+      {/* ── Returns ── */}
+      <Card
+        title="Returns"
+        sub="What each channel's source actually carries — net-of-returns honesty (spec §11)"
+      >
+        <ReturnsSection
+          channels={channels}
+          returnsByChannel={returnsByChannel}
+          cm={cm}
+          fkCashback={fkCashback}
+          mcfUnits={mcfUnits}
+          D={D}
+        />
+      </Card>
+    </div>
+  );
+};
+
+// ── Channel mix (stacked bar + legend) ───────────────────────────────────────
+const ChannelMix = ({ cm, channels, metric, D }) => {
+  const rows = channels
+    .map((ch) => ({
+      ch,
+      meta: chMeta(ch),
+      value: metric === "netRev" ? cm.byChannel[ch].netRev : cm.byChannel[ch].units,
+    }))
+    .sort((a, b) => b.value - a.value);
+  const total = rows.reduce((a, r) => a + (r.value || 0), 0) || 1;
+
+  return (
+    <div>
+      {/* Single stacked bar */}
+      <div style={{ display: "flex", height: 26, borderRadius: 5, overflow: "hidden", border: "1px solid var(--border-soft)" }}>
+        {rows.map((r) => {
+          const w = (r.value / total) * 100;
+          return (
+            <div
+              key={r.ch}
+              title={`${r.meta.name}: ${metric === "netRev" ? D.fmtINR(r.value) : D.fmtN(r.value) + " units"} (${w.toFixed(1)}%)`}
+              style={{ width: w + "%", background: r.meta.color, minWidth: w > 0 ? 2 : 0 }}
+            />
+          );
+        })}
+      </div>
+      {/* Legend + numbers */}
+      <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+        {rows.map((r) => (
+          <div key={r.ch} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: r.meta.color, flex: "0 0 auto" }} />
+            <span style={{ flex: 1, fontSize: 12.5 }}>{r.meta.name}</span>
+            <span className="mono" style={{ fontSize: 12 }}>
+              {metric === "netRev" ? D.fmtINR(r.value) : D.fmtN(r.value)}
+            </span>
+            <span className="muted mono" style={{ fontSize: 11, width: 46, textAlign: "right" }}>
+              {((r.value / total) * 100).toFixed(1)}%
+            </span>
           </div>
-        </Card>
+        ))}
       </div>
     </div>
   );
 };
 
-const ProjectionChart = ({ projected, target, lastMonth, mtd }) => {
-  const w = 600, h = 200;
-  const days = 31;
-  const today = 21;
-  const pad = { l: 36, r: 16, t: 14, b: 24 };
-  const innerW = w - pad.l - pad.r;
-  const innerH = h - pad.t - pad.b;
-  const max = Math.max(projected, target, lastMonth) * 1.05;
-  const yFor = v => pad.t + innerH - (v / max) * innerH;
-  const xFor = d => pad.l + ((d - 1) / (days - 1)) * innerW;
+// ── SKU breakdown table for one channel ──────────────────────────────────────
+const SkuBreakdownTable = ({ cm, channel, sort, D }) => {
+  // Build rows from the engine's per-SKU per-channel rollups — only SKUs that
+  // actually sold on this channel in the month appear (honest coverage).
+  const rows = [];
+  for (const code of Object.keys(cm.bySku)) {
+    const cell = cm.bySku[code]?.byChannel?.[channel];
+    if (!cell || (!cell.netRev && !cell.units)) continue;
+    // CM3% lives in the rollup's pcts.cm3 (the bySku/byChannel cell has no flat
+    // cm3Pct — that field is matrix-only). null when COGS is missing.
+    rows.push({ code, ...cell, cm3Pct: cell.pcts?.cm3 ?? null });
+  }
+  rows.sort((a, b) => {
+    if (sort === "netRev") return b.netRev - a.netRev;
+    if (sort === "units") return b.units - a.units;
+    if (sort === "cm3") return (b.cm3 ?? -Infinity) - (a.cm3 ?? -Infinity);
+    return 0;
+  });
 
-  // generate three series
-  const actualPts = Array.from({ length: today }, (_, i) => [xFor(i + 1), yFor(mtd / today * (i + 1))]);
-  const projPts = Array.from({ length: days - today + 1 }, (_, i) => [xFor(today + i), yFor(mtd + (projected - mtd) * (i / (days - today)))]);
-  const lastPts = Array.from({ length: days }, (_, i) => [xFor(i + 1), yFor(lastMonth / 31 * (i + 1))]);
+  const chTotal = cm.byChannel[channel]?.netRev || 0;
 
-  const toPath = (pts) => pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  if (rows.length === 0) {
+    return <div className="muted" style={{ padding: "18px 14px", fontSize: 12.5 }}>No SKU sales recorded for this channel in the active month.</div>;
+  }
 
   return (
-    <svg width={w} height={h} style={{ display: "block" }}>
-      {/* grid */}
+    <table className="table">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th className="num">Net rev</th>
+          <th className="num">Units</th>
+          <th className="num">AOV</th>
+          <th className="num">Rev share</th>
+          <th className="num">CM3</th>
+          <th className="num">CM3 %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => {
+          const aov = r.units ? Math.round(r.netRev / r.units) : null;
+          const share = chTotal ? (r.netRev / chTotal) * 100 : 0;
+          return (
+            <tr key={r.code}>
+              <td>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span>{skuName(r.code)}</span>
+                  <span className="sku">{r.code}</span>
+                </div>
+              </td>
+              <td className="num">{D.fmtINR(r.netRev)}</td>
+              <td className="num">{D.fmtN(r.units)}</td>
+              <td className="num">{aov != null ? "₹" + D.fmtN(aov) : "—"}</td>
+              <td className="num">{share.toFixed(1)}%</td>
+              <td className="num" style={{ color: r.cm3 != null && r.cm3 < 0 ? "var(--critical)" : "var(--ink)" }}>
+                {r.cm3 == null ? "—" : D.fmtINR(r.cm3)}
+              </td>
+              <td className="num">
+                {r.cm3 == null ? (
+                  <span className="muted" title="COGS not on file for this SKU">—</span>
+                ) : (
+                  <span style={{ color: r.cm3Pct < 0 ? "var(--critical)" : r.cm3Pct < 0.05 ? "var(--warning)" : "var(--ink)" }}>
+                    {pctStr(r.cm3Pct)}
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+};
+
+// ── Growth section ───────────────────────────────────────────────────────────
+const GrowthSection = ({ history, activeMonth, multiMonth, D }) => {
+  // Normalise the Monarch website history into a chronological series. Each
+  // entry is { convValue, days }. A month is "partial" (dimmed, excluded from
+  // MoM) when EITHER its recorded coverage is short (days < 28, e.g. a 7-day
+  // launch month) OR it is the current / a future calendar month — the live
+  // month's value is still accruing and must never read as a real decline.
+  const series = useMemo(() => {
+    if (!history) return [];
+    const now = new Date();
+    const currentYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    return Object.keys(history)
+      .sort()
+      .map((m) => {
+        const h = history[m] || {};
+        const days = Number(h.days) || 0;
+        const val = Number(h.convValue) || 0;
+        const incomplete = (days > 0 && days < 28) || m >= currentYM;
+        return { month: m, value: val, days, partial: incomplete };
+      });
+  }, [history]);
+
+  if (series.length === 0) {
+    return <div className="muted" style={{ fontSize: 12.5 }}>No website history available in the current data.</div>;
+  }
+
+  // MoM growth across consecutive FULL months only (skip partial months so a
+  // clipped first/last month can't masquerade as a swing).
+  const full = series.filter((s) => !s.partial);
+  const latestFull = full[full.length - 1];
+  const prevFull = full[full.length - 2];
+  const momPct =
+    prevFull && prevFull.value > 0 ? ((latestFull.value - prevFull.value) / prevFull.value) * 100 : null;
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 24, alignItems: "stretch" }}>
+        <TrendChart series={series} D={D} />
+        <div style={{ borderLeft: "1px solid var(--border-soft)", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 14, justifyContent: "center" }}>
+          <div>
+            <div className="stat-label">Latest full month</div>
+            <div className="mono" style={{ fontSize: 18, fontWeight: 500 }}>{D.fmtINR(latestFull.value)}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{fmtMonth(latestFull.month)} · website conv. value</div>
+          </div>
+          <div>
+            <div className="stat-label">MoM (vs {prevFull ? fmtMonth(prevFull.month) : "—"})</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <Delta value={momPct} />
+            </div>
+            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+              Website only · Monarch conversion value
+            </div>
+          </div>
+          <div>
+            <div className="stat-label">Series</div>
+            <div className="mono" style={{ fontSize: 13 }}>{series.length} months</div>
+            <div className="muted" style={{ fontSize: 11 }}>{fmtMonth(series[0].month)} → {fmtMonth(series[series.length - 1].month)}</div>
+          </div>
+        </div>
+      </div>
+      <div className="note" style={{ marginTop: 12 }}>
+        <strong>Why only website here?</strong>&nbsp;Monarch carries 13 months of website
+        conversion value — the single multi-month revenue history available. Marketplace
+        facts (Amazon / Flipkart / Blinkit) exist for {fmtMonth(activeMonth)} only, so
+        their growth stays blank rather than invented. The Monarch series is the website's
+        gross conversion value (its own scale), shown as a trend — not the same basis as
+        the net-revenue cards above. Partial-coverage months are dimmed.
+        {multiMonth && " A second month of marketplace facts will unlock channel MoM here automatically."}
+      </div>
+    </div>
+  );
+};
+
+// 13-month line+area trend (self-contained SVG, partial months dimmed).
+const TrendChart = ({ series, D }) => {
+  const w = 560, h = 200;
+  const pad = { l: 44, r: 14, t: 16, b: 26 };
+  const innerW = w - pad.l - pad.r;
+  const innerH = h - pad.t - pad.b;
+  const max = Math.max(...series.map((s) => s.value), 1) * 1.08;
+  const n = series.length;
+  const xFor = (i) => pad.l + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+  const yFor = (v) => pad.t + innerH - (Math.max(0, v) / max) * innerH;
+
+  const pts = series.map((s, i) => [xFor(i), yFor(s.value)]);
+  const line = pts.map((p, i) => (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  const area = line + ` L${pts[pts.length - 1][0].toFixed(1)},${(pad.t + innerH).toFixed(1)} L${pts[0][0].toFixed(1)},${(pad.t + innerH).toFixed(1)} Z`;
+
+  // Label cadence: every other month to avoid crowding.
+  const labelEvery = n > 8 ? 2 : 1;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block" }}>
+      {/* gridlines */}
       {[0, 0.5, 1].map((t, i) => (
         <g key={i}>
-          <line x1={pad.l} y1={pad.t + innerH * t} x2={w - pad.r} y2={pad.t + innerH * t} stroke="var(--border-soft)"/>
+          <line x1={pad.l} y1={pad.t + innerH * t} x2={w - pad.r} y2={pad.t + innerH * t} stroke="var(--border-soft)" />
           <text x={pad.l - 6} y={pad.t + innerH * t + 3} fontSize="9" textAnchor="end" fill="var(--ink-3)" fontFamily="var(--mono)">
-            ₹{((max * (1 - t)) / 10000000).toFixed(1)}Cr
+            {D.fmtINR(max * (1 - t)).replace("₹", "")}
           </text>
         </g>
       ))}
-      {/* target line */}
-      <line x1={pad.l} x2={w - pad.r} y1={yFor(target)} y2={yFor(target)} stroke="var(--brand)" strokeDasharray="4 4" strokeWidth="1"/>
-      <text x={w - pad.r - 6} y={yFor(target) - 4} fontSize="9.5" textAnchor="end" fill="var(--brand)" fontFamily="var(--mono)">target {(target/10000000).toFixed(2)}Cr</text>
-
-      {/* last month */}
-      <path d={toPath(lastPts)} fill="none" stroke="var(--ink-4)" strokeWidth="1.2" strokeDasharray="3 3"/>
-      {/* actual */}
-      <path d={toPath(actualPts)} fill="none" stroke="var(--ink)" strokeWidth="1.8"/>
-      {/* projection */}
-      <path d={toPath(projPts)} fill="none" stroke="var(--warning)" strokeWidth="1.8" strokeDasharray="2 3"/>
-
-      {/* today marker */}
-      <line x1={xFor(today)} x2={xFor(today)} y1={pad.t} y2={pad.t + innerH} stroke="var(--ink-3)" strokeWidth="0.5" strokeDasharray="2 2"/>
-      <text x={xFor(today) + 4} y={pad.t + 10} fontSize="9" fill="var(--ink-3)" fontFamily="var(--mono)">today</text>
-
-      {/* x labels */}
-      {[1, 8, 15, 22, 29].map(d => (
-        <text key={d} x={xFor(d)} y={h - 6} fontSize="9" textAnchor="middle" fill="var(--ink-3)" fontFamily="var(--mono)">{d}</text>
+      <path d={area} fill="var(--brand)" opacity="0.08" />
+      <path d={line} fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
+      {/* points — partial months hollow/dimmed */}
+      {series.map((s, i) => (
+        <circle
+          key={s.month}
+          cx={pts[i][0]}
+          cy={pts[i][1]}
+          r={s.partial ? 2.5 : 3}
+          fill={s.partial ? "var(--bg-card)" : "var(--brand)"}
+          stroke="var(--brand)"
+          strokeWidth={s.partial ? 1.2 : 0}
+          opacity={s.partial ? 0.6 : 1}
+        >
+          <title>{`${fmtMonth(s.month)}: ${D.fmtINR(s.value)}${s.partial ? ` (partial — ${s.days}d)` : ""}`}</title>
+        </circle>
       ))}
-      {/* legend */}
-      <g transform={`translate(${pad.l + 8}, ${pad.t + 8})`}>
-        <line x1="0" y1="0" x2="14" y2="0" stroke="var(--ink)" strokeWidth="1.8"/>
-        <text x="18" y="3" fontSize="10" fill="var(--ink-2)">MTD actual</text>
-        <line x1="84" y1="0" x2="98" y2="0" stroke="var(--warning)" strokeWidth="1.8" strokeDasharray="2 3"/>
-        <text x="102" y="3" fontSize="10" fill="var(--ink-2)">Projected</text>
-        <line x1="160" y1="0" x2="174" y2="0" stroke="var(--ink-4)" strokeWidth="1.2" strokeDasharray="3 3"/>
-        <text x="178" y="3" fontSize="10" fill="var(--ink-2)">Last month</text>
-      </g>
+      {/* x labels */}
+      {series.map((s, i) =>
+        i % labelEvery === 0 ? (
+          <text key={s.month} x={pts[i][0]} y={h - 8} fontSize="8.5" textAnchor="middle" fill="var(--ink-3)" fontFamily="var(--mono)">
+            {MONTHS[parseInt(s.month.split("-")[1], 10) - 1]}
+          </text>
+        ) : null
+      )}
     </svg>
   );
 };
 
+// ── Returns section ──────────────────────────────────────────────────────────
+const ReturnsSection = ({ channels, returnsByChannel, cm, fkCashback, mcfUnits, D }) => {
+  return (
+    <div>
+      <table className="table" style={{ marginBottom: 4 }}>
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th className="num">Return units</th>
+            <th className="num">Return value</th>
+            <th className="num">Return rate (units)</th>
+            <th>Treatment in revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {channels.map((ch) => {
+            const meta = chMeta(ch);
+            const r = returnsByChannel[ch];
+            const ch_ = cm.byChannel[ch];
+            // grossUnits = net units + returned units (returns already netted out
+            // of the units figure). rate = returns / (net + returns).
+            const netUnits = ch_?.units || 0;
+            const retUnits = r?.units || 0;
+            const denom = netUnits + retUnits;
+            const rate = denom > 0 && retUnits > 0 ? (retUnits / denom) * 100 : null;
+            const treatment =
+              ch === "amazon"
+                ? "Netted out of rev & units (All-Orders refund rows)"
+                : ch === "flipkart"
+                ? "Auto-netted into Buyer Invoice Amount (negative rows)"
+                : "Not itemised in source";
+            return (
+              <tr key={ch}>
+                <td>
+                  <span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.short}</span>
+                  <span style={{ marginLeft: 8, fontSize: 12.5 }}>{meta.name}</span>
+                </td>
+                <td className="num">{r?.hasData ? D.fmtN(retUnits) : <span className="muted">—</span>}</td>
+                <td className="num">{r?.hasData ? D.fmtINR(r.value) : <span className="muted">—</span>}</td>
+                <td className="num">{rate != null ? rate.toFixed(1) + "%" : <span className="muted">—</span>}</td>
+                <td className="muted" style={{ fontSize: 11.5 }}>{treatment}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      <div className="note" style={{ marginTop: 12 }}>
+        <strong>Coverage caveat.</strong>&nbsp;Returns are surfaced from what each
+        channel's native export actually carries. Amazon refund/return rows are netted
+        out of both revenue and units (spec §11); Flipkart's negative settlement rows are
+        absorbed into the Buyer Invoice Amount, so its return value reflects those
+        netted-down rows. Blinkit and Website carry no per-order return lines in the
+        {" "}{fmtMonth("2026-05")} sources — a dash here means <em>not in source</em>, not
+        a zero return rate. The Shopify 18.7% blended-return trend referenced in the spec
+        is not present in the bundled website source and is shown only once that history
+        is uploaded.
+        {fkCashback ? (
+          <>
+            {" "}Flipkart also reports a separate settlement-layer cashback of{" "}
+            <span className="mono">{D.fmtINR(fkCashback.value)}</span> ({fkCashback.rows} rows) —
+            excluded from revenue per spec §10, shown here as a net-realisation note only.
+          </>
+        ) : null}
+        {mcfUnits != null ? (
+          <>
+            {" "}Note: {D.fmtN(mcfUnits)} Amazon-fulfilled (MCF) units are website orders, not
+            Amazon channel sales, and are excluded from the Amazon figures above.
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+};
 
 export default PageSales;

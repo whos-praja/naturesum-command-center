@@ -1,472 +1,915 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { Icon, Delta, Card, Sparkline, BarChart, Progress, ChannelPill } from "../components/Shared.jsx";
+import { useState, useEffect, useMemo } from "react";
+import { Icon, Card } from "../components/Shared.jsx";
 import NSData from "../data.js";
+import { mergedFacts, monthsIn, channelsIn } from "../lib/businessStore.js";
+import { computeCM } from "../lib/cmEngine.js";
+import * as CostInputs from "../lib/costInputs.js";
+import { runVerification, ANCHOR_MONTH } from "../lib/businessVerification.js";
+import BizCoveragePanel from "../components/BizCoveragePanel.jsx";
 
-// Module 8 — Finance & Unit Economics
+// ─────────────────────────────────────────────────────────────────────────────
+// Module 8 — Finance & Unit Economics  (spec §9 PageFinance)
+//
+// REAL DERIVED DATA ONLY. Every figure flows from mergedFacts() (bundled May-2026
+// baseline ⊕ any uploads) → computeCM() (the pure CM1→CM4 engine) and from the
+// editable costInputs registry. There is NO fabricated stub data on this page —
+// the prior Whey/Collagen P&L/cash-flow mock was deleted wholesale per spec §9.
+//
+// HONESTY CONTRACT (spec §11): CM fields are null when a SKU's COGS is missing
+// (engine emits null, not 0); CM4 is hidden until the founder enters a monthly
+// fixed cost; absent ad-channel totals are surfaced, never silently zeroed.
+// No NaN/Infinity is ever rendered — fmtINR/fmtPct guard every derived value.
+// ─────────────────────────────────────────────────────────────────────────────
 
+const D = NSData;
+
+// SKU code → readable name+variant (from the canonical SKU table in data.js).
+const SKU_META = Object.fromEntries(D.skus.map((s) => [s.code, s]));
+const skuLabel = (code) => {
+  const m = SKU_META[code];
+  return m ? `${m.name} ${m.variant}` : code;
+};
+
+// Channel display chrome (brand colours match the inventory drill badges). New
+// channels (Instamart later) fall through to a neutral default — never crash.
+const CHANNEL_META = {
+  amazon:   { label: "Amazon",   color: "#C45A0A" },
+  flipkart: { label: "Flipkart", color: "#2874F0" },
+  blinkit:  { label: "Blinkit",  color: "#C9A227" },
+  website:  { label: "Website",  color: "var(--brand)" },
+};
+const chMeta = (ch) => CHANNEL_META[ch] || { label: ch, color: "var(--ink-3)" };
+
+// ── SAFE formatters (NaN/Infinity → em-dash, never leaked) ──
+const fmtINR = (n) => (Number.isFinite(n) ? D.fmtINR(n) : "—");
+const fmtN = (n) => (Number.isFinite(n) ? D.fmtN(n) : "—");
+// pct fraction (0..1) → "12.3%". null/NaN → "—".
+const fmtPct = (frac, dp = 1) =>
+  Number.isFinite(frac) ? `${(frac * 100).toFixed(dp)}%` : "—";
+// signed ₹ with typographic minus before the glyph (matches fmtINR convention).
+const fmtSignedINR = (n) => {
+  if (!Number.isFinite(n)) return "—";
+  return n < 0 ? `(${D.fmtINR(Math.abs(n))})` : D.fmtINR(n);
+};
+const monthLabel = (m) => {
+  if (!m || !/^\d{4}-\d{2}$/.test(m)) return m || "—";
+  const [y, mo] = m.split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[Number(mo) - 1] || mo} ${y}`;
+};
+
+const cmColor = (v) =>
+  v == null ? "var(--ink-4)" : v < 0 ? "var(--critical)" : "var(--ink)";
+
+// ─────────────────────────────────────────────────────────────────────────────
 const PageFinance = () => {
-  const D = NSData;
-  const [tab, setTab] = useState("pnl");
+  const [tab, setTab] = useState("waterfall");
+  // costVersion bumps whenever the Cost Inputs panel writes an override, forcing
+  // every consumer below (which reads cost data through the live registry) to
+  // recompute. The facts themselves are static within a session unless uploaded.
+  const [costVersion, setCostVersion] = useState(0);
+
+  const facts = useMemo(() => mergedFacts(), []);
+  const months = useMemo(() => {
+    const ms = monthsIn(facts);
+    return ms.length ? ms : [ANCHOR_MONTH];
+  }, [facts]);
+  // selectedMonth holds the user's pick; the EFFECTIVE month is derived during
+  // render so a stale pick (e.g. a month no longer in the store) safely falls
+  // back to the latest available — no sync effect, no cascading render.
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const month = selectedMonth && months.includes(selectedMonth)
+    ? selectedMonth
+    : months[months.length - 1];
+
+  // The single CM computation every view on this page reads from. Recomputes on
+  // month change or a cost-input edit (costVersion). Pure — no DOM, NaN-free.
+  const cm = useMemo(
+    () => computeCM({ facts, month }),
+    // costVersion is an intentional dependency: cost overrides change the result
+    // even though `facts`/`month` are unchanged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facts, month, costVersion]
+  );
+
+  const channels = useMemo(() => channelsIn(facts).filter((ch) => cm.byChannel[ch]), [facts, cm]);
+
+  const onCostChange = () => setCostVersion((v) => v + 1);
 
   return (
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Finance & Unit Economics</div>
-          <div className="page-sub">Cost cards · contribution margin · P&L · cash flow · synced with Zoho Books</div>
+          <div className="page-title">Finance &amp; Unit Economics</div>
+          <div className="page-sub">
+            Contribution margin CM1→CM4 · SKU×channel · derived live from the fact store
+          </div>
         </div>
         <div className="actions">
-          <div className="seg">
-            <button>Daily</button><button>Weekly</button><button className="active">MTD</button><button>YTD</button>
-          </div>
-          <button className="btn"><Icon name="download" size={13}/>Export</button>
+          {/* Month selector — May 2026 initially; the store/engine already key on
+              YYYY-MM so this list grows automatically as more months land. */}
+          <label className="muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="calendar" size={13}/>
+            <select
+              value={month}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="fin-month-select"
+              style={{
+                fontSize: 12, padding: "4px 8px", borderRadius: 6,
+                border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--ink)",
+              }}
+            >
+              {months.map((m) => (
+                <option key={m} value={m}>{monthLabel(m)}</option>
+              ))}
+            </select>
+          </label>
         </div>
       </div>
 
       <div className="tabs">
-        <button className={tab === "pnl" ? "active" : ""} onClick={() => setTab("pnl")}>P&L</button>
-        <button className={tab === "cm" ? "active" : ""} onClick={() => setTab("cm")}>Contribution margin</button>
-        <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Cost cards</button>
-        <button className={tab === "cash" ? "active" : ""} onClick={() => setTab("cash")}>Cash flow</button>
-        <button className={tab === "wc" ? "active" : ""} onClick={() => setTab("wc")}>Working capital</button>
+        <button className={tab === "waterfall" ? "active" : ""} onClick={() => setTab("waterfall")}>CM waterfall</button>
+        <button className={tab === "matrix" ? "active" : ""} onClick={() => setTab("matrix")}>CM3 matrix</button>
+        <button className={tab === "sku" ? "active" : ""} onClick={() => setTab("sku")}>SKU economics</button>
+        <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Cost inputs</button>
+        <button className={tab === "coverage" ? "active" : ""} onClick={() => setTab("coverage")}>Coverage</button>
+        <button className={tab === "verify" ? "active" : ""} onClick={() => setTab("verify")}>Verification</button>
       </div>
 
-      {tab === "pnl" && <PnLView/>}
-      {tab === "cm" && <ContributionMarginView/>}
-      {tab === "cost" && <CostCardsView/>}
-      {tab === "cash" && <CashFlowView/>}
-      {tab === "wc" && <WorkingCapitalView/>}
+      {!cm.coverage.cogsCovered && (
+        <div className="note" style={{ marginBottom: 14, background: "var(--warning-soft)", borderColor: "#E5D3A8" }}>
+          <strong style={{ color: "var(--warning)" }}>COGS gap:</strong>&nbsp;
+          {cm.coverage.cogsMisses.length} cell(s) have no cost card —{" "}
+          {[...new Set(cm.coverage.cogsMisses.map((x) => x.code))].map(skuLabel).join(", ")}.
+          Their netRev counts but CM1→CM4 are excluded (shown as “—”, never zero). Add the COGS in the Cost inputs tab.
+        </div>
+      )}
+
+      {tab === "waterfall" && <WaterfallView cm={cm} channels={channels} month={month}/>}
+      {tab === "matrix" && <MatrixView cm={cm} channels={channels}/>}
+      {tab === "sku" && <SkuEconomicsView cm={cm} channels={channels}/>}
+      {tab === "cost" && <CostInputsView month={month} onChange={onCostChange}/>}
+      {tab === "coverage" && (
+        <BizCoveragePanel
+          facts={facts}
+          month={month}
+          /* augment engine coverage with the resolved fixed amount so the panel's
+             per-month CM4 line reads "fixed cost set" correctly (engine coverage
+             carries hasFixedCost but the ₹ lives on company.fixedTotal). */
+          coverage={{ ...cm.coverage, fixedAmount: cm.company.fixedTotal ?? null }}
+        />
+      )}
+      {tab === "verify" && <VerificationView facts={facts}/>}
     </div>
   );
 };
 
-const PnLView = () => {
-  const D = NSData;
-  const revTotal = Object.values(D.pnl.revenue).reduce((a, b) => a + b, 0);
-  const fees = Object.values(D.pnl.platformFees).reduce((a, b) => a + b, 0);
-  const adSpend = Object.values(D.pnl.adSpend).reduce((a, b) => a + b, 0);
-  const grossProfit = revTotal + D.pnl.cogs;
-  const cm = grossProfit + fees + D.pnl.fulfillment + adSpend + D.pnl.influencer;
-  const netBeforeOH = cm + D.pnl.overhead;
-
-  const rows = [
-    { label: "Revenue", value: revTotal, strong: true, breakdown: D.pnl.revenue },
-    { label: "—  Amazon", value: D.pnl.revenue.amazon, indent: 1 },
-    { label: "—  Shopify", value: D.pnl.revenue.shopify, indent: 1 },
-    { label: "—  Flipkart", value: D.pnl.revenue.flipkart, indent: 1 },
-    { label: "—  Blinkit", value: D.pnl.revenue.blinkit, indent: 1 },
-    { label: "COGS (landed)", value: D.pnl.cogs, neg: true },
-    { label: "Gross profit", value: grossProfit, strong: true, hl: true },
-    { label: "Gross margin %", text: ((grossProfit / revTotal) * 100).toFixed(1) + "%", indent: 0, muted: true },
-    { divider: true },
-    { label: "Platform fees", value: fees, neg: true },
-    { label: "—  Amazon (16%)", value: D.pnl.platformFees.amazon, indent: 1, neg: true },
-    { label: "—  Flipkart (14%)", value: D.pnl.platformFees.flipkart, indent: 1, neg: true },
-    { label: "—  Blinkit (7.6%)", value: D.pnl.platformFees.blinkit, indent: 1, neg: true },
-    { label: "Fulfillment costs", value: D.pnl.fulfillment, neg: true },
-    { label: "Ad spend", value: adSpend, neg: true },
-    { label: "—  Google", value: D.pnl.adSpend.google, indent: 1, neg: true },
-    { label: "—  Meta", value: D.pnl.adSpend.meta, indent: 1, neg: true },
-    { label: "Influencer spend", value: D.pnl.influencer, neg: true },
-    { label: "Contribution margin", value: cm, strong: true, hl: true },
-    { label: "Contribution margin %", text: ((cm / revTotal) * 100).toFixed(1) + "%", muted: true },
-    { divider: true },
-    { label: "Overhead (Zoho)", value: D.pnl.overhead, neg: true, badge: "Zoho synced" },
-    { label: "—  Salaries", value: -980000, indent: 1, neg: true },
-    { label: "—  Rent + utilities", value: -240000, indent: 1, neg: true },
-    { label: "—  SaaS + ops", value: -180000, indent: 1, neg: true },
-    { label: "—  Misc / professional", value: -240000, indent: 1, neg: true },
-    { label: "Net before tax", value: netBeforeOH, strong: true, hl: true },
-    { label: "Net margin %", text: ((netBeforeOH / revTotal) * 100).toFixed(1) + "%", muted: true },
-  ];
+// ═════════════════════════════════════════════════════════════════════════════
+// CM WATERFALL — company + per-channel.
+// netRev → −COGS → CM1 → −fees → CM2 → −ads → CM3 → −fixed → CM4
+// ═════════════════════════════════════════════════════════════════════════════
+const WaterfallView = ({ cm, channels, month }) => {
+  const co = cm.company;
+  const hasFixed = cm.coverage.hasFixedCost;
 
   return (
     <>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 14 }}>
-        <Card title="Revenue MTD"><div className="stat-num lg">{D.fmtINR(revTotal)}</div><div className="muted" style={{ fontSize: 11.5 }}><Delta value={19.5}/> vs last mo</div></Card>
-        <Card title="Gross margin"><div className="stat-num lg">{((grossProfit/revTotal)*100).toFixed(1)}%</div><div className="muted" style={{ fontSize: 11.5 }}>{D.fmtINR(grossProfit)} gross profit</div></Card>
-        <Card title="Contribution margin"><div className="stat-num lg" style={{ color: cm > 0 ? "var(--success)" : "var(--critical)" }}>{((cm/revTotal)*100).toFixed(1)}%</div><div className="muted" style={{ fontSize: 11.5 }}>{D.fmtINR(cm)} CM</div></Card>
-        <Card title="Net before tax"><div className="stat-num lg" style={{ color: netBeforeOH > 0 ? "var(--success)" : "var(--critical)" }}>{D.fmtINR(netBeforeOH)}</div><div className="muted" style={{ fontSize: 11.5 }}>{((netBeforeOH/revTotal)*100).toFixed(1)}% margin</div></Card>
+      {/* Headline stat band — company CM milestones */}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", marginBottom: 14 }}>
+        <Card title="Net revenue">
+          <div className="stat-num lg">{fmtINR(co.netRev)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{fmtN(co.units)} units · {monthLabel(month)}</div>
+        </Card>
+        <Card title="CM1 · after COGS">
+          <div className="stat-num lg" style={{ color: cmColor(co.cm1) }}>{fmtINR(co.cm1)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{fmtPct(co.pcts.cm1)} of net rev</div>
+        </Card>
+        <Card title="CM2 · after fees">
+          <div className="stat-num lg" style={{ color: cmColor(co.cm2) }}>{fmtINR(co.cm2)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{fmtPct(co.pcts.cm2)} · breakeven-ACOS</div>
+        </Card>
+        <Card title="CM3 · after ads">
+          <div className="stat-num lg" style={{ color: cmColor(co.cm3) }}>{fmtINR(co.cm3)}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>{fmtPct(co.pcts.cm3)} · the decision layer</div>
+        </Card>
+        <Card title="CM4 · after fixed">
+          {hasFixed ? (
+            <>
+              <div className="stat-num lg" style={{ color: cmColor(co.cm4) }}>{fmtINR(co.cm4)}</div>
+              <div className="muted" style={{ fontSize: 11.5 }}>{fmtPct(co.pcts.cm4)} · reporting view</div>
+            </>
+          ) : (
+            <>
+              <div className="stat-num lg" style={{ color: "var(--ink-4)" }}>—</div>
+              <div className="muted" style={{ fontSize: 11.5 }}>set a fixed cost ↗ Cost inputs</div>
+            </>
+          )}
+        </Card>
       </div>
 
-      <Card title="P&L · May 2026" sub="MTD vs. prior month · synced with Zoho Books for below-the-line" padded={false}>
-        <table className="table">
-          <thead>
-            <tr><th style={{ width: "50%" }}>Line item</th><th className="num">May (MTD)</th><th className="num">Apr</th><th className="num">Δ</th><th className="num">% of revenue</th></tr>
-          </thead>
-          <tbody>
-            {(() => {
-              // realistic per-line month-over-month deltas (May MTD vs prior month)
-              const deltaByLabel = {
-                "Revenue": 19.5, "—  Amazon": 16.2, "—  Shopify": 24.8, "—  Flipkart": 8.4, "—  Blinkit": 38.6,
-                "COGS (landed)": 15.2, "Gross profit": 24.6,
-                "Platform fees": 14.8, "—  Amazon (16%)": 16.2, "—  Flipkart (14%)": 8.4, "—  Blinkit (7.6%)": 38.6,
-                "Fulfillment costs": 12.4, "Ad spend": 8.4, "—  Google": 6.2, "—  Meta": 10.2,
-                "Influencer spend": -4.8, "Contribution margin": 42.1,
-                "Overhead (Zoho)": 2.4, "—  Salaries": 0.0, "—  Rent + utilities": 0.0, "—  SaaS + ops": 4.2, "—  Misc / professional": 18.6,
-                "Net before tax": 86.4,
-              };
-              const revTotal = Object.values(NSData.pnl.revenue).reduce((a,b)=>a+b,0);
-              return rows.map((r, i) => {
-                if (r.divider) return <tr key={i}><td colSpan={5} style={{ background: "var(--bg-sunken)", height: 4, padding: 0 }}/></tr>;
-                const v = r.value;
-                const dlt = deltaByLabel[r.label] ?? 0;
-                const prev = (v != null && dlt !== 0) ? v / (1 + dlt/100) : (v != null ? v : 0);
-                const pctOfRev = v != null && !r.muted ? Math.abs(v / revTotal) * 100 : null;
-                return (
-                  <tr key={i} style={{ background: r.hl ? "var(--brand-soft)" : undefined }}>
-                    <td style={{ paddingLeft: 12 + (r.indent || 0) * 16, fontWeight: r.strong ? 600 : 400, color: r.muted ? "var(--ink-3)" : undefined }}>
-                      {r.label}
-                      {r.badge && <span className="badge brand" style={{ marginLeft: 8 }}>{r.badge}</span>}
-                    </td>
-                    <td className="num" style={{ fontWeight: r.strong ? 600 : 400, color: r.muted ? "var(--ink-3)" : v < 0 ? "var(--ink)" : undefined }}>
-                      {r.text || (v < 0 ? "(" + D.fmtINR(Math.abs(v)) + ")" : D.fmtINR(v))}
-                    </td>
-                    <td className="num muted">
-                      {!r.text && (prev < 0 ? "(" + D.fmtINR(Math.abs(prev)) + ")" : D.fmtINR(prev))}
-                    </td>
-                    <td className="num">
-                      {!r.text && dlt !== 0 && <Delta value={dlt}/>}
-                    </td>
-                    <td className="num muted">
-                      {pctOfRev != null && pctOfRev > 0 ? pctOfRev.toFixed(1) + "%" : ""}
-                    </td>
-                  </tr>
-                );
-              });
-            })()}
-          </tbody>
-        </table>
+      <Card
+        title={`Company contribution margin · ${monthLabel(month)}`}
+        sub="Net revenue stepped down through COGS, platform fees, ad spend, and (when set) allocated fixed cost"
+      >
+        <CMWaterfall cell={co} hasFixed={hasFixed}/>
+        <hr className="hr"/>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+          <span style={{ color: "var(--warning)", fontWeight: 600 }}>CM4 is a reporting view.</span>
+          Fixed cost is allocated revenue-proportionally — it taxes high-revenue cells regardless of
+          their actual fixed-resource use. <strong>CM3 stays the decision layer</strong> for delist / ad-budget calls.
+        </div>
       </Card>
-    </>
-  );
-};
 
-const ContributionMarginView = () => {
-  const D = NSData;
-  // CM per SKU per channel (simplified)
-  const rows = D.skuSales.slice(0, 9).map((s, i) => {
-    const card = D.costCards.find(c => c.sku === s.code) || { landed: 220, mrp: 800 };
-    const channels = D.channels.filter(c => c.id !== "instamart").map(c => {
-      const platformFee = { amazon: 0.16, shopify: 0.025, flipkart: 0.14, blinkit: 0.076 }[c.id] || 0.05;
-      const fulfilCost = { amazon: 48, shopify: 35, flipkart: 52, blinkit: 28 }[c.id] || 35;
-      const adAttrib = c.id === "shopify" ? 86 : 0;
-      const sellingPrice = card.mrp * { amazon: 0.92, shopify: 1.0, flipkart: 0.88, blinkit: 0.95 }[c.id];
-      const cm = sellingPrice - card.landed - (sellingPrice * platformFee) - fulfilCost - adAttrib;
-      return { ch: c, cm, pct: (cm / sellingPrice) * 100, sellingPrice };
-    });
-    const blendedCM = channels.reduce((a, b) => a + b.cm, 0) / channels.length;
-    const blendedPct = channels.reduce((a, b) => a + b.pct, 0) / channels.length;
-    return { ...s, card, channels, blendedCM, blendedPct };
-  });
-
-  return (
-    <>
-      <Card title="Contribution margin · per SKU per channel" sub="Revenue − COGS − Packaging − Platform fee − Fulfillment − Ad attribution" padded={false} style={{ marginBottom: 14 }}>
+      <Card
+        title="Per-channel waterfall"
+        sub="Each channel's own CM chain · CM3% is the headline health number"
+        style={{ marginTop: 14 }}
+        padded={false}
+      >
         <table className="table">
           <thead>
             <tr>
-              <th>SKU</th>
-              <th className="num">MRP</th>
-              <th className="num">Landed cost</th>
-              <th className="num">Amazon</th>
-              <th className="num">Shopify</th>
-              <th className="num">Flipkart</th>
-              <th className="num">Blinkit</th>
-              <th className="num">Blended CM</th>
-              <th className="num">CM %</th>
+              <th>Channel</th>
+              <th className="num">Net rev</th>
+              <th className="num">−COGS</th>
+              <th className="num">CM1</th>
+              <th className="num">−Fees</th>
+              <th className="num">CM2</th>
+              <th className="num">−Ads</th>
+              <th className="num">CM3</th>
+              <th className="num">CM3 %</th>
+              <th className="num">{hasFixed ? "CM4" : ""}</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.code}>
-                <td>
-                  <div>{r.name}</div>
-                  <div className="sku">{r.code}</div>
-                </td>
-                <td className="num">₹{D.fmtN(r.card.mrp)}</td>
-                <td className="num">₹{D.fmtN(r.card.landed)}</td>
-                {r.channels.map(c => (
-                  <td key={c.ch.id} className="num">
-                    <div style={{ color: c.cm < 0 ? "var(--critical)" : c.pct < 15 ? "var(--warning)" : "var(--ink)" }}>
-                      {c.cm < 0 ? "(₹" + D.fmtN(Math.abs(Math.round(c.cm))) + ")" : "₹" + D.fmtN(Math.round(c.cm))}
-                    </div>
-                    <div className="muted" style={{ fontSize: 10 }}>{c.pct.toFixed(0)}%</div>
+            {channels.map((ch) => {
+              const c = cm.byChannel[ch];
+              const meta = chMeta(ch);
+              return (
+                <tr key={ch}>
+                  <td>
+                    <span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>
+                      {meta.label}
+                    </span>
                   </td>
-                ))}
-                <td className="num strong">₹{D.fmtN(Math.round(r.blendedCM))}</td>
-                <td className="num">
-                  <span style={{ color: r.blendedPct < 10 ? "var(--critical)" : r.blendedPct < 25 ? "var(--warning)" : "var(--success)" }}>
-                    {r.blendedPct.toFixed(1)}%
-                  </span>
-                </td>
-              </tr>
-            ))}
+                  <td className="num">{fmtINR(c.netRev)}</td>
+                  <td className="num muted">{c.cogsCovered ? "−" + fmtINR(c.cogs) : "—"}</td>
+                  <td className="num" style={{ color: cmColor(c.cm1) }}>{c.cm1 == null ? "—" : fmtINR(c.cm1)}</td>
+                  <td className="num muted">−{fmtINR(c.fees)}</td>
+                  <td className="num" style={{ color: cmColor(c.cm2) }}>{c.cm2 == null ? "—" : fmtINR(c.cm2)}</td>
+                  <td className="num muted">{c.adSpend > 0 ? "−" + fmtINR(c.adSpend) : <span className="muted">—</span>}</td>
+                  <td className="num strong" style={{ color: cmColor(c.cm3) }}>{c.cm3 == null ? "—" : fmtINR(c.cm3)}</td>
+                  <td className="num">
+                    <span style={{ color: c.pcts.cm3 == null ? "var(--ink-4)" : c.pcts.cm3 < 0 ? "var(--critical)" : c.pcts.cm3 < 0.1 ? "var(--warning)" : "var(--success)" }}>
+                      {fmtPct(c.pcts.cm3)}
+                    </span>
+                  </td>
+                  <td className="num muted">{hasFixed ? (c.cm4 == null ? "—" : fmtINR(c.cm4)) : ""}</td>
+                </tr>
+              );
+            })}
+            {/* Company total row */}
+            <tr style={{ background: "var(--brand-soft)", fontWeight: 600 }}>
+              <td>All channels</td>
+              <td className="num">{fmtINR(co.netRev)}</td>
+              <td className="num muted">{co.cogsCovered ? "−" + fmtINR(co.cogs) : "—"}</td>
+              <td className="num" style={{ color: cmColor(co.cm1) }}>{fmtINR(co.cm1)}</td>
+              <td className="num muted">−{fmtINR(co.fees)}</td>
+              <td className="num" style={{ color: cmColor(co.cm2) }}>{fmtINR(co.cm2)}</td>
+              <td className="num muted">−{fmtINR(co.adSpend)}</td>
+              <td className="num strong" style={{ color: cmColor(co.cm3) }}>{fmtINR(co.cm3)}</td>
+              <td className="num">{fmtPct(co.pcts.cm3)}</td>
+              <td className="num">{hasFixed ? fmtINR(co.cm4) : ""}</td>
+            </tr>
           </tbody>
         </table>
       </Card>
-
-      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <Card title="CM breakdown · Whey Choc 1kg · Amazon" sub="Where every rupee goes">
-          <CMWaterfall mrp={1899} platformFee={279} cogs={560} fulfil={48} ad={0} cm={748} sellPrice={1747}/>
-        </Card>
-        <Card title="CM% over time · top SKUs" sub="last 90 days">
-          <CMTrend/>
-        </Card>
-      </div>
     </>
   );
 };
 
-const CMWaterfall = ({ mrp, sellPrice, cogs, platformFee, fulfil, ad, cm }) => {
-  const D = NSData;
-  const items = [
-    { label: "Selling price (Amazon)", value: sellPrice, type: "start" },
-    { label: "− COGS + packaging + freight", value: -cogs },
-    { label: "− Amazon fee (16%)", value: -platformFee },
-    { label: "− Fulfilment", value: -fulfil },
-    { label: "− Ad attribution", value: -ad },
-    { label: "Contribution margin", value: cm, type: "end" },
+// One channel/SKU CM chain rendered as a stepped bar waterfall. `cell` is any
+// rollup/cell with netRev, cogs, cm1, fees, cm2, adSpend, cm3, fixedAlloc, cm4.
+const CMWaterfall = ({ cell, hasFixed }) => {
+  const base = Math.max(1, Number.isFinite(cell.netRev) ? cell.netRev : 1);
+  // Steps: start = netRev; each deduction is negative; CM milestones are anchors.
+  const steps = [
+    { label: "Net revenue", value: cell.netRev, type: "start" },
+    { label: "− COGS", value: cell.cogsCovered === false ? null : -safe(cell.cogs), deduction: true },
+    { label: "CM1 · after COGS", value: cell.cm1, type: "milestone" },
+    { label: "− Platform fees", value: -safe(cell.fees), deduction: true },
+    { label: "CM2 · after fees", value: cell.cm2, type: "milestone" },
+    { label: "− Ad spend", value: -safe(cell.adSpend), deduction: true },
+    { label: "CM3 · after ads", value: cell.cm3, type: "milestone", strong: true },
   ];
-  let running = 0;
+  if (hasFixed) {
+    steps.push({ label: "− Fixed (allocated)", value: -safe(cell.fixedAlloc), deduction: true });
+    steps.push({ label: "CM4 · after fixed", value: cell.cm4, type: "milestone", caption: "reporting view" });
+  }
+
   return (
-    <div>
-      <div style={{ display: "grid", gap: 4 }}>
-        {items.map((it, i) => {
-          const w = Math.abs(it.value) / sellPrice * 100;
-          const isPos = it.value >= 0;
-          const isEdge = it.type === "start" || it.type === "end";
-          if (it.type === "start") { running = it.value; }
-          else if (it.type !== "end") { running += it.value; }
+    <div style={{ display: "grid", gap: 5 }}>
+      {steps.map((it, i) => {
+        const v = it.value;
+        const w = Number.isFinite(v) ? Math.min(100, (Math.abs(v) / base) * 100) : 0;
+        const isMilestone = it.type === "milestone";
+        const isStart = it.type === "start";
+        const isEdge = isMilestone || isStart;
+        const barColor = isStart
+          ? "var(--brand)"
+          : isMilestone
+            ? (v != null && v < 0 ? "var(--critical)" : "var(--success)")
+            : "var(--critical)";
+        return (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "200px 1fr 120px", gap: 12, alignItems: "center" }}>
+            <div style={{ fontSize: 11.5, color: isEdge ? "var(--ink)" : "var(--ink-3)", fontWeight: isEdge ? 600 : 400 }}>
+              {it.label}
+              {it.caption && <span className="muted" style={{ fontSize: 9.5, marginLeft: 6, fontStyle: "italic" }}>{it.caption}</span>}
+            </div>
+            <div style={{ position: "relative", height: 16, background: "var(--bg-sunken)", borderRadius: 3 }}>
+              <div style={{
+                position: "absolute", left: 0, width: w + "%", height: "100%",
+                background: barColor, opacity: isEdge ? (isMilestone ? 0.85 : 1) : 0.5,
+                borderRadius: 3,
+              }}/>
+            </div>
+            <div className="mono" style={{ fontSize: 11.5, textAlign: "right", fontWeight: isEdge ? 600 : 400, color: v == null ? "var(--ink-4)" : isMilestone ? cmColor(v) : it.deduction ? "var(--critical)" : "var(--ink)" }}>
+              {v == null ? "—" : it.deduction ? "−" + fmtINR(Math.abs(v)) : fmtINR(v)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+const safe = (n) => (Number.isFinite(n) ? n : 0);
+
+// ═════════════════════════════════════════════════════════════════════════════
+// CM3 MATRIX — the headline view. SKU rows × channel columns, cell = CM3 (with
+// CM3% beneath). Negative cells highlighted red. Click a cell or a SKU → drill.
+// ═════════════════════════════════════════════════════════════════════════════
+const MatrixView = ({ cm, channels }) => {
+  const [drill, setDrill] = useState(null); // { code } | { code, channel }
+  // Sort SKU rows by total net revenue desc (biggest contributors first).
+  const codes = useMemo(
+    () => Object.keys(cm.bySku).sort((a, b) => safe(cm.bySku[b].netRev) - safe(cm.bySku[a].netRev)),
+    [cm]
+  );
+
+  return (
+    <>
+      <Card
+        title="SKU × channel CM3 matrix"
+        sub="Contribution margin after ads, per SKU per channel · the headline decision view · click a cell to drill"
+        padded={false}
+      >
+        <div style={{ overflowX: "auto" }}>
+          <table className="table" style={{ minWidth: 720 }}>
+            <thead>
+              <tr>
+                <th style={{ position: "sticky", left: 0, background: "var(--bg-card)", zIndex: 1 }}>SKU</th>
+                {channels.map((ch) => {
+                  const meta = chMeta(ch);
+                  return <th key={ch} className="num" style={{ color: meta.color }}>{meta.label}</th>;
+                })}
+                <th className="num">SKU total CM3</th>
+              </tr>
+            </thead>
+            <tbody>
+              {codes.map((code) => {
+                const sku = cm.bySku[code];
+                return (
+                  <tr key={code}>
+                    <td style={{ position: "sticky", left: 0, background: "var(--bg-card)", zIndex: 1, cursor: "pointer" }} onClick={() => setDrill({ code })}>
+                      <div style={{ fontWeight: 500 }}>{SKU_META[code]?.name || code}</div>
+                      <div className="sku">{code} · {SKU_META[code]?.variant || ""}</div>
+                    </td>
+                    {channels.map((ch) => {
+                      const m = cm.matrix[code]?.[ch];
+                      if (!m) return <td key={ch} className="num muted" style={{ color: "var(--ink-4)" }}>—</td>;
+                      const neg = m.cm3 != null && m.cm3 < 0;
+                      return (
+                        <td
+                          key={ch}
+                          className="num"
+                          style={{ cursor: "pointer", background: neg ? "var(--critical-soft)" : undefined }}
+                          onClick={() => setDrill({ code, channel: ch })}
+                          title={`${skuLabel(code)} · ${chMeta(ch).label}\nNet rev ${fmtINR(m.netRev)} · ${fmtN(m.units)} units · ad ${fmtINR(m.adSpend)}`}
+                        >
+                          <div style={{ color: cmColor(m.cm3), fontWeight: neg ? 600 : 400 }}>
+                            {m.cm3 == null ? "—" : fmtSignedINR(m.cm3)}
+                          </div>
+                          <div className="muted" style={{ fontSize: 10 }}>{fmtPct(m.cm3Pct, 0)}</div>
+                        </td>
+                      );
+                    })}
+                    <td className="num strong" style={{ color: cmColor(sku.cm3) }} onClick={() => setDrill({ code })}>
+                      <div style={{ cursor: "pointer" }}>{sku.cm3 == null ? "—" : fmtSignedINR(sku.cm3)}</div>
+                      <div className="muted" style={{ fontSize: 10 }}>{fmtPct(sku.pcts.cm3, 0)}</div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {/* Channel totals footer */}
+              <tr style={{ background: "var(--bg-sunken)", fontWeight: 600 }}>
+                <td style={{ position: "sticky", left: 0, background: "var(--bg-sunken)", zIndex: 1 }}>Channel CM3</td>
+                {channels.map((ch) => {
+                  const c = cm.byChannel[ch];
+                  return (
+                    <td key={ch} className="num" style={{ color: cmColor(c?.cm3) }}>
+                      {c?.cm3 == null ? "—" : fmtSignedINR(c.cm3)}
+                      <div className="muted" style={{ fontSize: 10 }}>{fmtPct(c?.pcts?.cm3, 0)}</div>
+                    </td>
+                  );
+                })}
+                <td className="num" style={{ color: cmColor(cm.company.cm3) }}>
+                  {fmtSignedINR(cm.company.cm3)}
+                  <div className="muted" style={{ fontSize: 10 }}>{fmtPct(cm.company.pcts.cm3, 0)}</div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--ink-3)", display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: "var(--critical-soft)", border: "1px solid var(--critical)", borderRadius: 2, marginRight: 5, verticalAlign: "middle" }}/>negative CM3 (loss-making after ads)</span>
+          <span>“—” = SKU not sold on that channel, or COGS missing</span>
+        </div>
+      </Card>
+
+      {drill && (
+        <SkuDrillModal code={drill.code} focusChannel={drill.channel} cm={cm} channels={channels} onClose={() => setDrill(null)}/>
+      )}
+    </>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SKU ECONOMICS — per-SKU cards (COGS, blended CM3, channels). Click → drill.
+// ═════════════════════════════════════════════════════════════════════════════
+const SkuEconomicsView = ({ cm, channels }) => {
+  const [drill, setDrill] = useState(null);
+  const codes = useMemo(
+    () => Object.keys(cm.bySku).sort((a, b) => safe(cm.bySku[b].netRev) - safe(cm.bySku[a].netRev)),
+    [cm]
+  );
+
+  return (
+    <>
+      <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+        {codes.map((code) => {
+          const sku = cm.bySku[code];
+          const card = CostInputs.getCostCard(code);
+          const activeChannels = channels.filter((ch) => sku.byChannel?.[ch]);
+          const cm3Pct = sku.pcts.cm3;
+          const tone = cm3Pct == null ? "var(--ink-4)" : cm3Pct < 0 ? "var(--critical)" : cm3Pct < 0.1 ? "var(--warning)" : "var(--success)";
           return (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "180px 1fr 80px", gap: 12, alignItems: "center" }}>
-              <div style={{ fontSize: 11.5, color: isEdge ? "var(--ink)" : "var(--ink-3)", fontWeight: isEdge ? 600 : 400 }}>{it.label}</div>
-              <div style={{ position: "relative", height: 16, background: "var(--bg-sunken)", borderRadius: 3 }}>
-                <div style={{
-                  position: "absolute", left: isEdge ? 0 : ((it.value < 0 ? running : running - it.value) / sellPrice * 100) + "%",
-                  width: w + "%", height: "100%",
-                  background: isEdge ? "var(--brand)" : "var(--critical)",
-                  opacity: isEdge ? 1 : 0.5,
-                  borderRadius: 3,
-                }}/>
-              </div>
-              <div className="mono" style={{ fontSize: 11.5, textAlign: "right", color: isEdge ? "var(--ink)" : "var(--critical)", fontWeight: isEdge ? 600 : 400 }}>
-                {it.value < 0 ? "−₹" + D.fmtN(Math.abs(it.value)) : "₹" + D.fmtN(it.value)}
+            <div key={code} className="card" style={{ cursor: "pointer" }} onClick={() => setDrill({ code })}>
+              <div className="card-body">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>{SKU_META[code]?.name || code}</div>
+                    <div className="sku">{code} · {SKU_META[code]?.variant || ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: tone }}>{fmtPct(cm3Pct)}</div>
+                    <div className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>CM3 %</div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "8px 0", borderTop: "1px solid var(--border-soft)", borderBottom: "1px solid var(--border-soft)" }}>
+                  <Stat label="Net rev" value={fmtINR(sku.netRev)}/>
+                  <Stat label="Units" value={fmtN(sku.units)}/>
+                  <Stat label="CM3" value={fmtINR(sku.cm3)} color={cmColor(sku.cm3)}/>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, fontSize: 11 }}>
+                  <span className="muted">
+                    COGS {card ? fmtINR(card.cogs) + "/u" : <span style={{ color: "var(--critical)" }}>missing</span>}
+                    {card?.pkgPlaceholder && (
+                      <span title="Packaging cost is a ₹0 placeholder in the COGS file" style={{ marginLeft: 6, color: "var(--warning)", fontWeight: 600 }}>⚠ pkg ₹0</span>
+                    )}
+                  </span>
+                  <span style={{ display: "flex", gap: 4 }}>
+                    {activeChannels.map((ch) => {
+                      const meta = chMeta(ch);
+                      const c = sku.byChannel[ch];
+                      const negCh = c?.cm3 != null && c.cm3 < 0;
+                      return (
+                        <span key={ch} title={`${meta.label} CM3 ${c?.cm3 == null ? "—" : fmtINR(c.cm3)}`}
+                          style={{ width: 8, height: 8, borderRadius: "50%", background: negCh ? "var(--critical)" : meta.color, opacity: negCh ? 1 : 0.85 }}/>
+                      );
+                    })}
+                  </span>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
-      <hr className="hr"/>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span className="muted">CM % (this channel)</span>
-        <span className="mono strong" style={{ color: "var(--success)" }}>{(cm/sellPrice*100).toFixed(1)}%</span>
+      {drill && <SkuDrillModal code={drill.code} cm={cm} channels={channels} onClose={() => setDrill(null)}/>}
+    </>
+  );
+};
+
+const Stat = ({ label, value, color }) => (
+  <div>
+    <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: color || "var(--ink)" }}>{value}</div>
+    <div className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>{label}</div>
+  </div>
+);
+
+// ── SKU economics drill — full CM chain per channel for one SKU ──
+const SkuDrillModal = ({ code, focusChannel, cm, channels, onClose }) => {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const sku = cm.bySku[code];
+  const card = CostInputs.getCostCard(code);
+  if (!sku) return null;
+  const activeChannels = channels.filter((ch) => sku.byChannel?.[ch]);
+  const hasFixed = cm.coverage.hasFixedCost;
+  // Focus the clicked channel's waterfall if a specific cell was clicked; else
+  // show the SKU's blended (all-channel) chain.
+  const focusCell = focusChannel && sku.byChannel?.[focusChannel] ? sku.byChannel[focusChannel] : sku;
+  const focusLabel = focusChannel ? chMeta(focusChannel).label : "All channels (blended)";
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-card" onMouseDown={(e) => e.stopPropagation()} style={{ width: "min(820px, 94vw)" }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{SKU_META[code]?.name || code}</div>
+            <div className="modal-sub sku">
+              {code} · {SKU_META[code]?.variant || ""} ·{" "}
+              COGS {card ? fmtINR(card.cogs) + "/unit" : "missing"}
+              {card?.asOf && <span> · as of {card.asOf}</span>}
+              {card?.pkgPlaceholder && <span style={{ color: "var(--warning)", marginLeft: 6 }}>· pkg ₹0 placeholder</span>}
+            </div>
+          </div>
+          <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
+        </div>
+
+        <div className="modal-body" style={{ gap: 12 }}>
+          {/* Per-channel CM chain table for this SKU */}
+          <div className="blk-modal-list">
+            <div className="blk-modal-list-head" style={{ gridTemplateColumns: "1fr repeat(6, auto)", gap: 10 }}>
+              <span>Channel</span>
+              <span style={{ textAlign: "right", minWidth: 70 }}>Net rev</span>
+              <span style={{ textAlign: "right", minWidth: 60 }}>CM1</span>
+              <span style={{ textAlign: "right", minWidth: 60 }}>CM2</span>
+              <span style={{ textAlign: "right", minWidth: 56 }}>Ads</span>
+              <span style={{ textAlign: "right", minWidth: 60 }}>CM3</span>
+              <span style={{ textAlign: "right", minWidth: 50 }}>CM3%</span>
+            </div>
+            {activeChannels.map((ch) => {
+              const c = sku.byChannel[ch];
+              const meta = chMeta(ch);
+              const isFocus = ch === focusChannel;
+              return (
+                <div key={ch} className="blk-modal-row" style={{ gridTemplateColumns: "1fr repeat(6, auto)", gap: 10, padding: "8px 14px", background: isFocus ? "var(--brand-soft)" : undefined }}>
+                  <div className="blk-modal-row-wh">
+                    <span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.label}</span>
+                    <span className="muted" style={{ fontSize: 10.5, marginLeft: 6 }}>{fmtN(c.units)} units</span>
+                  </div>
+                  <div className="mono" style={{ minWidth: 70, textAlign: "right" }}>{fmtINR(c.netRev)}</div>
+                  <div className="mono" style={{ minWidth: 60, textAlign: "right", color: cmColor(c.cm1) }}>{c.cm1 == null ? "—" : fmtINR(c.cm1)}</div>
+                  <div className="mono" style={{ minWidth: 60, textAlign: "right", color: cmColor(c.cm2) }}>{c.cm2 == null ? "—" : fmtINR(c.cm2)}</div>
+                  <div className="mono muted" style={{ minWidth: 56, textAlign: "right" }}>{c.adSpend > 0 ? fmtINR(c.adSpend) : "—"}</div>
+                  <div className="mono" style={{ minWidth: 60, textAlign: "right", fontWeight: 600, color: cmColor(c.cm3) }}>{c.cm3 == null ? "—" : fmtINR(c.cm3)}</div>
+                  <div className="mono" style={{ minWidth: 50, textAlign: "right", color: c.pcts.cm3 == null ? "var(--ink-4)" : c.pcts.cm3 < 0 ? "var(--critical)" : "var(--ink-3)" }}>{fmtPct(c.pcts.cm3, 0)}</div>
+                </div>
+              );
+            })}
+            {/* SKU blended row */}
+            <div className="blk-modal-row" style={{ gridTemplateColumns: "1fr repeat(6, auto)", gap: 10, padding: "8px 14px", background: "var(--bg-sunken)", borderTop: "1px solid var(--border)", fontWeight: 600 }}>
+              <div className="blk-modal-row-wh">Blended (all channels)</div>
+              <div className="mono" style={{ minWidth: 70, textAlign: "right" }}>{fmtINR(sku.netRev)}</div>
+              <div className="mono" style={{ minWidth: 60, textAlign: "right", color: cmColor(sku.cm1) }}>{sku.cm1 == null ? "—" : fmtINR(sku.cm1)}</div>
+              <div className="mono" style={{ minWidth: 60, textAlign: "right", color: cmColor(sku.cm2) }}>{sku.cm2 == null ? "—" : fmtINR(sku.cm2)}</div>
+              <div className="mono" style={{ minWidth: 56, textAlign: "right" }}>{fmtINR(sku.adSpend)}</div>
+              <div className="mono" style={{ minWidth: 60, textAlign: "right", color: cmColor(sku.cm3) }}>{sku.cm3 == null ? "—" : fmtINR(sku.cm3)}</div>
+              <div className="mono" style={{ minWidth: 50, textAlign: "right" }}>{fmtPct(sku.pcts.cm3, 0)}</div>
+            </div>
+          </div>
+
+          {/* Waterfall for the focused channel (or blended) */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8, padding: "0 2px" }}>
+              <strong style={{ fontSize: 13 }}>CM chain</strong>
+              <span className="muted" style={{ fontSize: 11 }}>{focusLabel}</span>
+            </div>
+            <CMWaterfall cell={focusCell} hasFixed={hasFixed}/>
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            CM chain = netRev − COGS×units → CM1 − platform-fee% → CM2 − ads (direct + channel-allocated) → CM3{hasFixed ? " − fixed (allocated) → CM4" : ""}. COGS/fee% editable in Cost inputs.
+          </span>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );
 };
 
-const CMTrend = () => {
-  const series = [
-    { name: "Multivit W", color: "#2F5E47", data: [32,34,33,35,36,34,33,32,34,35,36,38] },
-    { name: "Biotin",     color: "#B07A1F", data: [28,30,32,34,35,36,38,37,38,40,42,44] },
-    { name: "Whey Choc",  color: "#3A6072", data: [22,24,23,22,21,22,24,23,22,21,20,22] },
-    { name: "Collagen",   color: "#B73838", data: [18,16,14,12,10, 8, 6, 4, 6, 4, 2, 0] },
-  ];
-  const w = 480, h = 180;
-  const pad = { l: 30, r: 90, t: 14, b: 22 };
-  const innerW = w - pad.l - pad.r, innerH = h - pad.t - pad.b;
-  const max = 50;
-  const xFor = i => pad.l + (i / 11) * innerW;
-  const yFor = v => pad.t + innerH - (v / max) * innerH;
-  return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`}>
-      {[0, 25, 50].map(v => <line key={v} x1={pad.l} x2={w-pad.r} y1={yFor(v)} y2={yFor(v)} stroke="var(--border-soft)"/>)}
-      {[0, 25, 50].map(v => <text key={v} x={pad.l-6} y={yFor(v)+3} fontSize="9" fill="var(--ink-3)" textAnchor="end" fontFamily="var(--mono)">{v}%</text>)}
-      {series.map((s, si) => {
-        const path = s.data.map((v, i) => (i===0?"M":"L") + xFor(i).toFixed(1) + "," + yFor(v).toFixed(1)).join(" ");
-        return (
-          <g key={si}>
-            <path d={path} fill="none" stroke={s.color} strokeWidth="1.6"/>
-            <text x={w-pad.r+6} y={yFor(s.data[s.data.length-1])+3} fontSize="10" fill={s.color}>{s.name}</text>
-          </g>
-        );
-      })}
-      {[0, 5, 11].map(i => <text key={i} x={xFor(i)} y={h-6} fontSize="9" textAnchor="middle" fill="var(--ink-3)" fontFamily="var(--mono)">W{i+1}</text>)}
-    </svg>
-  );
-};
+// ═════════════════════════════════════════════════════════════════════════════
+// COST INPUTS — editable COGS / fee% / mcfShare / fixed cost, all with as-of +
+// source labels and the two ₹0-packaging flags. Writes localStorage overrides.
+// ═════════════════════════════════════════════════════════════════════════════
+const CostInputsView = ({ month, onChange }) => {
+  const [, setVersion] = useState(0);
+  const refresh = () => { setVersion((v) => v + 1); onChange(); };
+  const inputs = CostInputs.listCostInputs();
+  const fixed = CostInputs.getFixedCost(month);
+  const today = new Date().toISOString().slice(0, 10);
 
-const CostCardsView = () => {
-  const D = NSData;
-  return (
-    <Card title="Cost cards · per SKU per batch" sub="Manually maintained · same SKU can have different COGS across batches"
-      action={<button className="btn primary sm"><Icon name="plus" size={12}/>New cost card</button>}
-      padded={false}>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>SKU</th>
-            <th>Batch</th>
-            <th className="num">COGS (raw)</th>
-            <th className="num">Packaging</th>
-            <th className="num">Freight</th>
-            <th className="num">Landed cost</th>
-            <th className="num">MRP</th>
-            <th className="num">Implied gross %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {D.costCards.map((c, i) => (
-            <tr key={i}>
-              <td>{D.skus.find(s => s.code === c.sku)?.name}<div className="sku">{c.sku}</div></td>
-              <td className="sku">{c.batch}</td>
-              <td className="num">₹{c.cogs}</td>
-              <td className="num">₹{c.packaging}</td>
-              <td className="num">₹{c.freight}</td>
-              <td className="num strong">₹{c.landed}</td>
-              <td className="num">₹{D.fmtN(c.mrp)}</td>
-              <td className="num">
-                <span style={{ color: ((c.mrp - c.landed) / c.mrp) > 0.5 ? "var(--success)" : "var(--warning)" }}>
-                  {(((c.mrp - c.landed) / c.mrp) * 100).toFixed(1)}%
-                </span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
-};
+  const onReset = () => {
+    if (typeof window !== "undefined" && !window.confirm("Reset ALL cost inputs to the baked defaults? Your overrides are discarded.")) return;
+    CostInputs.resetCostInputs();
+    refresh();
+  };
 
-const CashFlowView = () => {
-  const D = NSData;
-  const onHand = 6240000;
-  let running = onHand;
-  const series = D.cashflow.map(c => {
-    running += c.inflow + c.outflow;
-    return { ...c, balance: running };
-  });
-  const breach = series.find(c => c.balance < 4000000);
+  // JSON export/import of the override layer (spec §7 "export/import as JSON").
+  const onExport = () => {
+    const blob = new Blob([JSON.stringify(inputs, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `naturesum-cost-inputs-${today}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 14 }}>
-        <Card title="Cash on hand"><div className="stat-num lg">{D.fmtINR(onHand)}</div><div className="muted" style={{ fontSize: 11.5 }}>across 3 bank accounts</div></Card>
-        <Card title="In-transit from marketplaces"><div className="stat-num lg">{D.fmtINR(4820000)}</div><div className="muted" style={{ fontSize: 11.5 }}>earned · awaiting payout</div></Card>
-        <Card title="Owed to suppliers"><div className="stat-num lg" style={{ color: "var(--warning)" }}>{D.fmtINR(2840000)}</div><div className="muted" style={{ fontSize: 11.5 }}>across 6 open POs</div></Card>
-        <Card title="Cash runway"><div className="stat-num lg" style={{ color: "var(--warning)" }}>48 days</div><div className="muted" style={{ fontSize: 11.5 }}>at current burn</div></Card>
+      <div className="note" style={{ marginBottom: 14, background: "var(--bg-sunken)", borderColor: "var(--border)" }}>
+        Defaults are baked from the founder files (COGS · BusinessModel %s). Edits are stored as
+        local overrides — every figure shows its <strong>as-of date + source</strong>. The CM engine reads these live.
       </div>
 
-      {breach && (
-        <div className="note" style={{ marginBottom: 14, background: "var(--critical-soft)", borderColor: "#E5BFBC" }}>
-          <strong style={{ color: "var(--critical)" }}>Cash crunch alert:</strong>&nbsp;
-          Projection breaches ₹40L floor on {breach.date} ({D.fmtINR(breach.balance)}). Consider delaying ₹6.8L PO to Marpol by 6 days or accelerating Amazon Lending advance.
-        </div>
-      )}
-
-      <Card title="Cash flow projection · next 30 days" sub="Inflows from marketplace payouts · outflows from PO log + upcoming expenses" padded={false}>
-        <CashFlowChart data={series} onHand={onHand}/>
+      <Card
+        title="Per-SKU COGS"
+        sub="₹/unit incl. packaging · 11-Jun Unit_COGS file · editable"
+        padded={false}
+        action={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn sm" onClick={onExport}><Icon name="download" size={12}/>Export JSON</button>
+            <button className="btn ghost sm" onClick={onReset}>Reset all</button>
+          </div>
+        }
+        style={{ marginBottom: 14 }}
+      >
         <table className="table">
           <thead>
-            <tr><th>Date</th><th>Event</th><th className="num">Inflow</th><th className="num">Outflow</th><th className="num">Balance</th></tr>
+            <tr><th>SKU</th><th className="num">COGS ₹/unit</th><th>As of</th><th>Source</th></tr>
           </thead>
           <tbody>
-            {series.map((c, i) => (
-              <tr key={i}>
-                <td className="mono">{c.date}</td>
-                <td>{c.evt}</td>
-                <td className="num">{c.inflow ? <span style={{ color: "var(--success)" }}>+{D.fmtINR(c.inflow)}</span> : <span className="muted">—</span>}</td>
-                <td className="num">{c.outflow ? <span style={{ color: "var(--critical)" }}>−{D.fmtINR(Math.abs(c.outflow))}</span> : <span className="muted">—</span>}</td>
-                <td className="num strong" style={{ color: c.balance < 4000000 ? "var(--critical)" : c.balance < 6000000 ? "var(--warning)" : undefined }}>
-                  {D.fmtINR(c.balance)}
-                </td>
-              </tr>
+            {/* key includes the live value so a Save/Reset remounts each row,
+                re-seeding its input draft from the new source (no sync effect). */}
+            {inputs.cogs.map((c) => (
+              <CogsRow key={`${c.code}:${c.cogs}`} card={c} onSaved={refresh}/>
             ))}
           </tbody>
         </table>
       </Card>
-    </>
-  );
-};
 
-const CashFlowChart = ({ data, onHand }) => {
-  const w = 1080, h = 200;
-  const pad = { l: 60, r: 24, t: 18, b: 26 };
-  const innerW = w - pad.l - pad.r, innerH = h - pad.t - pad.b;
-  const min = Math.min(...data.map(d => d.balance), 4000000) * 0.9;
-  const max = Math.max(...data.map(d => d.balance), onHand) * 1.05;
-  const xFor = i => pad.l + (i / (data.length - 1)) * innerW;
-  const yFor = v => pad.t + innerH - ((v - min) / (max - min)) * innerH;
-  const path = data.map((d, i) => (i === 0 ? "M" : "L") + xFor(i).toFixed(1) + "," + yFor(d.balance).toFixed(1)).join(" ");
-  const area = path + ` L${xFor(data.length-1).toFixed(1)},${pad.t+innerH} L${pad.l},${pad.t+innerH} Z`;
-  return (
-    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ display: "block", padding: "10px 14px 0" }}>
-      {/* floor */}
-      <line x1={pad.l} x2={w-pad.r} y1={yFor(4000000)} y2={yFor(4000000)} stroke="var(--critical)" strokeDasharray="4 4" strokeWidth="1"/>
-      <text x={w-pad.r-6} y={yFor(4000000)-4} fontSize="9.5" textAnchor="end" fill="var(--critical)" fontFamily="var(--mono)">₹40L floor</text>
-      <path d={area} fill="var(--brand)" opacity="0.1"/>
-      <path d={path} fill="none" stroke="var(--brand)" strokeWidth="1.8"/>
-      {data.map((d, i) => (
-        <g key={i}>
-          <circle cx={xFor(i)} cy={yFor(d.balance)} r="3" fill={d.balance < 4000000 ? "var(--critical)" : "var(--brand)"}/>
-          {i % 2 === 0 && <text x={xFor(i)} y={h-8} fontSize="9" textAnchor="middle" fill="var(--ink-3)" fontFamily="var(--mono)">{d.date}</text>}
-        </g>
-      ))}
-      {[min, (min+max)/2, max].map((v, i) => (
-        <text key={i} x={pad.l - 6} y={yFor(v)+3} fontSize="9" textAnchor="end" fill="var(--ink-3)" fontFamily="var(--mono)">
-          {NSData.fmtINR(v)}
-        </text>
-      ))}
-    </svg>
-  );
-};
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+        <Card title="Platform fee %" sub="Variable platform cost · of channel net revenue · BusinessModel Apr-26" padded={false}>
+          <table className="table">
+            <thead>
+              <tr><th>Channel row</th><th className="num">Fee %</th><th>As of</th></tr>
+            </thead>
+            <tbody>
+              {inputs.fees.map((f) => (
+                <FeeRow key={`${f.channelKey}:${f.pct}`} fee={f} onSaved={refresh}/>
+              ))}
+              <tr style={{ background: "var(--bg-sunken)" }}>
+                <td>
+                  <span title={`Blended website fee = mcfShare×mcf-web + (1−mcfShare)×website-direct\n${inputs.websiteBlendedFee.source || ""}`} style={{ borderBottom: "1px dotted var(--ink-3)", cursor: "help" }}>
+                    website (blended)
+                  </span>
+                </td>
+                <td className="num strong">{fmtPct(inputs.websiteBlendedFee.pct, 2)}</td>
+                <td className="muted" style={{ fontSize: 10.5 }}>derived</td>
+              </tr>
+            </tbody>
+          </table>
+        </Card>
 
-const WorkingCapitalView = () => {
-  const D = NSData;
-  const data = [
-    { label: "Locked in inventory", v: 7840000, c: "var(--info)" },
-    { label: "In transit (marketplaces)", v: 4820000, c: "var(--brand)" },
-    { label: "Receivables (other)", v: 640000, c: "var(--success)" },
-    { label: "− Owed to suppliers", v: -2840000, c: "var(--critical)" },
-    { label: "− Upcoming expenses", v: -1240000, c: "var(--warning)" },
-  ];
-  const net = data.reduce((a, b) => a + b.v, 0);
-  return (
-    <>
-      <div className="grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 14 }}>
-        <Card title="Net working capital"><div className="stat-num lg">{D.fmtINR(net)}</div><div className="muted" style={{ fontSize: 11.5 }}>Current assets − liabilities</div></Card>
-        <Card title="Inventory turnover"><div className="stat-num lg">3.6×</div><div className="muted" style={{ fontSize: 11.5 }}>annualised</div></Card>
-        <Card title="Days inventory outstanding"><div className="stat-num lg">102 d</div><div className="muted" style={{ fontSize: 11.5 }}>blended</div></Card>
-        <Card title="Cash conversion cycle"><div className="stat-num lg">86 days</div><div className="muted" style={{ fontSize: 11.5 }}>DIO 102 + DSO 14 − DPO 30</div></Card>
-      </div>
-
-      <Card title="Working capital composition" sub="Where the money lives">
-        <div style={{ display: "grid", gap: 12 }}>
-          {data.map(d => (
-            <div key={d.label} style={{ display: "grid", gridTemplateColumns: "200px 1fr 120px", gap: 12, alignItems: "center" }}>
-              <div style={{ fontSize: 12 }}>{d.label}</div>
-              <div style={{ position: "relative", height: 14, background: "var(--bg-sunken)", borderRadius: 3 }}>
-                <div style={{ width: Math.abs(d.v) / 9000000 * 100 + "%", height: "100%", background: d.c, borderRadius: 3 }}/>
-              </div>
-              <div className="mono text-right" style={{ fontSize: 12 }}>
-                <span style={{ color: d.v < 0 ? "var(--critical)" : "var(--ink)" }}>
-                  {d.v < 0 ? "−" + D.fmtINR(Math.abs(d.v)) : D.fmtINR(d.v)}
-                </span>
-              </div>
-            </div>
-          ))}
-          <hr className="hr"/>
-          <div style={{ display: "grid", gridTemplateColumns: "200px 1fr 120px", gap: 12, alignItems: "center", fontWeight: 600 }}>
-            <div>Net working capital</div>
-            <div></div>
-            <div className="mono text-right">{D.fmtINR(net)}</div>
+        <Card title="Website mcfShare & monthly fixed cost" sub="mcfShare drives the website blended fee · fixed cost unlocks CM4" padded={false}>
+          <div style={{ padding: "12px 14px", display: "grid", gap: 14 }}>
+            <McfShareEditor key={`mcf:${inputs.mcfShare.share}`} share={inputs.mcfShare} onSaved={refresh}/>
+            <FixedCostEditor key={`fixed:${month}:${fixed ? fixed.amount : "none"}`} month={month} fixed={fixed} onSaved={refresh}/>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </>
   );
 };
 
+const CogsRow = ({ card, onSaved }) => {
+  // Remounted via key when card.cogs changes (Save/Reset), so the initializer
+  // re-seeds from the live value — no draft-sync effect needed.
+  const [draft, setDraft] = useState(String(card.cogs));
+  const dirty = Number(draft) !== card.cogs && draft !== "" && Number.isFinite(Number(draft));
+  const save = () => {
+    const n = Number(draft);
+    if (!Number.isFinite(n)) return;
+    CostInputs.setCostCard(card.code, n);
+    onSaved();
+  };
+  return (
+    <tr>
+      <td>
+        {SKU_META[card.code]?.name || card.code}
+        <div className="sku">
+          {card.code}
+          {card.pkgPlaceholder && (
+            <span title="Packaging is a ₹0 placeholder in the COGS file — fold real packaging cost in when known" style={{ marginLeft: 6, color: "var(--warning)", fontWeight: 600, fontSize: 10 }}>⚠ pkg ₹0</span>
+          )}
+        </div>
+      </td>
+      <td className="num">
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+          <input
+            type="number" className="sim-number" min={0} step={0.5}
+            value={draft} onChange={(e) => setDraft(e.target.value)}
+            style={{ width: 84, textAlign: "right" }}
+          />
+          {dirty && <button className="btn primary sm" onClick={save}>Save</button>}
+        </span>
+      </td>
+      <td className="muted" style={{ fontSize: 10.5 }}>{card.asOf}</td>
+      <td className="muted" style={{ fontSize: 10.5 }}>{card.source}</td>
+    </tr>
+  );
+};
+
+const FeeRow = ({ fee, onSaved }) => {
+  // Stored as a fraction (0..1); displayed + edited as a percentage. Remounted
+  // via key on fee.pct change, so the initializer re-seeds the draft.
+  const [draft, setDraft] = useState((fee.pct * 100).toFixed(4).replace(/0+$/, "").replace(/\.$/, ""));
+  const pctNum = Number(draft);
+  const dirty = Number.isFinite(pctNum) && Math.abs(pctNum / 100 - fee.pct) > 1e-9 && draft !== "";
+  const save = () => {
+    if (!Number.isFinite(pctNum)) return;
+    CostInputs.setFeePct(fee.channelKey, pctNum / 100);
+    onSaved();
+  };
+  return (
+    <tr>
+      <td>{fee.channelKey}</td>
+      <td className="num">
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, justifyContent: "flex-end" }}>
+          <input
+            type="number" className="sim-number" min={0} step={0.1}
+            value={draft} onChange={(e) => setDraft(e.target.value)}
+            style={{ width: 76, textAlign: "right" }}
+          />
+          <span className="muted" style={{ fontSize: 10 }}>%</span>
+          {dirty && <button className="btn primary sm" onClick={save}>Save</button>}
+        </span>
+      </td>
+      <td className="muted" style={{ fontSize: 10.5 }}>{fee.asOf}</td>
+    </tr>
+  );
+};
+
+const McfShareEditor = ({ share, onSaved }) => {
+  // Remounted via key on share.share change → initializer re-seeds the draft.
+  const [draft, setDraft] = useState((share.share * 100).toFixed(1));
+  const n = Number(draft);
+  const dirty = Number.isFinite(n) && Math.abs(n / 100 - share.share) > 1e-9 && draft !== "";
+  const save = () => { if (Number.isFinite(n)) { CostInputs.setMcfShare(n / 100); onSaved(); } };
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <strong style={{ fontSize: 12.5 }}>Website MCF share</strong>
+        {share.placeholder && (
+          <span title="Default 0.0 placeholder until the May build pins the MCF revenue share" style={{ color: "var(--warning)", fontSize: 10, fontWeight: 600 }}>⚠ placeholder 0%</span>
+        )}
+        {share.capped && (
+          <span title="The build proxy (MCF units × website per-unit price) exceeded 1.0 because gross MCF units > net website units; capped to 100%. Edit if you have a truer split." style={{ color: "var(--warning)", fontSize: 10, fontWeight: 600 }}>⚠ capped 100%</span>
+        )}
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+        Share of website revenue fulfilled by Amazon (MCF). Drives the website blended fee.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <input type="number" className="sim-number" min={0} max={100} step={0.5} value={draft} onChange={(e) => setDraft(e.target.value)} style={{ width: 84, textAlign: "right" }}/>
+        <span className="muted" style={{ fontSize: 11 }}>%</span>
+        <button className="btn primary sm" onClick={save} disabled={!dirty}>Save</button>
+      </div>
+      <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>as of {share.asOf} · {share.source}</div>
+    </div>
+  );
+};
+
+const FixedCostEditor = ({ month, fixed, onSaved }) => {
+  // Remounted via key on month/amount change → initializer re-seeds the draft.
+  const [draft, setDraft] = useState(fixed ? String(fixed.amount) : "");
+  const save = () => {
+    const n = Number(draft);
+    if (draft === "" || !Number.isFinite(n)) { CostInputs.setFixedCost(month, null); }
+    else { CostInputs.setFixedCost(month, n); }
+    onSaved();
+  };
+  const clear = () => { CostInputs.setFixedCost(month, null); setDraft(""); onSaved(); };
+  return (
+    <div style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <strong style={{ fontSize: 12.5 }}>Monthly fixed cost · {monthLabel(month)}</strong>
+      </div>
+      <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+        Total fixed cost for the month (₹). When set, CM4 unlocks — allocated revenue-proportionally.
+        Leave blank to keep CM4 hidden.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span className="muted">₹</span>
+        <input type="number" className="sim-number" min={0} step={1000} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="not set" style={{ width: 130, textAlign: "right" }}/>
+        <button className="btn primary sm" onClick={save}>Save</button>
+        {fixed && <button className="btn ghost sm" onClick={clear}>Clear</button>}
+      </div>
+      {fixed && <div className="muted" style={{ fontSize: 10, marginTop: 4 }}>as of {fixed.asOf}</div>}
+    </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VERIFICATION — the permanent regression net (spec §10). MATCH / DRIFT / PENDING
+// / NO-DATA per anchor, with the exact filter string so a human can audit it.
+// ═════════════════════════════════════════════════════════════════════════════
+const STATUS_META = {
+  MATCH:     { color: "var(--success)",  label: "MATCH" },
+  DRIFT:     { color: "var(--critical)", label: "DRIFT" },
+  PENDING:   { color: "var(--ink-3)",    label: "PENDING" },
+  "NO-DATA": { color: "var(--warning)",  label: "NO-DATA" },
+};
+
+const VerificationView = ({ facts }) => {
+  const results = useMemo(() => runVerification(facts), [facts]);
+  const counts = results.reduce((acc, r) => { acc[r.status] = (acc[r.status] || 0) + 1; return acc; }, {});
+
+  return (
+    <Card
+      title={`Verification · ${monthLabel(ANCHOR_MONTH)} anchors`}
+      sub="Every §2/§3 anchor recomputed live from the fact store · MATCH within tolerance, DRIFT surfaces the δ"
+      padded={false}
+    >
+      <div style={{ display: "flex", gap: 14, padding: "10px 14px", borderBottom: "1px solid var(--border-soft)", fontSize: 12 }}>
+        {["MATCH", "DRIFT", "PENDING", "NO-DATA"].map((s) => (
+          <span key={s} style={{ color: STATUS_META[s].color, fontWeight: 600 }}>
+            {counts[s] || 0} {STATUS_META[s].label}
+          </span>
+        ))}
+      </div>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Anchor</th>
+            <th className="num">Expected</th>
+            <th className="num">Actual</th>
+            <th className="num">Δ</th>
+            <th style={{ width: 90 }}>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((r) => {
+            const sm = STATUS_META[r.status] || STATUS_META.PENDING;
+            return (
+              <tr key={r.id}>
+                <td>
+                  <div style={{ fontSize: 12 }}>{r.label}</div>
+                  <div className="sku" style={{ fontSize: 10, color: "var(--ink-3)", whiteSpace: "normal", lineHeight: 1.35, marginTop: 2 }}>
+                    {r.filter}
+                  </div>
+                </td>
+                <td className="num mono">
+                  {r.expected == null ? <span className="muted">pending</span> : fmtN(r.expected)}
+                </td>
+                <td className="num mono">{r.actual == null ? <span className="muted">—</span> : fmtN(r.actual)}</td>
+                <td className="num mono" style={{ color: r.status === "DRIFT" ? "var(--critical)" : "var(--ink-3)" }}>
+                  {r.delta == null ? "—" : `${r.delta > 0 ? "+" : "−"}${fmtN(Math.abs(r.delta))}`}
+                  {Number.isFinite(r.deltaPct) && r.status === "DRIFT" && (
+                    <span className="muted" style={{ fontSize: 10, marginLeft: 4 }}>({(r.deltaPct * 100).toFixed(1)}%)</span>
+                  )}
+                </td>
+                <td>
+                  <span className="badge" style={{ background: sm.color + "22", color: sm.color, borderColor: sm.color + "55", fontWeight: 600 }}>
+                    {sm.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--ink-3)" }}>
+        PENDING anchors await a bundled-baseline pin (Snell/Monarch channel ad totals, post-return-netted Amazon).
+        DRIFT means the bundled fact differs from the locked §2/§3 number — a data-baseline matter, not a UI bug.
+      </div>
+    </Card>
+  );
+};
 
 export default PageFinance;

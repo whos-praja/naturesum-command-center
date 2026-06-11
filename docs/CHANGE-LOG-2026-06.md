@@ -226,3 +226,66 @@ Full analysis: `docs/FIRST-PRINCIPLES-2026-06.md`. Summary:
 - Cascade "total runway = Infinity when WH residual velocity = 0 and a channel
   has 0 velocity" — defensible; optional redefinition pending (P2-4 — the Sim/
   RunwayTab still coerce that Infinity to 0d for true zero-demand SKUs).
+
+## Business module (pass 5) — Business Performance (2026-06)
+
+New module: genuine business visibility (sales, revenue, growth, ads, margins).
+Built against `docs/BUSINESS-MODULE-SPEC.md` (founder-approved 2026-06-11, the 11
+binding decisions). Verification record: `docs/VERIFICATION-BUSINESS-2026-06.md`.
+Channels (amazon · flipkart · blinkit · website) are a first-class dimension
+everywhere — adding one needs only a parser + a fee row, never a consumer edit.
+
+**Fact store + bundled baseline (twin discipline)**
+- `src/lib/businessStore.js` — durable AGGREGATED fact store under localStorage
+  `ns.businessPerf` (schemaVersion 1): `monthly["YYYY-MM|channel|CODE"]`
+  (authoritative units/grossRev/netRev/returns/adSpendDirect) + `daily[...]`
+  (shape/trend). `upsertFacts`/`clearSource` (exact inverse via a `meta.contrib`
+  snapshot) / `mergedFacts` (bundled baseline ⊕ uploads, uploaded wins per
+  key+source). Re-upload REPLACES same-key facts (idempotent — V3-proven).
+- `src/bundledBusinessData.js` — May-2026 baseline, baked by the offline twin
+  `scripts/build-business-data.cjs` from the raw `~/Downloads` files (same twin
+  pattern as centralWhEngine). Bakes Snell/Monarch channel ad totals + the FK
+  cashback note + the capped mcfShare into `meta.bySource`.
+- `src/lib/businessParsers.js` — fail-loud browser parsers (schema drift → throw,
+  never silent 0) reusing `uploadParsers.js` CODE_MAP + the binding ASIN map;
+  Blinkit keyed on Item Id with conservative fuzzy title fallback.
+
+**Cost inputs (no-sheet-next-time provision, spec §4/§5/§7)**
+- `src/lib/costInputs.js` — baked §4 COGS (14 cards, 2 ₹0-pkg placeholders flagged)
+  + §5 variable platform %s (the ONLY BusinessModel numbers used; deductions tab
+  used nowhere). `getCostCard`/`getFeePct`/`getMcfShare`/`getFixedCost` + setters
+  writing `ns.bizCost.*` localStorage overrides. Every figure carries as-of +
+  source. Website fee = blended mcf-web/website-direct via mcfShare; the May
+  mcfShare proxy overshoots 1.0 (652 MCF units > 610 net website units) so the
+  build caps it to [0,1] (share=1, blended fee 24.8011%, UI "⚠ capped 100%").
+
+**Engine (pure, NaN-free, spec §6)**
+- `src/lib/cmEngine.js` — `computeCM({ facts, month, costs?, adSpendOverride? })`
+  → `{ byChannel, bySku, matrix, company, adAllocation, coverage }`. CM1→CM4 per
+  channel × SKU; SKU×channel CM3 matrix (headline view); ad allocation =
+  direct + max(0, channelTotal − Σ direct) split by netRev share (totals from
+  param → localStorage → meta-derived Snell/Monarch → Σ direct). Absent COGS →
+  null CM (excluded from rollups, flagged in `coverage`), never 0. CM4 null until
+  a monthly fixed cost is set. Node self-test 17/17.
+
+**Pages (fabricated stub data DELETED, un-gated from preview/blur)**
+- `src/pages/PageFinance.jsx` — CM waterfall (channel + company), SKU×channel CM3
+  matrix, SKU economics cards, Cost Inputs panel, Coverage tab
+  (`src/components/BizCoveragePanel.jsx`), CM4 view (captioned "reporting view";
+  CM3 stays the decision layer), and the Verification panel. PageSales /
+  PageMarketing consume the same fact store.
+
+**Verification panel (permanent regression net, spec §10)**
+- `src/lib/businessVerification.js` — every §2/§3 May anchor as
+  `{ id, label, expected, filter, compute(facts) }`; `runVerification(facts)` →
+  MATCH/DRIFT(δ) per anchor against the live store. 15 anchors, all pinned
+  (`PENDING_ANCHORS` empty). Node self-test 19/19. Anchors change ONLY when a new
+  bundled baseline ships.
+
+**Gate result (2026-06-12):** `runVerification(BUNDLED_BUSINESS)` = 15/15 MATCH,
+0 DRIFT; engine 17/17 + verification 19/19 self-tests pass; build twin reproduces
+`bundledBusinessData.js` with zero git diff; zero NaN/Infinity across full engine
+output; `npm run build` clean. May headline: netRev ₹21,12,823 · CM1 ₹11,63,961
+(55.1%) · CM2 ₹6,45,619 (30.6%) · CM3 −₹48,283 (−2.3%) · CM4 hidden (no fixed
+cost set). See `docs/VERIFICATION-BUSINESS-2026-06.md` for the anchor table,
+hand-recomputed CM chains, durability proofs, and the 5 caveats.

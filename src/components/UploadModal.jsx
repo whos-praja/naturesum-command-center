@@ -24,6 +24,12 @@ import {
 import { detectFileType, checkAnomalies } from "../lib/claudeHelper.js";
 import { REAL_MARKETPLACE_DATA } from "../realMarketplaceData.js";
 import { CENTRAL_WH_DATA } from "../bundledCentralWHData.js";
+import { BUSINESS_FILE_TYPES, parseBusinessFile } from "../lib/businessParsers.js";
+import {
+  loadBusinessFacts,
+  upsertFacts,
+  clearSource,
+} from "../lib/businessStore.js";
 
 // Extract the slice of bundled real-data that matches a given file type —
 // used as the "before" baseline when Claude is asked to spot anomalies in
@@ -74,8 +80,48 @@ const fmtDate = (iso) => {
 };
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+// ── Business Performance upload zones (spec §8) ──────────────────────────────
+// These write to the durable AGGREGATED fact store (ns.businessPerf) via
+// businessStore.upsertFacts — a SEPARATE store from the inventory multiFile
+// snapshot above. The zone key IS the source tag (per the pinned contract), so
+// re-upload of the same source REPLACES same-key facts (idempotent: the store's
+// clearSource+contrib-snapshot guarantees parse-twice == parse-once). The list
+// is driven off BUSINESS_FILE_TYPES so the channel/zone set is never hardcoded.
+const BIZ_ZONES = Object.entries(BUSINESS_FILE_TYPES).map(([key, def]) => ({
+  key, label: def.label, channel: def.channel, parse: def.parse,
+})).filter((z) => z.label);
+
+// Month-scoped files have NO date column, so their parser takes opts.month
+// (defaults to 2026-05 in the parser). The rest derive month from row dates and
+// ignore the picker. We surface a month picker only where it actually matters.
+const BIZ_MONTH_SCOPED = new Set(["shopify-net", "ads-google", "ads-fk-pla", "snell-agency", "monarch-web"]);
+const DEFAULT_BIZ_MONTH = "2026-05";
+const ALL_BIZ_FORMATS = ".csv,.txt,.tsv,.xlsx,.xls";
+
+// Highest-severity DQ level in a flag list → drives the badge color. The
+// parsers always emit at least one info flag, so "info" is the floor.
+function dqWorst(dq) {
+  if (!Array.isArray(dq) || dq.length === 0) return "info";
+  if (dq.some((f) => f.level === "error")) return "error";
+  if (dq.some((f) => f.level === "warn")) return "warn";
+  return "info";
+}
+function dqCounts(dq) {
+  const c = { error: 0, warn: 0, info: 0 };
+  for (const f of dq || []) if (c[f.level] != null) c[f.level]++;
+  return c;
+}
+
 export function UploadModal({ onClose }) {
   const [store, setStore] = useState(() => loadMultiFile() || { uploadedAt: null, files: {} });
+  // Business fact-store snapshot — its own store (ns.businessPerf). We keep a
+  // tick to re-read meta.uploads after each business upload so provenance
+  // displays update without a reload.
+  const [bizStore, setBizStore] = useState(() => loadBusinessFacts());
+  const refreshBiz = () => setBizStore(loadBusinessFacts());
+  // Two sections: Inventory (multiFile snapshot) + Business Performance (fact
+  // store). Inventory is the historical default tab.
+  const [tab, setTab] = useState("inventory");
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -84,7 +130,7 @@ export function UploadModal({ onClose }) {
   }, [onClose]);
 
   const handleApplyAndClose = () => {
-    // Reload so data.js re-reads localStorage at init.
+    // Reload so data.js + the business module re-read localStorage at init.
     window.location.reload();
   };
   const handleClearAll = () => {
@@ -99,6 +145,24 @@ export function UploadModal({ onClose }) {
   // 'amazon-orders') still lingers in storage from an older upload.
   const zoneKeys = new Set(ZONES.map((z) => z.key));
   const filesCount = Object.keys(store?.files || {}).filter((k) => zoneKeys.has(k)).length;
+  // Business uploads recorded in the fact store's meta.uploads (set by
+  // upsertFacts). Only count tags that map to a CURRENT business zone.
+  const bizZoneKeys = new Set(BIZ_ZONES.map((z) => z.key));
+  const bizUploads = (bizStore?.meta?.uploads || []).filter((u) => bizZoneKeys.has(u.sourceTag));
+  const bizCount = new Set(bizUploads.map((u) => u.sourceTag)).size;
+
+  const footerCopy = (() => {
+    const parts = [];
+    if (filesCount > 0) parts.push(`${filesCount}/${ZONES.length} inventory sources`);
+    if (bizCount > 0) parts.push(`${bizCount}/${BIZ_ZONES.length} business sources`);
+    if (parts.length === 0) return "Nothing uploaded yet — dashboard is showing bundled real-data.";
+    const last = Math.max(
+      store?.uploadedAt ? new Date(store.uploadedAt).getTime() : 0,
+      ...bizUploads.map((u) => (u.at ? new Date(u.at).getTime() : 0)),
+    );
+    return `${parts.join(" · ")} uploaded · last updated ${last ? new Date(last).toLocaleString("en-IN") : "—"}`;
+  })();
+  const anyUploaded = filesCount > 0 || bizCount > 0;
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -107,36 +171,73 @@ export function UploadModal({ onClose }) {
           <div>
             <div className="modal-title">Upload data</div>
             <div className="modal-sub">
-              Drop daily exports per source. Each sales/marketplace file has its own date-cutoff (rows past it are ignored); the Central Warehouse workbook has none — it always uses the latest audit + post-audit movement. Apply &amp; reload to refresh the dashboard.
+              Drop exports per source. <strong>Inventory</strong> sources feed the warehouse / runway dashboard; <strong>Business Performance</strong> sources feed the Finance / Sales / Marketing margin engine. Apply &amp; reload to refresh.
             </div>
           </div>
           <button className="btn ghost icon" onClick={onClose} title="Close (Esc)">✕</button>
         </div>
 
-        <div className="modal-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {ZONES.map((zone) => (
-              <UploadZone
-                key={zone.key}
-                zone={zone}
-                entry={store.files?.[zone.key]}
-                onUpdate={(updated) => setStore(updated)}
-              />
-            ))}
-          </div>
+        <div style={{ display: "flex", gap: 4, padding: "0 18px", borderBottom: "1px solid var(--border-soft)" }}>
+          {[
+            { id: "inventory", label: `Inventory & Warehouse${filesCount ? ` · ${filesCount}` : ""}` },
+            { id: "business", label: `Business Performance${bizCount ? ` · ${bizCount}` : ""}` },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className="btn ghost sm"
+              style={{
+                borderRadius: 0,
+                borderBottom: tab === t.id ? "2px solid var(--brand, #3F7250)" : "2px solid transparent",
+                color: tab === t.id ? "var(--ink)" : "var(--ink-3)",
+                fontWeight: tab === t.id ? 600 : 500,
+                padding: "8px 10px",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="modal-body" style={{ maxHeight: "64vh", overflowY: "auto" }}>
+          {tab === "inventory" ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 2 }}>
+                Each sales/marketplace file has its own date-cutoff (rows past it are ignored); the Central Warehouse workbook has none — it always uses the latest audit + post-audit movement.
+              </div>
+              {ZONES.map((zone) => (
+                <UploadZone
+                  key={zone.key}
+                  zone={zone}
+                  entry={store.files?.[zone.key]}
+                  onUpdate={(updated) => setStore(updated)}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 2 }}>
+                Drop the monthly source exports. Each writes AGGREGATED facts (month×channel×SKU) to the durable business store — no raw rows kept. Re-uploading the same source REPLACES its prior facts (idempotent, never double-counted). Month-scoped files (Shopify net, Google/FK ads, Snell, Monarch) use the month picker; the rest read the date off each row.
+              </div>
+              {BIZ_ZONES.map((zone) => (
+                <BizUploadZone
+                  key={zone.key}
+                  zone={zone}
+                  upload={bizUploads.find((u) => u.sourceTag === zone.key) || null}
+                  onChange={refreshBiz}
+                />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="modal-foot">
-          <span className="muted" style={{ fontSize: 11.5 }}>
-            {filesCount > 0
-              ? `${filesCount} of ${ZONES.length} sources uploaded · last updated ${store.uploadedAt ? new Date(store.uploadedAt).toLocaleString("en-IN") : "—"}`
-              : "Nothing uploaded yet — dashboard is showing bundled real-data."}
-          </span>
+          <span className="muted" style={{ fontSize: 11.5 }}>{footerCopy}</span>
           <div style={{ display: "flex", gap: 8 }}>
             {filesCount > 0 && (
-              <button className="btn ghost" onClick={handleClearAll}>Clear all</button>
+              <button className="btn ghost" onClick={handleClearAll}>Clear inventory</button>
             )}
-            <button className="btn primary" onClick={handleApplyAndClose} disabled={filesCount === 0}>
+            <button className="btn primary" onClick={handleApplyAndClose} disabled={!anyUploaded}>
               Apply &amp; reload
             </button>
           </div>
@@ -425,6 +526,233 @@ function UploadZone({ zone, entry, onUpdate }) {
               <input
                 type="file"
                 accept={zone.accept}
+                onChange={handlePick}
+                style={{ display: "none" }}
+              />
+            </label>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── BizUploadZone — one Business Performance source (spec §8) ────────────────
+// Parses via businessParsers, upserts the resulting facts into the durable
+// business fact store under the zone key as the source tag, and renders the
+// data-quality flags + provenance. Re-uploading replaces the source's facts
+// (idempotent — the store snapshots each source's contribution so a second
+// parse subtracts the first exactly: parse-twice == parse-once).
+function BizUploadZone({ zone, upload, onChange }) {
+  const monthScoped = BIZ_MONTH_SCOPED.has(zone.key);
+  const [stage, setStage] = useState("idle"); // idle | parsing | error | uploaded
+  const [error, setError] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [month, setMonth] = useState(upload?.month || DEFAULT_BIZ_MONTH);
+  // DQ flags from the most recent parse this session. Persisted provenance lives
+  // in the store's meta.uploads (the `upload` prop) so a re-open still shows
+  // what's loaded; the rich DQ list is session-local (not stored, to respect the
+  // no-raw-rows localStorage budget).
+  const [dq, setDq] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  // A source is "loaded" if the store recorded an upload for it (survives
+  // re-open of the modal) OR we just parsed it this session.
+  const isLoaded = !!upload || stage === "uploaded";
+  const dqShown = dq || upload?.dqSample || null;
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setStage("parsing");
+    setError(null);
+    setDq(null);
+    let result;
+    try {
+      result = await parseBusinessFile(zone.key, file, monthScoped ? { month } : {});
+    } catch (e) {
+      setError(e?.message || String(e));
+      setStage("error");
+      return;
+    }
+    const flags = Array.isArray(result?.dq) ? result.dq : [];
+    setDq(flags);
+    // Idempotent upsert: clearSource is run inside upsertFacts, but we also call
+    // it defensively here so a parse that throws mid-way can't leave a partial
+    // contribution behind. The zone key IS the source tag (pinned contract).
+    try {
+      clearSource(zone.key);
+      upsertFacts(result.facts, zone.key, {
+        fileName: file.name,
+        month: monthScoped ? month : undefined,
+        baked: false,
+        dq: dqCounts(flags),
+        // A trimmed DQ sample so the modal can re-show severity after re-open
+        // without retaining the full list (budget-respecting provenance).
+        dqSample: flags.filter((f) => f.level !== "info").slice(0, 6),
+      });
+    } catch (e) {
+      setError("Stored facts but failed to persist: " + (e?.message || String(e)));
+      setStage("error");
+      return;
+    }
+    setStage("uploaded");
+    onChange?.();
+  };
+
+  const handleRemove = () => {
+    clearSource(zone.key);
+    setStage("idle");
+    setDq(null);
+    onChange?.();
+  };
+  const handleDrop = (e) => {
+    e.preventDefault(); setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  };
+  const handlePick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleFile(file);
+  };
+
+  const worst = dqShown ? dqWorst(dqShown) : null;
+  const counts = dqShown ? dqCounts(dqShown) : null;
+
+  const tint = stage === "error" ? "rgba(183,56,56,0.10)"
+             : isLoaded          ? "rgba(63,114,80,0.06)"
+             : dragging          ? "rgba(40,116,240,0.08)"
+             : "var(--bg-canvas)";
+  const border = stage === "error" ? "rgba(183,56,56,0.32)"
+               : isLoaded          ? "rgba(63,114,80,0.32)"
+               : dragging          ? "rgba(40,116,240,0.4)"
+               : "var(--border-soft)";
+  // Channel tag: "*" means the source feeds multiple channels (Snell).
+  const chTag = zone.channel === "*" ? "multi-channel" : zone.channel;
+
+  return (
+    <div style={{
+      border: `1px solid ${border}`,
+      background: tint,
+      borderRadius: 8,
+      padding: 12,
+      transition: "background 0.12s ease, border 0.12s ease",
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+            {zone.label}
+            <span style={{ marginLeft: 8, fontSize: 9.5, padding: "1px 5px", borderRadius: 3, background: "var(--bg-soft, rgba(0,0,0,0.05))", color: "var(--ink-3)", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {chTag}
+            </span>
+            {isLoaded && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(63,114,80,0.12)", color: "var(--success)", fontWeight: 700, letterSpacing: "0.04em" }}>
+                LOADED
+              </span>
+            )}
+            {worst === "error" && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(183,56,56,0.12)", color: "var(--critical, #B73838)", fontWeight: 700, letterSpacing: "0.04em" }}>
+                ⚠ {counts.error} ERROR{counts.error === 1 ? "" : "S"}
+              </span>
+            )}
+            {worst === "warn" && (
+              <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 5px", borderRadius: 3, background: "rgba(176,122,31,0.12)", color: "var(--warning)", fontWeight: 700, letterSpacing: "0.04em" }}>
+                ⚠ {counts.warn} FLAG{counts.warn === 1 ? "" : "S"}
+              </span>
+            )}
+          </div>
+
+          {isLoaded ? (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+              {upload?.fileName ? `${upload.fileName} · ` : ""}
+              {monthScoped ? `month ${upload?.month || month} · ` : ""}
+              {upload?.at ? `uploaded ${fmtDate(upload.at)}` : "loaded this session"}
+              {" · re-upload replaces (idempotent)"}
+            </div>
+          ) : (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+              Accepts {ALL_BIZ_FORMATS}
+            </div>
+          )}
+
+          {stage === "error" && (
+            <div style={{ fontSize: 11.5, color: "var(--critical)", marginTop: 4 }}>
+              ⚠ {error}
+            </div>
+          )}
+
+          {dqShown && dqShown.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <button
+                className="btn ghost sm"
+                onClick={() => setExpanded((v) => !v)}
+                style={{ fontSize: 10.5, padding: "2px 6px" }}
+              >
+                {expanded ? "Hide" : "Show"} data-quality flags
+                {counts && (counts.error || counts.warn)
+                  ? ` (${[counts.error && `${counts.error} error`, counts.warn && `${counts.warn} warn`].filter(Boolean).join(", ")})`
+                  : ""}
+              </button>
+              {expanded && (
+                <ul style={{
+                  listStyle: "none", margin: "6px 0 0", padding: "8px 10px",
+                  background: "rgba(0,0,0,0.025)",
+                  border: "1px solid var(--border-soft)",
+                  borderRadius: 6, fontSize: 11, color: "var(--ink-2)",
+                  display: "flex", flexDirection: "column", gap: 4,
+                  maxHeight: 160, overflowY: "auto",
+                }}>
+                  {dqShown.map((f, i) => (
+                    <li key={i}>
+                      <span style={{
+                        fontSize: 9, fontWeight: 700, marginRight: 6, letterSpacing: "0.04em",
+                        color: f.level === "error" ? "var(--critical, #B73838)"
+                             : f.level === "warn"  ? "var(--warning)"
+                             : "var(--ink-3)",
+                      }}>
+                        {String(f.level || "info").toUpperCase()}
+                      </span>
+                      {f.msg}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+          {monthScoped && (
+            <>
+              <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Month
+              </label>
+              <input
+                type="month"
+                value={month}
+                onChange={(e) => setMonth(e.target.value || DEFAULT_BIZ_MONTH)}
+                className="input sm"
+                style={{ width: 120, fontSize: 12, padding: "3px 6px" }}
+                title="This source has no per-row date; it is scoped to the month you pick."
+              />
+            </>
+          )}
+          {isLoaded ? (
+            <button className="btn ghost sm" onClick={handleRemove} title="Remove this source from the fact store">Remove</button>
+          ) : stage === "parsing" ? (
+            <span className="muted" style={{ fontSize: 11.5, padding: "0 8px" }}>Parsing…</span>
+          ) : (
+            <label
+              className="btn primary sm"
+              onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragOver={(e)  => { e.preventDefault(); }}
+              onDragLeave={()  => setDragging(false)}
+              onDrop={handleDrop}
+              style={{ cursor: "pointer" }}
+            >
+              {dragging ? "Drop file" : "Pick file"}
+              <input
+                type="file"
+                accept={ALL_BIZ_FORMATS}
                 onChange={handlePick}
                 style={{ display: "none" }}
               />

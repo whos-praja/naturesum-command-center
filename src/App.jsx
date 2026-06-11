@@ -55,7 +55,12 @@ const App = () => {
   }, [theme]);
 
   const D = NSData;
-  const isPreviewPage = active !== "inventory";
+  // Pages backed by REAL derived data (inventory + the rebuilt Business
+  // Performance pages) are never preview-blurred. Spec §9: "Un-gate these
+  // pages from preview/blur mode." Extensible — add a section id here as each
+  // page is rebuilt onto the live fact store.
+  const LIVE_DATA_PAGES = new Set(["inventory", "marketing", "finance", "sales"]);
+  const isPreviewPage = !LIVE_DATA_PAGES.has(active);
   const showPreviewUI = isPreviewPage && previewMode;
 
   // Navigation helper passed to Sidebar / page components
@@ -118,10 +123,11 @@ const App = () => {
             <span className="preview-pill">UI Preview</span>
             <span className="preview-text">
               <strong>{navLabel}</strong> is a design preview — the layout is final but the data is
-              static and the integrations aren’t wired up yet. Only <strong>Inventory</strong> is live.
+              static and the integrations aren’t wired up yet. <strong>Inventory</strong>,{" "}
+              <strong>Finance</strong>, <strong>Sales</strong> and <strong>Marketing</strong> run on live data.
             </span>
-            <button className="preview-cta" onClick={() => goTo("inventory")}>
-              Go to live module →
+            <button className="preview-cta" onClick={() => goTo("finance")}>
+              Go to a live module →
             </button>
           </div>
         )}

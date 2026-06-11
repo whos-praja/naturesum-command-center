@@ -138,7 +138,7 @@ function maxMoMGrowth(monthly) {
 
 const NSData = (function () {
   const fmtINR = (n) => {
-    if (n == null) return "—";
+    if (n == null || !Number.isFinite(n)) return "—"; // NaN/Infinity → em-dash, never "₹NaN"
     // Bug #9 — put the minus sign BEFORE the rupee glyph so negatives
     // render as "−₹0.2K" instead of the ugly "₹-0.2K". Use the typographic
     // minus (U+2212) to match the Delta component's convention.
