@@ -311,13 +311,20 @@ const NSData = (function () {
     if (Number.isFinite(_bomStockIndex[ref])) return _bomStockIndex[ref];
     return 0;
   }
-  // D1 non-constraining set (cartons + juice air pouches) — read from whichever
-  // engine payload won (uploaded workbook over bundled). SAFE FALLBACK to the
-  // known set so the flag is correct even if the payload omits `nonConstraining`.
+  // D1 non-constraining set (outer cartons only — founder pass-4 correction:
+  // juice air pouches DO constrain) — read from whichever engine payload won
+  // (uploaded workbook over bundled). SAFE FALLBACK to the known set so the
+  // flag is correct even if the payload omits `nonConstraining`.
   const NON_CONSTRAINING = new Set(
     (Array.isArray(CWH_SRC?.nonConstraining) && CWH_SRC.nonConstraining.length)
       ? CWH_SRC.nonConstraining
-      : ["NSPKGCB100", "NSPKGCB250", "NSPKGJB300", "NSPKGJB500"]
+      : ["NSPKGCB100", "NSPKGCB250"]
+  );
+  // Pass 4 — BOM refs with NO audit line anywhere: stock is UNKNOWN, not zero.
+  // Excluded from producible binding + M3 allocation (phantom-zero guard) and
+  // labelled "untracked" in the UI. Today: juice glass bottles + labels.
+  const UNTRACKED = new Set(
+    Array.isArray(CWH_SRC?.untrackedComponents) ? CWH_SRC.untrackedComponents : []
   );
 
   // Per-SKU recipe — kind (raw/semi), the input item, and packaging components.
@@ -706,6 +713,7 @@ const NSData = (function () {
         capacity: rawCap,                                    // real pack-equivalent
         capacityReal: rawCap,
         constrains,                                          // D1 — UI filters on this
+        untracked: UNTRACKED.has(ref),                       // no audit line — stock unknown ≠ 0
         leadTime: mkLead(ref),
       };
       if (recipe.kind === "semi") sfg = inputRow;
@@ -726,6 +734,7 @@ const NSData = (function () {
         capacity:     rawCap,                                // real pack-equivalent
         capacityReal: rawCap,
         constrains,                                          // D1 — UI filters on this
+        untracked:    UNTRACKED.has(p.refCode),              // no audit line — stock unknown ≠ 0
         leadTime:     mkLead(p.refCode),
       };
     });
@@ -745,7 +754,8 @@ const NSData = (function () {
       producibleFG = 0;
       bindingComponent = null;
     } else {
-      const constrainingRows = [sfg, rm, ...pkgList].filter(r => r && r.constrains);
+      // Untracked rows excluded — unknown stock can't bind (phantom-zero guard).
+      const constrainingRows = [sfg, rm, ...pkgList].filter(r => r && r.constrains && !r.untracked);
       const caps = constrainingRows.map(r => r.capacityReal);
       producibleFG = caps.length ? Math.max(0, Math.min(...caps)) : 0;
       if (!isFinite(producibleFG)) producibleFG = 0;
@@ -1203,7 +1213,8 @@ const NSData = (function () {
       const wb = s.warehouseBreakdown || {};
       const rows = [wb.inputs?.sfg, wb.inputs?.rm, ...(wb.inputs?.pkg || [])].filter(Boolean);
       for (const r of rows) {
-        if (!r.constrains) continue;                          // cartons / air pouches never bind
+        if (!r.constrains) continue;                          // outer cartons never bind
+        if (r.untracked) continue;                            // unknown stock can't bind (phantom-zero guard)
         const perPack = r.perPack ?? r.unitsPerPack ?? 0;
         if (!(perPack > 0)) continue;
         (consumers[r.refCode] ||= []).push({ code: s.code, perPack });
@@ -1559,12 +1570,23 @@ const NSData = (function () {
           // draining → daysCover null → no reorder pressure.
           const salesCons = componentSalesConsumption[c.ref];
           const consumption = Number.isFinite(salesCons) ? Math.max(0, salesCons) : 0;
-          const daysCover = consumption > 0 ? Math.round(stock / consumption) : null;
+          // Pass 4 — untracked (no audit line): stock is UNKNOWN, not zero. No
+          // cover / reorder pressure can be derived; surfaced as "untracked" in
+          // the UI + DQ flags so the founder adds an audit row.
+          const untracked = c.untracked === true || UNTRACKED.has(c.ref);
+          const daysCover = !untracked && consumption > 0 ? Math.round(stock / consumption) : null;
           // D6: reorder when sales-based cover < own lead time. Kept for ALL
           // components incl. non-constraining (you still reorder cartons).
           const reorder = daysCover != null && leadDays != null && daysCover < leadDays;
           const reorderByDays = (daysCover != null && leadDays != null)
             ? daysCover - leadDays
+            : null;
+          // Suggested order quantity — how much to order NOW to hold cover
+          // through one replenishment cycle + a 30-day buffer at the current
+          // sales-based consumption: ceil(consumption × (lead + 30) − stock),
+          // floored at 0. null when not draining / untracked (no basis).
+          const suggestedQty = (!untracked && consumption > 0 && leadDays != null)
+            ? Math.max(0, Math.ceil(consumption * (leadDays + 30) - stock))
             : null;
           const constrains = c.constrains !== false;   // D1 flag
           // Which SKUs does this CONSTRAINING component block? A SKU where this
@@ -1594,6 +1616,8 @@ const NSData = (function () {
             leadDays,
             reorder,
             reorderByDays,
+            suggestedQty,                  // order now to cover lead + 30d buffer
+            untracked,                     // no audit line — stock unknown ≠ 0
             // Reorder date (ISO, as-of + reorderByDays). null when no signal or
             // as-of is unknown. Negative reorderByDays → a past date (overdue).
             reorderDate: (reorderByDays != null && asOf)

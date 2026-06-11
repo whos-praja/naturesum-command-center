@@ -208,8 +208,8 @@ export const FORMULA_REFERENCE = [
   {
     id: "producibleFG",
     name: "Producible FG (BOM cap)",
-    expression: "producibleFG = min over CONSTRAINING components of floor(ALLOCATED component qty / units-per-pack)\n  CONSTRAINING = all BOM components EXCEPT the easily-arranged set (cartons NSPKGCB100/250, juice air pouches NSPKGJB300/500)\n  shared input → allocated by demand share = (SKU velocity × per-pack) ÷ Σ across consuming SKUs",
-    plain: "The slowest GENUINE constraint (raw/SFG input or a real packaging component) caps how many additional FG packs we could pack today. Each capacity = floor(component qty / units-per-pack). Cartons and juice air-pouches are EXCLUDED (D1) — they're quickly arranged, so they never cap producible or become the bottleneck. Old stock does not count. M3 — when an input is SHARED across SKUs (e.g. Moringa raw feeds both 100 g and 250 g), its stock is ALLOCATED across them by demand share before the cap, so the per-SKU producibles are realistic and don't double-claim the same pool (no more '1000 + 400 from 100 kg'). Shared rows are marked 'shared' in the Materials breakdown with the allocated capacity.",
+    expression: "producibleFG = min over CONSTRAINING TRACKED components of floor(ALLOCATED component qty / units-per-pack)\n  CONSTRAINING = all BOM components EXCEPT outer shipping cartons (NSPKGCB100/250) — juice air pouches DO constrain (founder pass-4)\n  UNTRACKED (no audit line) = stock unknown ≠ 0 → flagged, never binds\n  shared input → allocated by demand share = (SKU velocity × per-pack) ÷ Σ across consuming SKUs",
+    plain: "The slowest GENUINE constraint (raw/SFG input or a real packaging component) caps how many additional FG packs we could pack today. Each capacity = floor(component qty / units-per-pack). Outer shipping cartons are EXCLUDED (D1, quickly arranged); juice AIR POUCHES now CONSTRAIN (founder pass-4 — real packing components with tracked stock). UNTRACKED components (no audit line — e.g. juice glass bottles/labels) have UNKNOWN stock, not zero: they are flagged and excluded from binding so they can never phantom-zero a SKU. Old stock does not count. M3 — when an input is SHARED across SKUs (e.g. Moringa raw feeds both 100 g and 250 g), its stock is ALLOCATED across them by demand share before the cap, so the per-SKU producibles are realistic and don't double-claim the same pool (no more '1000 + 400 from 100 kg'). Shared rows are marked 'shared' in the Materials breakdown with the allocated capacity.",
     where: "src/data.js · warehouseBreakdown.producibleFG (M3 constrained allocation)",
   },
   {
@@ -343,8 +343,8 @@ export const FORMULA_REFERENCE = [
   {
     id: "simBottleneck",
     name: "Producible FG bottleneck",
-    expression: "bottleneck = argmin over CONSTRAINING components of floor(component qty / units-per-pack)\n  CONSTRAINING excludes cartons (NSPKGCB100/250) and juice air pouches (NSPKGJB300/500)",
-    plain: "Which GENUINE input or packaging component runs out first when packing more FG. That component caps Producible FG — fix it and you unblock more units. Cartons and juice air-pouches are excluded (D1, easily arranged) so they can never show up as the bottleneck.",
+    expression: "bottleneck = argmin over CONSTRAINING TRACKED components of floor(component qty / units-per-pack)\n  CONSTRAINING excludes outer cartons (NSPKGCB100/250); juice air pouches DO constrain (founder pass-4); UNTRACKED components never bind",
+    plain: "Which GENUINE input or packaging component runs out first when packing more FG. That component caps Producible FG — fix it and you unblock more units. Outer cartons are excluded (D1, easily arranged); juice air pouches count (founder pass-4). Untracked components (no audit line) have unknown stock — flagged, never the bottleneck.",
     where: "src/pages/PageInventory.jsx · SimulatorTab · bottleneck",
   },
   {

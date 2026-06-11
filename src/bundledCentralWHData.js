@@ -20,9 +20,13 @@ export const CENTRAL_WH_DATA = {
   },
   "nonConstraining": [
     "NSPKGCB100",
-    "NSPKGCB250",
-    "NSPKGJB300",
-    "NSPKGJB500"
+    "NSPKGCB250"
+  ],
+  "untrackedComponents": [
+    "NSPKGJBOT300",
+    "NSPKGJLBL300",
+    "NSPKGJBOT500",
+    "NSPKGJLBL500"
   ],
   "fg": {
     "NSMP100": {
@@ -42,21 +46,24 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.1,
           "stock": 100,
           "cap": 1000,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGMP100",
           "perPack": 1,
           "stock": 2935,
           "cap": 2935,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGCB100",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": false
+          "constrains": false,
+          "untracked": false
         }
       ],
       "sales30": 7.167,
@@ -89,21 +96,24 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.25,
           "stock": 100,
           "cap": 400,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGMP250",
           "perPack": 1,
           "stock": 2934,
           "cap": 2934,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGCB250",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": false
+          "constrains": false,
+          "untracked": false
         }
       ],
       "sales30": 6.9,
@@ -135,14 +145,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.1,
           "stock": 910.7,
           "cap": 9107,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGSBP100",
           "perPack": 1,
           "stock": 651,
           "cap": 651,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 23.367,
@@ -177,14 +189,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.25,
           "stock": 910.7,
           "cap": 3642,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGSBP250",
           "perPack": 1,
           "stock": 670,
           "cap": 670,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 43.4,
@@ -219,14 +233,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.5,
           "stock": 910.7,
           "cap": 1821,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGSBP500",
           "perPack": 1,
           "stock": 113,
           "cap": 113,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 27.3,
@@ -261,14 +277,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGDBP100",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 3.867,
@@ -302,14 +320,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.25,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGDBP250",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 4.467,
@@ -344,14 +364,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.5,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGDBP500",
           "perPack": 1,
           "stock": 1200,
           "cap": 1200,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": -1.033,
@@ -385,35 +407,40 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.3,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJBOT300",
           "perPack": 1,
-          "stock": 1826,
-          "cap": 1826,
-          "constrains": true
+          "stock": 0,
+          "cap": 0,
+          "constrains": true,
+          "untracked": true
         },
         {
           "ref": "NSPKGJB300",
           "perPack": 1,
-          "stock": 0,
-          "cap": 0,
-          "constrains": false
+          "stock": 910,
+          "cap": 910,
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJTUB300",
           "perPack": 1,
-          "stock": 0,
-          "cap": 0,
-          "constrains": true
+          "stock": 1826,
+          "cap": 1826,
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJLBL300",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": true
         }
       ],
       "sales30": 10.567,
@@ -446,35 +473,40 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.5,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJBOT500",
           "perPack": 1,
-          "stock": 2022,
-          "cap": 2022,
-          "constrains": true
+          "stock": 0,
+          "cap": 0,
+          "constrains": true,
+          "untracked": true
         },
         {
           "ref": "NSPKGJB500",
           "perPack": 1,
-          "stock": 0,
-          "cap": 0,
-          "constrains": false
+          "stock": 1000,
+          "cap": 1000,
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJTUB500",
           "perPack": 1,
-          "stock": 0,
-          "cap": 0,
-          "constrains": true
+          "stock": 2022,
+          "cap": 2022,
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJLBL500",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": true
         }
       ],
       "sales30": 24.967,
@@ -507,35 +539,40 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.015,
           "stock": 5.6,
           "cap": 373,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOBT15",
           "perPack": 1,
           "stock": 375,
           "cap": 375,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOB15",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOCAP",
           "perPack": 1,
           "stock": 1503,
           "cap": 1503,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBODROP",
           "perPack": 1,
           "stock": 876,
           "cap": 876,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 0.167,
@@ -569,35 +606,40 @@ export const CENTRAL_WH_DATA = {
           "perPack": 0.03,
           "stock": 5.6,
           "cap": 186,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOBT30",
           "perPack": 1,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOB30",
           "perPack": 1,
           "stock": 86,
           "cap": 86,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBOCAP",
           "perPack": 1,
           "stock": 1503,
           "cap": 1503,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGBODROP",
           "perPack": 1,
           "stock": 876,
           "cap": 876,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 0,
@@ -630,14 +672,16 @@ export const CENTRAL_WH_DATA = {
           "perPack": 1,
           "stock": 96,
           "cap": 96,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGJOB100",
           "perPack": 1,
           "stock": 177,
           "cap": 177,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 2.667,
@@ -671,21 +715,24 @@ export const CENTRAL_WH_DATA = {
           "perPack": 30,
           "stock": 0,
           "cap": 0,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGACTC30",
           "perPack": 30,
           "stock": 37550,
           "cap": 1251,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         },
         {
           "ref": "NSPKGACTCBOX",
           "perPack": 1,
           "stock": 2507,
           "cap": 2507,
-          "constrains": true
+          "constrains": true,
+          "untracked": false
         }
       ],
       "sales30": 1.733,
@@ -717,6 +764,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 41,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSMP100",
         "NSMP250"
@@ -734,6 +782,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 34,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSB100",
         "NSSB250",
@@ -752,6 +801,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBDB100",
         "NSSBDB250",
@@ -770,6 +820,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBJ300",
         "NSSBJ500"
@@ -787,6 +838,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 2236,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSJOF100": {
@@ -801,6 +853,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 36,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSJO100"
       ]
@@ -817,6 +870,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSACDT30"
       ]
@@ -833,6 +887,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 410,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGMP250": {
@@ -847,6 +902,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 425,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGCB100": {
@@ -861,6 +917,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": false,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGCB250": {
@@ -875,6 +932,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": false,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGSBP100": {
@@ -889,6 +947,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 28,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSB100"
       ]
@@ -905,6 +964,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 15,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSB250"
       ]
@@ -921,6 +981,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 4,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSB500"
       ]
@@ -937,6 +998,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBDB100"
       ]
@@ -953,6 +1015,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBDB250"
       ]
@@ -969,11 +1032,42 @@ export const CENTRAL_WH_DATA = {
       "daysCover": null,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGJBOT300": {
       "ref": "NSPKGJBOT300",
       "name": "Juice Bottle 300 ml",
+      "type": "PKG",
+      "unit": "Pcs",
+      "leadDays": 14,
+      "stock": 0,
+      "oldStock": 0,
+      "consumption": 10.567,
+      "daysCover": null,
+      "reorder": false,
+      "constrains": true,
+      "untracked": true,
+      "blocks": []
+    },
+    "NSPKGJB300": {
+      "ref": "NSPKGJB300",
+      "name": "Small Air Pouch 300 ml",
+      "type": "PKG",
+      "unit": "Pcs",
+      "leadDays": 14,
+      "stock": 910,
+      "oldStock": 0,
+      "consumption": 10.567,
+      "daysCover": 86,
+      "reorder": false,
+      "constrains": true,
+      "untracked": false,
+      "blocks": []
+    },
+    "NSPKGJTUB300": {
+      "ref": "NSPKGJTUB300",
+      "name": "Juice Tube 300 ml",
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
@@ -983,37 +1077,8 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 173,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
-    },
-    "NSPKGJB300": {
-      "ref": "NSPKGJB300",
-      "name": "Small Air Pouch 300 ml",
-      "type": "PKG",
-      "unit": "Pcs",
-      "leadDays": 14,
-      "stock": 0,
-      "oldStock": 0,
-      "consumption": 10.567,
-      "daysCover": 0,
-      "reorder": true,
-      "constrains": false,
-      "blocks": []
-    },
-    "NSPKGJTUB300": {
-      "ref": "NSPKGJTUB300",
-      "name": "Juice Tube 300 ml",
-      "type": "PKG",
-      "unit": "Pcs",
-      "leadDays": 14,
-      "stock": 0,
-      "oldStock": 0,
-      "consumption": 10.567,
-      "daysCover": 0,
-      "reorder": true,
-      "constrains": true,
-      "blocks": [
-        "NSSBJ300"
-      ]
     },
     "NSPKGJLBL300": {
       "ref": "NSPKGJLBL300",
@@ -1024,16 +1089,47 @@ export const CENTRAL_WH_DATA = {
       "stock": 0,
       "oldStock": 0,
       "consumption": 10.567,
-      "daysCover": 0,
-      "reorder": true,
+      "daysCover": null,
+      "reorder": false,
       "constrains": true,
-      "blocks": [
-        "NSSBJ300"
-      ]
+      "untracked": true,
+      "blocks": []
     },
     "NSPKGJBOT500": {
       "ref": "NSPKGJBOT500",
       "name": "Juice Bottle 500 ml",
+      "type": "PKG",
+      "unit": "Pcs",
+      "leadDays": 14,
+      "stock": 0,
+      "oldStock": 0,
+      "consumption": 24.967,
+      "daysCover": null,
+      "reorder": false,
+      "constrains": true,
+      "untracked": true,
+      "blocks": []
+    },
+    "NSPKGJB500": {
+      "ref": "NSPKGJB500",
+      "name": "Large Air Pouch 500 ml",
+      "type": "PKG",
+      "unit": "Pcs",
+      "leadDays": 14,
+      "stock": 1000,
+      "oldStock": 0,
+      "consumption": 24.967,
+      "daysCover": 40,
+      "reorder": false,
+      "constrains": true,
+      "untracked": false,
+      "blocks": [
+        "NSSBJ500"
+      ]
+    },
+    "NSPKGJTUB500": {
+      "ref": "NSPKGJTUB500",
+      "name": "Juice Tube 500 ml",
       "type": "PKG",
       "unit": "Pcs",
       "leadDays": 14,
@@ -1043,37 +1139,8 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 81,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
-    },
-    "NSPKGJB500": {
-      "ref": "NSPKGJB500",
-      "name": "Large Air Pouch 500 ml",
-      "type": "PKG",
-      "unit": "Pcs",
-      "leadDays": 14,
-      "stock": 0,
-      "oldStock": 0,
-      "consumption": 24.967,
-      "daysCover": 0,
-      "reorder": true,
-      "constrains": false,
-      "blocks": []
-    },
-    "NSPKGJTUB500": {
-      "ref": "NSPKGJTUB500",
-      "name": "Juice Tube 500 ml",
-      "type": "PKG",
-      "unit": "Pcs",
-      "leadDays": 14,
-      "stock": 0,
-      "oldStock": 0,
-      "consumption": 24.967,
-      "daysCover": 0,
-      "reorder": true,
-      "constrains": true,
-      "blocks": [
-        "NSSBJ500"
-      ]
     },
     "NSPKGJLBL500": {
       "ref": "NSPKGJLBL500",
@@ -1084,12 +1151,11 @@ export const CENTRAL_WH_DATA = {
       "stock": 0,
       "oldStock": 0,
       "consumption": 24.967,
-      "daysCover": 0,
-      "reorder": true,
+      "daysCover": null,
+      "reorder": false,
       "constrains": true,
-      "blocks": [
-        "NSSBJ500"
-      ]
+      "untracked": true,
+      "blocks": []
     },
     "NSPKGBOBT15": {
       "ref": "NSPKGBOBT15",
@@ -1103,6 +1169,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 2246,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGBOB15": {
@@ -1117,6 +1184,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 0,
       "reorder": true,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBBO15"
       ]
@@ -1133,6 +1201,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": null,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": [
         "NSSBBO30"
       ]
@@ -1149,6 +1218,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": null,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGBOCAP": {
@@ -1163,6 +1233,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 9000,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGBODROP": {
@@ -1177,6 +1248,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 5246,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGJOB100": {
@@ -1191,6 +1263,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 66,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGACTC30": {
@@ -1205,6 +1278,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 722,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     },
     "NSPKGACTCBOX": {
@@ -1219,6 +1293,7 @@ export const CENTRAL_WH_DATA = {
       "daysCover": 1447,
       "reorder": false,
       "constrains": true,
+      "untracked": false,
       "blocks": []
     }
   },
@@ -1421,18 +1496,6 @@ export const CENTRAL_WH_DATA = {
       "section": "PKG"
     },
     {
-      "name": "Air pouches (300ML)",
-      "qty": 910,
-      "unit": "pcs",
-      "section": "PKG"
-    },
-    {
-      "name": "Air pouches (500ML)",
-      "qty": 1000,
-      "unit": "pcs",
-      "section": "PKG"
-    },
-    {
       "name": "Golden stickers (Powder)",
       "qty": 22,
       "unit": "Sheets",
@@ -1464,21 +1527,17 @@ export const CENTRAL_WH_DATA = {
     }
   ],
   "flags": {
-    "unmappedNames": 1,
-    "unmappedComponents": 27,
+    "unmappedNames": 0,
+    "unmappedComponents": 25,
     "unparsedQuantities": 0,
     "manualReview": 0,
     "negativeStock": 1,
-    "bomGaps": 5,
-    "duplicateComponentRows": 1,
+    "bomGaps": 4,
+    "duplicateComponentRows": 2,
+    "fuzzyMatched": 1,
     "offlineMarketingSpike": 0,
     "detail": {
-      "unmapped_names": [
-        {
-          "source": "production",
-          "name": "AC Tea Pouches(Green, Filled)"
-        }
-      ],
+      "unmapped_names": [],
       "unmapped_components": [
         {
           "section": "SFG",
@@ -1602,18 +1661,6 @@ export const CENTRAL_WH_DATA = {
         },
         {
           "section": "PKG",
-          "name": "Air pouches (300ML)",
-          "raw": "910",
-          "bucket": "consumable"
-        },
-        {
-          "section": "PKG",
-          "name": "Air pouches (500ML)",
-          "raw": "1000",
-          "bucket": "consumable"
-        },
-        {
-          "section": "PKG",
           "name": "Golden stickers (Powder)",
           "raw": "22",
           "bucket": "consumable"
@@ -1653,24 +1700,20 @@ export const CENTRAL_WH_DATA = {
       ],
       "bom_gaps": [
         {
-          "ref": "NSPKGJB300",
-          "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
-        },
-        {
-          "ref": "NSPKGJTUB300",
-          "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
+          "ref": "NSPKGJBOT300",
+          "note": "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row"
         },
         {
           "ref": "NSPKGJLBL300",
-          "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
+          "note": "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row"
         },
         {
-          "ref": "NSPKGJTUB500",
-          "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
+          "ref": "NSPKGJBOT500",
+          "note": "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row"
         },
         {
           "ref": "NSPKGJLBL500",
-          "note": "no clean audit line — set to 0, founder must confirm juice packaging map"
+          "note": "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row"
         }
       ],
       "duplicate_component_rows": [
@@ -1688,6 +1731,30 @@ export const CENTRAL_WH_DATA = {
               "qty": 2.8
             }
           ]
+        },
+        {
+          "ref": "NSPKGJB500",
+          "rows": [
+            {
+              "section": "PKG",
+              "name": "Large Air pouch for juice(500 ml)",
+              "qty": 0
+            },
+            {
+              "section": "PKG",
+              "name": "Air pouches (500ML)",
+              "qty": 1000
+            }
+          ]
+        }
+      ],
+      "fuzzy_matched": [
+        {
+          "source": "production-sfg",
+          "name": "AC Tea Pouches(Green, Filled)",
+          "matchedKey": "acacia tea pouches green, filled",
+          "ref": "NSACDSF30",
+          "score": 0.8
         }
       ],
       "offline_marketing_spike": [],

@@ -189,10 +189,39 @@ clean. It found **4 surface/consistency gaps**; 3 fixed, 1 deferred to founder:
   behaviour was reversed: old-stock-selling SKUs now count their old stock as
   cover and fire reorder normally (see corrected M4 above).
 
+## Pass 4 (2026-06) — founder spot-checks + first-principles hardening
+
+Full analysis: `docs/FIRST-PRINCIPLES-2026-06.md`. Summary:
+- **Juice tubes ≠ bottles**: `"Juice containers (Package)"` audit rows (1826/
+  2022) re-aliased to the TUBE refs; glass bottles have no audit line → now
+  UNTRACKED, not phantom-zero.
+- **Juice air pouches now count**: `"Air pouches (300ML)/(500ML)"` (910/1000)
+  aliased + `NSPKGJB300/500` removed from NON_CONSTRAINING (founder: real
+  packing components, not air-wrap). Only outer cartons remain non-constraining.
+- **UNTRACKED rule (phantom-zero guard, generalised)**: any BOM ref with no
+  audit line = stock UNKNOWN ≠ 0 → flagged, labelled "untracked" in UI,
+  excluded from producible/bottleneck/worst-cover/M3/Simulator binding.
+- **R-FUZZY name robustness**: digit-unit splitting in `norm()` ("100gm" ≡
+  "100 g") + conservative fuzzy alias fallback (numeric tokens exact, Dice
+  ≥ 0.8, unambiguous) across audit/production/daily-movement (engine twins)
+  AND agency column headers (parser twins). Every hit FLAGGED in the DQ panel;
+  unknown names still flag unmapped. Synthetic altered-names test passes; real
+  workbook byte-identical. Immediately fixed a real miss: Production's
+  "AC Tea Pouches(Green, Filled)" now maps → Acacia SFG production counted.
+- **Blinkit cell velocity** (founder): Unified Stock Blinkit cell now shows the
+  full meta row (days-cover, vel/d max(30,15), MoM) like other channels.
+- **Reorder horizons in months/years** (founder): "Sep 14 · in ~3.1 mo" across
+  Runway risk cards, materials table, Suppliers component tab.
+- **Component suggested order qty** (Suppliers): ceil(consumption × (lead+30d)
+  − stock) — e.g. juice pulp → order 1,343 Ltr.
+- DQ panel: new "Fuzzy name matches" + "Duplicate component rows" sections;
+  BOM gaps relabelled "Untracked components".
+- Headline numbers unchanged (expected): ₹72,48,755 · 3r/5a/6g · 3 reorders.
+
 ## Still open / maintenance
 - Engine twins (`centralWhEngine.js` + `build-central-wh.cjs`) are duplicate
-  logic — keep in sync.
-- Juice air pouch treated as non-constraining (air-wrap) — flag if that's wrong.
+  logic — keep in sync. (Agency parser twins too: `uploadParsers.js` ↔
+  `build-bundled-agency.cjs`.)
 - Component inbound/PO sheet not yet modelled (deplete-only) — add when ready.
 - Cascade "total runway = Infinity when WH residual velocity = 0 and a channel
   has 0 velocity" — defensible; optional redefinition pending (P2-4 — the Sim/

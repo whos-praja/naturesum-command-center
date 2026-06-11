@@ -981,6 +981,17 @@ const FlipkartDrillModal = ({ sku, onClose }) => {
   );
 };
 
+// ── fmtDur — human duration for a day count (founder pass-4: action-needed
+//    dates should also read in months/years, not just a calendar date) ──────
+//    <30d → "Nd" · <365d → "X.X mo" · ≥365d → "X.X yr"
+const fmtDur = (days) => {
+  if (days == null || !Number.isFinite(days)) return null;
+  const d = Math.abs(Math.round(days));
+  if (d < 30) return `${d}d`;
+  if (d < 365) return `${(d / 30).toFixed(1).replace(/\.0$/, "")} mo`;
+  return `${(d / 365).toFixed(1).replace(/\.0$/, "")} yr`;
+};
+
 // ── PlatformCell — one channel's stock + runway + velocity + growth stack ──
 // Used inside the Unified Stock table for every location column. Renders:
 //   1. Units on hand (hero) — with an optional inline breakdown caption to
@@ -1508,6 +1519,29 @@ const UnifiedStockTab = ({ inventory }) => {
                       <div className="pf-cell-units-row">
                         <div className="pf-cell-units mono">{D.fmtN(s.stock.blinkit)}</div>
                       </div>
+                      {/* Daily SALES velocity + days-of-cover + MoM (max(30,15) —
+                          D5), mirroring the other channel cells' meta row; was
+                          missing from the Blinkit cell (founder pass-4). */}
+                      {(() => {
+                        const bv = s.channelVelocity?.blinkit;
+                        const bg = s.channelGrowth?.blinkit;
+                        if ((bv == null || bv === 0) && bg == null) return null;
+                        const hasVel = bv != null && bv > 0;
+                        const days = hasVel ? Math.round((s.stock.blinkit || 0) / bv) : null;
+                        const tier = days == null ? "" : days < 14 ? " crit" : days < 30 ? " warn" : "";
+                        return (
+                          <div className="pf-cell-meta">
+                            {hasVel && <span className={"pf-cell-runway" + tier}>{days}d</span>}
+                            {bv != null && bv < 0 && (
+                              <span className="pf-cell-runway crit" title="Net returns — more units coming back than selling">net returns</span>
+                            )}
+                            {bv != null && bv !== 0 && (
+                              <span className="pf-cell-vel mono" title="Blinkit daily sales velocity · max(30d, 15d) window">{Math.abs(bv).toFixed(1)}/d</span>
+                            )}
+                            {bg != null && <span className="pf-cell-growth"><Delta value={bg} hideArrow/></span>}
+                          </div>
+                        );
+                      })()}
                       <BlinkitFeederStats
                         feeders={s.blinkitFeeders}
                         sku={s}
@@ -1573,16 +1607,19 @@ const MaterialsTab = ({ inventory }) => {
     // D1 — only CONSTRAINING components can be the bottleneck (cartons + juice
     // air pouches carry constrains:false and are excluded; the engine already
     // does the same for producibleFG).
-    const inputCap = (inputObj && inputObj.constrains !== false) ? (inputObj.capacity ?? Infinity) : Infinity;
+    // Pass 4: untracked rows (no audit line — stock UNKNOWN, not zero) are
+    // excluded alongside non-constraining, mirroring the headline producible.
+    const bindable = (r) => r && r.constrains !== false && !r.untracked;
+    const inputCap = bindable(inputObj) ? (inputObj.capacity ?? Infinity) : Infinity;
     const pkgList  = wb.inputs?.pkg || [];
-    const conPkg   = pkgList.filter(p => p.constrains !== false);
+    const conPkg   = pkgList.filter(bindable);
     const pkgMinCap = conPkg.length ? Math.min(...conPkg.map(p => p.capacity)) : Infinity;
     let bottleneck = "—";
-    if (inputObj && inputObj.constrains !== false && inputCap <= pkgMinCap) {
+    if (bindable(inputObj) && inputCap <= pkgMinCap) {
       bottleneck = wb.kind === "semi" ? "SFG" : "RM";
     } else if (conPkg.length) {
       // Identify which specific PKG component is the binding constraint
-      const minIdx = pkgList.findIndex(p => p.constrains !== false && p.capacity === pkgMinCap);
+      const minIdx = pkgList.findIndex(p => bindable(p) && p.capacity === pkgMinCap);
       bottleneck = `PKG${minIdx + 1}`;
     }
     const maxInput = Math.max(wb.fg, wb.semiFg, wb.rawMaterial, wb.packaging, 1);
@@ -1730,9 +1767,9 @@ const MaterialsTab = ({ inventory }) => {
                           // Bottleneck pkg row = whichever CONSTRAINING pkg has the
                           // lowest capacity (D1: cartons/air pouches excluded) AND is
                           // the binding constraint overall (PKG bottleneck on this SKU)
-                          const conCaps = s.wb.inputs.pkg.filter(x => x.constrains !== false).map(x => x.capacity);
+                          const conCaps = s.wb.inputs.pkg.filter(x => x.constrains !== false && !x.untracked).map(x => x.capacity);
                           const minCap = conCaps.length ? Math.min(...conCaps) : Infinity;
-                          const isMinPkg = bnPack && p.constrains !== false && p.capacity === minCap;
+                          const isMinPkg = bnPack && p.constrains !== false && !p.untracked && p.capacity === minCap;
                           // D1 — carton / juice air pouch: quickly arranged, excluded
                           // from producible + bottleneck. Show no runway chip (a
                           // runway here would imply it caps output) and flag it.
@@ -1912,7 +1949,12 @@ const ComponentReorderSection = ({ components, asOf }) => {
                     </span>
                     {overdue && (
                       <span className="mono" style={{ fontSize: 9.5, fontWeight: 600, color: "var(--critical)" }}>
-                        overdue {Math.abs(c.reorderByDays)}d
+                        overdue {fmtDur(c.reorderByDays)}
+                      </span>
+                    )}
+                    {!overdue && c.reorderByDays != null && c.reorderByDays > 14 && (
+                      <span className="mono muted" style={{ fontSize: 9.5 }}>
+                        in ~{fmtDur(c.reorderByDays)}
                       </span>
                     )}
                   </div>
@@ -2200,7 +2242,10 @@ const SkuBreakdownModal = ({ sku, onClose }) => {
           </div>
         </div>
         <div className="wb-row-value mono">
-          {isNA ? <span className="muted">N/A</span> : <>{D.fmtN(value)} <span className="wb-row-unit muted">{isFG ? "Pcs" : data.unit}</span></>}
+          {isNA ? <span className="muted">N/A</span>
+            : data?.untracked
+              ? <span className="muted" title="No line for this component in the audit sheet — stock is UNKNOWN (not zero). Excluded from producible binding; add an audit row to track it.">untracked</span>
+              : <>{D.fmtN(value)} <span className="wb-row-unit muted">{isFG ? "Pcs" : data.unit}</span></>}
           {isFG && wb.oldStock > 0 && (
             <div className="muted" style={{ fontSize: 10, fontWeight: 400, marginTop: 1 }}>
               {D.fmtN(wb.fg)} new + {D.fmtN(wb.oldStock)} old
@@ -2597,9 +2642,11 @@ const SimulatorTab = ({ inventory }) => {
         qty:          p.qty,
         unitsPerPack: p.unitsPerPack,
         leadTime:     p.leadTime ?? s.leadTime ?? 21,
-        // D1 — carton/juice-air-pouch carry constrains:false so the simulator's
+        // D1 — outer cartons carry constrains:false so the simulator's
         // producible math excludes them (mirrors the engine + base tool).
         constrains:   p.constrains !== false,
+        // Pass 4 — untracked (no audit line): excluded from sim producible too.
+        untracked:    p.untracked === true,
       })),
       // Lead times
       leadAmzInbound: MP_INBOUND_LEAD_DEFAULT.amazonFBA,
@@ -2672,8 +2719,11 @@ const SimulatorTab = ({ inventory }) => {
   // D1: cartons + juice air pouches (constrains:false) are excluded — they're
   // quickly arranged and must never cap producible (mirrors the engine).
   const inputPackEq = sim.inputPerPack > 0 ? Math.floor(sim.inputQty / sim.inputPerPack) : 0;
+  // Pass 4: untracked components (no audit line — stock UNKNOWN) excluded,
+  // mirroring the headline; otherwise a 0-qty untracked bottle row would
+  // zero the sim producible that the headline correctly doesn't zero.
   const pkgCaps = sim.pkg
-    .filter(p => p.constrains !== false)
+    .filter(p => p.constrains !== false && !p.untracked)
     .map(p => p.unitsPerPack > 0 ? Math.floor(p.qty / p.unitsPerPack) : 0);
   const producibleFg = pkgCaps.length
     ? Math.min(inputPackEq, ...pkgCaps)
@@ -3388,13 +3438,16 @@ const RunwayTab = ({ inventory: rawInventory }) => {
   // Filter for the main table
   const visible = inventory.filter(s => statusFilter === "all" || s.adjStatus === statusFilter);
 
+  // Pass 4 (founder): long horizons read as months/years alongside the date —
+  // "Sep 14 · in ~3.1 mo" is actionable; a bare calendar date isn't.
   const fmtReorderDate = (rb) => {
-    if (rb.daysFromNow < 0) return `Overdue by ${Math.abs(rb.daysFromNow)}d`;
+    if (rb.daysFromNow < 0) return `Overdue by ${fmtDur(rb.daysFromNow)}`;
     if (rb.daysFromNow === 0) return "Today";
     if (rb.daysFromNow === 1) return "Tomorrow";
     if (rb.daysFromNow <= 14) return `In ${rb.daysFromNow}d`;
     const opts = { month: "short", day: "numeric" };
-    return rb.date.toLocaleDateString("en-US", opts);
+    const date = rb.date.toLocaleDateString("en-US", opts);
+    return `${date} · in ~${fmtDur(rb.daysFromNow)}`;
   };
 
   return (

@@ -46,7 +46,7 @@ const FIXED_ASSET_NAMES = new Set([
   "picking equipment", "empty drums", "ac unit", "laptop",
   "tsc label printer", "2d wireless barcode scanner", "tables", "benches",
   "office chairs", "thermal inkjet printer", "steel racks",
-].map(s => s)); // already lowercase / no punctuation → norm() lands here
+].map(s => norm(s))); // normalized through norm() so its rules (digit-unit split etc.) can never desync
 
 // ─── §2a — Finished-good SKUs ───────────────────────────────────
 const SKUS = [
@@ -127,17 +127,19 @@ const BOM = {
 
 // ─── D1 — NON-CONSTRAINING components ────────────────────────────
 // Founder decision (FIX-SPEC D1): these BOM components are quickly/easily
-// arranged (outer cartons + protective juice "air pouches") and must NEVER be
-// the producible bottleneck. They are still LISTED per-SKU for display (with a
+// arranged (outer shipping cartons) and must NEVER be the producible
+// bottleneck. They are still LISTED per-SKU for display (with a
 // constrains:false flag) but are excluded from the producible min + binding.
 //   NSPKGCB100 / NSPKGCB250 — Moringa shipping carton boxes.
-//   NSPKGJB300 / NSPKGJB500 — juice air pouches (protective air-wrap).
+// FOUNDER CORRECTION (2026-06 pass 4): juice AIR POUCHES (NSPKGJB300/JB500)
+// DO constrain — they are real packing components with tracked audit stock
+// ("Air pouches (300ML)" / "(500ML)"), not generic air-wrap. Removed from this
+// set. The generic "Juice air wrap" consumable stays excluded (unmapped).
 // Everything else in a BOM (raw materials, primary pouches, bottles, SFG,
-// droppers/caps, outer product boxes, juice tube/label) STAYS constraining.
-// Exported (FIX-SPEC D1: "one exported NON_CONSTRAINING set") so data.js / UI
-// can label these components consistently.
+// droppers/caps, outer product boxes, juice tube/label/air pouch) STAYS
+// constraining. Exported (FIX-SPEC D1) so data.js / UI label consistently.
 export const NON_CONSTRAINING = new Set([
-  "NSPKGCB100", "NSPKGCB250", "NSPKGJB300", "NSPKGJB500",
+  "NSPKGCB100", "NSPKGCB250",
 ]);
 
 // ─── §2d — Normaliser + alias maps ──────────────────────────────
@@ -146,7 +148,11 @@ function norm(s) {
   let x = String(s).toLowerCase();
   // remove . ( ) and the listed words
   x = x.replace(/[.()]/g, " ");
-  x = x.replace(/\b(pure|packed|gm|gram|grams)\b/g, " ");
+  // Pass 4 (R-FUZZY): split glued digit-unit tokens so "100gm" == "100 gm" ==
+  // "100g" and "300ML" == "300 ml" — unit-suffix spelling must never decide a
+  // match. (g/gm/gram/grams collapse to nothing below; ml/ltr stay.)
+  x = x.replace(/(\d)([a-z])/g, "$1 $2");
+  x = x.replace(/\b(pure|packed|g|gm|gram|grams)\b/g, " ");
   x = x.replace(/\s+/g, " ").trim();
   return x;
 }
@@ -218,11 +224,70 @@ const COMPONENT_ALIASES_RAW = {
   "sb powder empty pouches (500 gram)":         "NSPKGSBP500",
   "sb powder empty pouches (250 gram)":         "NSPKGSBP250",
   "sb powder empty pouches (100 gram)":         "NSPKGSBP100",
-  "juice containers (package) 300ml":           "NSPKGJBOT300",
-  "juice containers (package) 500ml":           "NSPKGJBOT500",
+  // FOUNDER CORRECTION (pass 4): "Juice containers (Package)" rows are the
+  // juice TUBES (outer cylindrical container the bottle ships in), NOT the
+  // glass bottles — they were misread as bottles. The glass bottles have no
+  // packaging audit line (they appear filled under SEMI-FINISHED) → JBOT
+  // refs are UNTRACKED, never phantom-zero-bound.
+  "juice containers (package) 300ml":           "NSPKGJTUB300",
+  "juice containers (package) 500ml":           "NSPKGJTUB500",
+  // Juice AIR POUCHES — real packing components with tracked stock
+  // ("Air pouches (300ML)" 910 / "(500ML)" 1000). The 0-stock "Large Air
+  // pouch for juice(500 ml)" row maps to the same ref (duplicate flag fires).
+  "air pouches (300ml)":                        "NSPKGJB300",
+  "air pouches (500ml)":                        "NSPKGJB500",
   "large air pouch for juice (500 ml)":         "NSPKGJB500",
 };
 const COMPONENT_ALIASES = Object.fromEntries(Object.entries(COMPONENT_ALIASES_RAW).map(([k, v]) => [norm(k), v]));
+
+// ─── R-FUZZY — tolerant alias resolution (pass 4) ────────────────
+// The warehouse team renames items slightly between audits ("Pouches" →
+// "Pouch", "SB" → "Sea Buckthorn", word reorder). An exact-normalized miss
+// used to silently drop the row to unmapped/consumable. Now: after an exact
+// miss we try a conservative fuzzy match on stemmed word tokens —
+//   - NUMERIC tokens must match EXACTLY (300 can never match 500; a size
+//     change is a different item, not a typo),
+//   - Dice similarity ≥ 0.8 on the stemmed token sets,
+//   - unambiguous (best beats runner-up by ≥ 0.08).
+// Every fuzzy hit is FLAGGED (flags.fuzzy_matched) so the founder can audit
+// the guess — tolerant, but never silent.
+function stemTok(t) {
+  if (/\d/.test(t)) return t;                       // never stem sizes/units like "300ml"
+  if (t.length > 3 && t.endsWith("es")) return t.slice(0, -2);
+  if (t.length > 3 && t.endsWith("s") && !t.endsWith("ss")) return t.slice(0, -1);
+  return t;
+}
+function tokSet(s) { return new Set(norm(s).split(" ").filter(Boolean).map(stemTok)); }
+function numSig(s) { return (String(s).match(/\d+/g) || []).sort().join(","); }
+function fuzzyResolve(nm, table) {
+  const A = tokSet(nm), an = numSig(nm);
+  let bestKey = null, best = 0, second = 0;
+  for (const k of Object.keys(table)) {
+    if (numSig(k) !== an) continue;                 // sizes must match exactly
+    const B = tokSet(k);
+    let inter = 0;
+    for (const t of A) if (B.has(t)) inter++;
+    const score = (2 * inter) / (A.size + B.size);
+    if (score > best) { second = best; best = score; bestKey = k; }
+    else if (score > second) second = score;
+  }
+  if (bestKey && best >= 0.8 && best - second >= 0.08) {
+    return { key: bestKey, ref: table[bestKey], score: Math.round(best * 100) / 100 };
+  }
+  return null;
+}
+// Exact-first lookup; fuzzy fallback is flagged. `source` names the sheet/loop
+// for the DQ panel.
+function resolveAlias(nm, table, flags, source, rawName) {
+  const exact = table[nm];
+  if (exact) return exact;
+  const fz = fuzzyResolve(nm, table);
+  if (fz) {
+    flags.fuzzy_matched.push({ source, name: String(rawName ?? nm), matchedKey: fz.key, ref: fz.ref, score: fz.score });
+    return fz.ref;
+  }
+  return undefined;
+}
 
 // ─── §4 — Quantity cleaner ──────────────────────────────────────
 function cleanQty(raw) {
@@ -440,7 +505,7 @@ function parseAudit(wb, state) {
     const nm = norm(base);
 
     if (section === "FG") {
-      const code = FG_ALIASES[nm];
+      const code = resolveAlias(nm, FG_ALIASES, flags, "audit-FG", bRaw);
       if (!code) { flags.unmapped_names.push({ source: "audit-FG", name: bRaw }); continue; }
       // FK-shipment FG → counts as fresh central-WH FG (founder: team will
       // move it into FG; Daily Movement deducts it when it actually ships).
@@ -450,7 +515,8 @@ function parseAudit(wb, state) {
     }
 
     // SFG / RM / PKG — classify into BOM component | fixed asset | consumable.
-    const ref = COMPONENT_ALIASES[nm];
+    // R-FUZZY: exact alias first, conservative fuzzy fallback (flagged).
+    const ref = resolveAlias(nm, COMPONENT_ALIASES, flags, `audit-${section}`, bRaw);
     if (ref) {
       // Track every audit row mapping to this ref → FLAG duplicate lines (same
       // material under two sections) instead of silently summing (mirror CJS).
@@ -517,10 +583,11 @@ function parseProduction(wb, state) {
     const itemRaw = row[0];
     if (!itemRaw || itemRaw === "·") continue;
     const nm = norm(itemRaw);
-    let code = FG_ALIASES[nm];
+    // R-FUZZY: exact alias first, conservative fuzzy fallback (flagged).
+    let code = resolveAlias(nm, FG_ALIASES, flags, "production", itemRaw);
     let isSfg = false;
     if (!code) {
-      code = SFG_PRODUCTION_ALIASES[nm];
+      code = resolveAlias(nm, SFG_PRODUCTION_ALIASES, flags, "production-sfg", itemRaw);
       isSfg = !!code;
     }
     if (!code) { flags.unmapped_names.push({ source: "production", name: String(itemRaw) }); continue; }
@@ -563,7 +630,8 @@ function parseDailyMovement(wb, state) {
       const row = grid[i + j];
       if (!row || !row[0]) continue;
       const nm = norm(row[0]);
-      const code = FG_ALIASES[nm];
+      // R-FUZZY: exact alias first, conservative fuzzy fallback (flagged).
+      const code = resolveAlias(nm, FG_ALIASES, flags, "daily-mvmt", row[0]);
       if (!code) { flags.unmapped_names.push({ source: "daily-mvmt", name: String(row[0]) }); continue; }
       // Stock-Out: B..G = cols 1..6  | Stock-In: H..M = cols 7..12
       // Channels order: Amazon, Flipkart, Blinkit, Website, Offline, Marketing
@@ -642,12 +710,15 @@ function computeMetrics(state, balance, asOf) {
     // never cap producible nor become the binding component.
     let producible = Infinity, binding = null, bindingMissing = false;
     const bomDetail = [];
+    const untrackedSet = state.untrackedComponents || new Set();
     for (const [ref, perPack] of (BOM[code] || [])) {
       const cs = Math.max(0, balance[ref] || 0);                 // D3: old already folded into balance via audit_open; clamp ≥0
       const cap = perPack > 0 ? Math.floor(cs / perPack) : Infinity;
       const constrains = !NON_CONSTRAINING.has(ref);
-      bomDetail.push({ ref, perPack, stock: cs, cap: Number.isFinite(cap) ? cap : null, constrains });
+      const untracked = untrackedSet.has(ref);                   // no audit line — stock UNKNOWN, not zero
+      bomDetail.push({ ref, perPack, stock: cs, cap: Number.isFinite(cap) ? cap : null, constrains, untracked });
       if (!constrains) continue;                                 // never the bottleneck
+      if (untracked) continue;                                   // phantom-zero guard: unknown can't bind
       if (cap < producible) { producible = cap; binding = ref; bindingMissing = cs === 0 && !(ref in openingComp); }
     }
     if (producible === Infinity) producible = 0;                 // SAFE: no constraining component → 0
@@ -736,6 +807,7 @@ function computeMetrics(state, balance, asOf) {
     let worstComp = null, worstCover = Infinity;
     for (const [ref, perPack] of (BOM[code] || [])) {
       if (NON_CONSTRAINING.has(ref)) continue;
+      if (untrackedSet.has(ref)) continue;   // unknown stock can't drive worst-cover
       const cs = Math.max(0, balance[ref] || 0);
       // Rough consumption velocity: this SKU's sales velocity × perPack (other SKUs not yet folded — done in component pass)
       const vel = sales30 > 0 ? sales30 * perPack : 0;
@@ -795,11 +867,14 @@ function computeMetrics(state, balance, asOf) {
     // components incl. non-constraining (you still reorder cartons) — but a
     // non-constraining component can NEVER block production (D1), so it is
     // excluded from `blocks`.
-    const reorder = daysCover != null && daysCover < c.leadDays;
+    const untracked = (state.untrackedComponents || new Set()).has(c.ref);
+    // Untracked (no audit line) → stock is UNKNOWN, not zero: no cover, no
+    // reorder pressure, no blocking — flagged for the founder to add a row.
+    const reorder = !untracked && daysCover != null && daysCover < c.leadDays;
     const constrains = !NON_CONSTRAINING.has(c.ref);            // D1 flag
     // Which SKUs does this block? Only CONSTRAINING components block: a SKU
     // where this is the binding component OR cover < sku.leadDays.
-    if (constrains) {
+    if (constrains && !untracked) {
       for (const fg of fgRows) {
         const recipe = BOM[fg.code] || [];
         const usesIt = recipe.some(([r]) => r === c.ref);
@@ -812,7 +887,9 @@ function computeMetrics(state, balance, asOf) {
     compRows.push({
       ref: c.ref, name: c.name, type: c.type, unit: c.unit, leadDays: c.leadDays,
       stock, oldStock: Math.max(0, oldComp[c.ref] || 0),
-      consumption: +consumption.toFixed(3), daysCover, reorder, constrains, blocks,
+      consumption: +consumption.toFixed(3),
+      daysCover: untracked ? null : daysCover,
+      reorder, constrains, untracked, blocks,
     });
   }
 
@@ -870,12 +947,14 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
       negative_stock: [],
       bom_gaps: [],
       duplicate_component_rows: [],   // same material under two audit sections
+      fuzzy_matched: [],              // R-FUZZY: tolerant alias hits (audited, never silent)
       offline_marketing_spike: [],   // founder: flag unusual offline/marketing outflow
       notes: [],
     },
     ledger: [],
     newFG, oldFG, newComp, oldComp,
     compRowOccurrences: {},          // ref → [{ section, name, qty }] (duplicate-row flag)
+    untrackedComponents: new Set(),  // BOM refs with NO audit line (stock unknown ≠ 0)
     fixedAssets: [],
     consumables: [],
     // Back-compat aliases the metric code reads from (mirror the CJS twin).
@@ -895,14 +974,30 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
     if (e.date.getTime() > asOf.getTime()) asOf = e.date;
   }
 
+  // UNTRACKED BOM components (pass 4 — generalises the old hardcoded
+  // knownGaps list): any BOM ref with NO audit line at all (neither new nor
+  // old). Per the phantom-zero rule (the original Moringa-pouch OOS bug),
+  // "no data" ≠ "zero": untracked components are flagged + EXCLUDED from the
+  // producible binding rather than binding everything to 0. Today: the juice
+  // GLASS BOTTLES (JBOT300/500 — they only appear filled under SEMI-FINISHED)
+  // and juice LABELS (JLBL300/500). Tubes + air pouches are now tracked.
+  // MUST run BEFORE computeMetrics (the binding exclusion reads this set).
+  {
+    const seen = new Set();
+    for (const code of Object.keys(BOM)) {
+      for (const [ref] of BOM[code]) {
+        if (seen.has(ref)) continue;
+        seen.add(ref);
+        if (!(ref in state.openingComp) && !(ref in state.oldComp)) {
+          state.untrackedComponents.add(ref);
+          state.flags.bom_gaps.push({ ref, note: "no audit line — stock UNKNOWN (not zero); excluded from producible binding, founder to add an audit row" });
+        }
+      }
+    }
+  }
+
   const balance = computeBalances(state);
   const { fgRows, compRows } = computeMetrics(state, balance, asOf);
-
-  // Known BOM gaps per spec.
-  const knownGaps = ["NSPKGJB300","NSPKGJTUB300","NSPKGJLBL300","NSPKGJTUB500","NSPKGJLBL500"];
-  for (const ref of knownGaps) {
-    if (!(ref in state.openingComp)) state.flags.bom_gaps.push({ ref, note: "no clean audit line — set to 0, founder must confirm juice packaging map" });
-  }
 
   // Offline / Marketing spike flag (founder): offline + marketing outflow is
   // deliberately EXCLUDED from velocity/runway, but the WH FG count still
@@ -926,6 +1021,10 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
     // juice air pouches). Mirrors NON_CONSTRAINING; emitted so data.js / the UI
     // can label them consistently (same shape as bundledCentralWHData.js).
     nonConstraining: [...NON_CONSTRAINING],
+    // Pass 4 — BOM refs with NO audit line anywhere (stock UNKNOWN, not zero).
+    // data.js excludes these from producible binding + M3 allocation and the
+    // UI labels them "untracked" instead of a phantom 0.
+    untrackedComponents: [...state.untrackedComponents],
     fg: fgOut,
     components: compOut,
     // Non-BOM audit lines, split per founder's request:
@@ -941,6 +1040,7 @@ export async function parseCentralWhWorkbook(file, opts = {}) { // eslint-disabl
       negativeStock: state.flags.negative_stock.length,
       bomGaps: state.flags.bom_gaps.length,
       duplicateComponentRows: state.flags.duplicate_component_rows.length,
+      fuzzyMatched: state.flags.fuzzy_matched.length,
       offlineMarketingSpike: state.flags.offline_marketing_spike.length,
       detail: state.flags,
     },

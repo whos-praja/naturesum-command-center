@@ -71,15 +71,46 @@ function normalizeAgencyName(s) {
 }
 
 // "Jatamansi Oil*4" → { code: NSJO100, multiplier: 4 }; single → multiplier 1.
+// R-FUZZY (pass 4, mirror of uploadParsers.js) — conservative fuzzy fallback
+// for slightly-altered column names. Numeric tokens must match exactly;
+// Dice >= 0.8; unambiguous. Hits are logged to the console (offline twin).
+function agStem(t) {
+  if (/\d/.test(t)) return t;
+  if (t.length > 3 && t.endsWith("es")) return t.slice(0, -2);
+  if (t.length > 3 && t.endsWith("s") && !t.endsWith("ss")) return t.slice(0, -1);
+  return t;
+}
+function agTokSet(x) { return new Set(normalizeAgencyName(x).split(" ").filter(Boolean).map(agStem)); }
+function agNumSig(x) { return (String(x).match(/\d+/g) || []).sort().join(","); }
+function fuzzyAgencyCode(name) {
+  const A = agTokSet(name), an = agNumSig(name);
+  let bestKey = null, best = 0, second = 0;
+  for (const k of Object.keys(AGENCY_NAME_MAP)) {
+    if (agNumSig(k) !== an) continue;
+    const B = agTokSet(k);
+    let inter = 0;
+    for (const t of A) if (B.has(t)) inter++;
+    const score = (2 * inter) / (A.size + B.size);
+    if (score > best) { second = best; best = score; bestKey = k; }
+    else if (score > second) second = score;
+  }
+  if (bestKey && best >= 0.8 && best - second >= 0.08) {
+    console.warn(`  [fuzzy] "${name}" -> ${AGENCY_NAME_MAP[bestKey]} (via "${bestKey}", ${Math.round(best * 100)}%)`);
+    return AGENCY_NAME_MAP[bestKey];
+  }
+  return undefined;
+}
+function agencyCodeFor(name) { return AGENCY_NAME_MAP[name] ?? fuzzyAgencyCode(name); }
+
 function mapAgencyColumnToCode(header) {
   const norm = normalizeAgencyName(header);
   if (!norm || norm === "total") return null;
   const m = norm.match(/^(.+?)\s*\*\s*(\d+)$/);
   if (m) {
-    const code = AGENCY_NAME_MAP[m[1].trim()];
+    const code = agencyCodeFor(m[1].trim());
     return code ? { code, multiplier: parseInt(m[2], 10) || 1 } : null;
   }
-  const code = AGENCY_NAME_MAP[norm];
+  const code = agencyCodeFor(norm);
   return code ? { code, multiplier: 1 } : null;
 }
 

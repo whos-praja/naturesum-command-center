@@ -224,9 +224,16 @@ function componentReorderCount(D) {
 // Negative ⇒ overdue. SAFE: null in → "—".
 function fmtReorderWhen(byDays, isoDate) {
   if (byDays == null || !Number.isFinite(byDays)) return { text: "—", tone: "muted" };
-  if (byDays < 0)  return { text: `Overdue ${Math.abs(byDays)}d${isoDate ? ` · was ${isoDate}` : ""}`, tone: "red" };
+  // Pass 4 (founder): long horizons read as months/years, not a bare day count.
+  const dur = (d) => {
+    const a = Math.abs(Math.round(d));
+    if (a < 30) return `${a}d`;
+    if (a < 365) return `${(a / 30).toFixed(1).replace(/\.0$/, "")} mo`;
+    return `${(a / 365).toFixed(1).replace(/\.0$/, "")} yr`;
+  };
+  if (byDays < 0)  return { text: `Overdue ${dur(byDays)}${isoDate ? ` · was ${isoDate}` : ""}`, tone: "red" };
   if (byDays === 0) return { text: `Order today${isoDate ? ` · ${isoDate}` : ""}`, tone: "red" };
-  return { text: `In ${byDays}d${isoDate ? ` · ${isoDate}` : ""}`, tone: byDays <= 7 ? "amber" : "ok" };
+  return { text: `In ~${dur(byDays)}${isoDate ? ` · ${isoDate}` : ""}`, tone: byDays <= 7 ? "amber" : "ok" };
 }
 
 const TYPE_LABEL = { RM: "Raw material", SFG: "Semi-FG", PKG: "Packaging" };
@@ -272,6 +279,7 @@ function ComponentReorderTab({ D }) {
             <th className="num">Consumption/d</th>
             <th className="num">Days cover</th>
             <th className="num">Lead time</th>
+            <th className="num" title="Order this much now to hold cover through one replenishment cycle + a 30-day buffer at the current sales-based consumption: ceil(consumption × (lead + 30) − stock)">Suggested qty</th>
             <th>Reorder</th>
             <th>Blocks</th>
           </tr>
@@ -296,7 +304,11 @@ function ComponentReorderTab({ D }) {
                   </div>
                 </td>
                 <td className="muted" style={{ fontSize: 11.5 }}>{TYPE_LABEL[c.type] || c.type || "—"}</td>
-                <td className="num">{fmtN(c.stock)}{c.unit ? <span className="muted"> {c.unit}</span> : null}</td>
+                <td className="num">
+                  {c.untracked
+                    ? <span className="muted" title="No line for this component in the audit sheet — stock is UNKNOWN (not zero). Add an audit row to track it.">untracked</span>
+                    : <>{fmtN(c.stock)}{c.unit ? <span className="muted"> {c.unit}</span> : null}</>}
+                </td>
                 <td className="num muted">{Number.isFinite(c.consumption) ? fmtN(c.consumption) : "—"}</td>
                 <td className="num">
                   <span className={coverTone ? coverTone : undefined}>
@@ -304,6 +316,11 @@ function ComponentReorderTab({ D }) {
                   </span>
                 </td>
                 <td className="num">{Number.isFinite(c.leadDays) ? `${c.leadDays} d` : "—"}</td>
+                <td className="num">
+                  {Number.isFinite(c.suggestedQty) && c.suggestedQty > 0
+                    ? <strong>{fmtN(c.suggestedQty)}{c.unit ? <span className="muted" style={{ fontWeight: 400 }}> {c.unit}</span> : null}</strong>
+                    : <span className="muted">{c.untracked ? "—" : "covered"}</span>}
+                </td>
                 <td>
                   {c.reorder
                     ? <span className={"badge " + (when.tone === "red" ? "red" : "amber") + " dot"}>{when.text}</span>
@@ -404,12 +421,38 @@ const FLAG_CATEGORIES = [
   },
   {
     key: "bom_gaps", summaryKey: "bomGaps",
-    label: "BOM gaps",
-    hint: "Bill-of-material refs with no clean audit line — producible may be understated.",
+    label: "Untracked components (BOM gaps)",
+    hint: "Bill-of-material refs with NO audit line — stock is UNKNOWN (not zero). Excluded from producible binding so they can't phantom-zero a SKU; add an audit row to track them.",
     render: (r, i) => (
       <div key={i} style={FLAG_ROW_STYLE}>
         <span className="mono">{r?.ref ?? "—"}</span>
         <span className="muted" style={{ fontSize: 10.5 }}>{r?.note ?? ""}</span>
+      </div>
+    ),
+  },
+  {
+    key: "fuzzy_matched", summaryKey: "fuzzyMatched",
+    label: "Fuzzy name matches",
+    hint: "Sheet names that didn't match an alias exactly but were close enough to map confidently (sizes must match exactly; similarity ≥ 0.8, unambiguous). Verify each guess — if one is wrong, fix the sheet name or tell the tool.",
+    render: (r, i) => (
+      <div key={i} style={FLAG_ROW_STYLE}>
+        <span>“{r?.name ?? "—"}”</span>
+        <span className="muted" style={{ fontSize: 10.5 }}>
+          → <span className="mono">{r?.ref ?? "?"}</span>{r?.score != null ? ` · ${Math.round(r.score * 100)}%` : ""}{r?.source ? ` · ${r.source}` : ""}
+        </span>
+      </div>
+    ),
+  },
+  {
+    key: "duplicate_component_rows", summaryKey: "duplicateComponentRows",
+    label: "Duplicate component rows",
+    hint: "The same material appears on two audit lines (e.g. under two sections). The tool SUMS them — verify that's physically right and not a double-count.",
+    render: (r, i) => (
+      <div key={i} style={FLAG_ROW_STYLE}>
+        <span className="mono">{r?.ref ?? "—"}</span>
+        <span className="muted" style={{ fontSize: 10.5 }}>
+          {Array.isArray(r?.rows) ? r.rows.map(x => `${x.name} (${x.qty})`).join("  +  ") : ""}
+        </span>
       </div>
     ),
   },

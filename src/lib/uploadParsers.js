@@ -343,6 +343,44 @@ function normalizeAgencyName(s) {
     .trim();
 }
 
+// R-FUZZY (pass 4, mirror of centralWhEngine) — the agency renames columns
+// slightly between exports ("Berries" → "Berry", word reorder). Exact match
+// first; then a conservative fuzzy on stemmed word tokens: NUMERIC tokens must
+// match EXACTLY (100g never matches 250g), Dice ≥ 0.8, unambiguous (margin
+// ≥ 0.08). Hits are recorded in `fuzzyAgencyMatches` so callers can surface
+// them — tolerant, never silent.
+const fuzzyAgencyMatches = [];
+function agStem(t) {
+  if (/\d/.test(t)) return t;
+  if (t.length > 3 && t.endsWith("es")) return t.slice(0, -2);
+  if (t.length > 3 && t.endsWith("s") && !t.endsWith("ss")) return t.slice(0, -1);
+  return t;
+}
+function agTokSet(s) { return new Set(normalizeAgencyName(s).split(" ").filter(Boolean).map(agStem)); }
+function agNumSig(s) { return (String(s).match(/\d+/g) || []).sort().join(","); }
+function fuzzyAgencyCode(name) {
+  const A = agTokSet(name), an = agNumSig(name);
+  let bestKey = null, best = 0, second = 0;
+  for (const k of Object.keys(AGENCY_NAME_MAP)) {
+    if (agNumSig(k) !== an) continue;
+    const B = agTokSet(k);
+    let inter = 0;
+    for (const t of A) if (B.has(t)) inter++;
+    const score = (2 * inter) / (A.size + B.size);
+    if (score > best) { second = best; best = score; bestKey = k; }
+    else if (score > second) second = score;
+  }
+  if (bestKey && best >= 0.8 && best - second >= 0.08) {
+    const ref = AGENCY_NAME_MAP[bestKey];
+    fuzzyAgencyMatches.push({ name: String(name), matchedKey: bestKey, ref, score: Math.round(best * 100) / 100 });
+    return ref;
+  }
+  return undefined;
+}
+function agencyCodeFor(name) {
+  return AGENCY_NAME_MAP[name] ?? fuzzyAgencyCode(name);
+}
+
 // Multi-pack columns: "Jatamansi Oil*4" → { code: NSJO100, multiplier: 4 }.
 // Singles: "Jatamansi Oil" → { code: NSJO100, multiplier: 1 }.
 // Unmapped or "total" → null.
@@ -351,10 +389,10 @@ function mapAgencyColumnToCode(header) {
   if (!norm || norm === "total") return null;
   const m = norm.match(/^(.+?)\s*\*\s*(\d+)$/);
   if (m) {
-    const code = AGENCY_NAME_MAP[m[1].trim()];
+    const code = agencyCodeFor(m[1].trim());
     return code ? { code, multiplier: parseInt(m[2], 10) || 1 } : null;
   }
-  const code = AGENCY_NAME_MAP[norm];
+  const code = agencyCodeFor(norm);
   return code ? { code, multiplier: 1 } : null;
 }
 
@@ -487,6 +525,8 @@ function processAgencyDailyLogTab(ws, channel, byCode, cutoff = null) {
 
 export async function parseAgencyChannelSales(file, opts = {}) {
   const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+  // R-FUZZY — reset the per-parse fuzzy-hit log (module-level accumulator).
+  fuzzyAgencyMatches.length = 0;
   // D2 per-sheet cutoff — applied to the daily-log path (the only agency shape
   // with dated rows). WIDE/LONG shapes carry pre-aggregated 30d/60d totals with
   // no row dates, so a cutoff is not applicable there.
@@ -509,7 +549,9 @@ export async function parseAgencyChannelSales(file, opts = {}) {
         if (ok) processedTabs.push({ name, channel });
       }
       if (processedTabs.length > 0) {
-        return { byCode, shape: "daily-log", processedTabs };
+        // fuzzyMatches: column headers mapped by the tolerant matcher — surfaced
+        // so the founder can audit each guess (R-FUZZY, never silent).
+        return { byCode, shape: "daily-log", processedTabs, fuzzyMatches: fuzzyAgencyMatches.slice() };
       }
       // Fall through to WIDE/LONG on first sheet if no daily-log tabs matched
     }
