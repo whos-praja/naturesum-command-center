@@ -148,3 +148,73 @@ permanent regression net the founder asked for.
 - Engine logic in lib/ pure functions (unit-testable via node), UI thin.
 - docs/CHANGE-LOG-2026-06.md updated; verification results recorded in
   docs/VERIFICATION-BUSINESS-2026-06.md.
+
+# ═══ V2 ADDENDUM (2026-06-12) — multi-month history, coverage honesty, daily grain ═══
+Founder verdict on v1: "not good — rich data, little used." V2 is BINDING and
+supersedes v1 where they conflict.
+
+## V2.1 Source tiers + override semantics
+- **Tier-1 NATIVE** (per-SKU revenue grain): Amazon All-Orders, FK Sales xlsx,
+  Blinkit report, Shopify net csv. Currently May-2026 only.
+- **Tier-2 AGENCY (Snell)**: Sale tab = DAILY channel-grain units + gross/net
+  revenue + ad spend — Amazon Aug-2024→, FK Jun-2025→, Blinkit Dec-2025→
+  (incl June 2026 to date). Categorywise tabs = DAILY per-SKU UNITS (same
+  ranges). Units only at SKU grain — never fabricate SKU revenue from them.
+- **Tier-3 MONARCH**: Master Sheet = DAILY website revenue + cancels + Google/
+  Meta spend, Jun-2025→ (12 mo).
+- **Override rule**: for the same (month × channel × metric), NATIVE wins over
+  AGENCY/MONARCH. Both retained; UI shows the active source per figure and the
+  agency-vs-native delta as a reconciliation note, never silently.
+- Every fact carries `tier` + `source`. The long-term view BUILDS from tiers
+  2/3 and upgrades automatically when native reports are uploaded.
+
+## V2.2 Coverage model (kills the 16276%-ACOS class of bug)
+Per (month × channel): `{sales: native|agency|none, skuGrain: bool,
+ads: actual|agency|none}`. HARD RULES:
+- A ratio (ROAS/ACOS/CM%/MoM) may ONLY divide quantities from the SAME
+  coverage window. No cross-window ratios, ever.
+- A month×channel missing sales coverage shows "no sales data" — NEVER a
+  computed margin against near-zero revenue.
+- Months in pickers/charts carry coverage badges; partial months (e.g. June
+  to-date) are labeled "MTD through <date>" and excluded from MoM unless
+  compared like-for-like (same day-of-month window).
+- ACOS/ROAS display: if ACOS > 500% or ROAS < 0.2 AND coverage is mixed-tier,
+  suppress the number and show "window mismatch" with the explanation. If
+  genuinely same-window, show it with the evidence inline.
+- Flipkart Apr-type artifacts (returns dated into a prior month creating
+  negative revenue): months where |netRev| is < 2% of the channel's typical
+  month AND negative → label "returns tail, no sales coverage" — not a CM row.
+
+## V2.3 Ad-spend provenance (visible on every margin figure)
+`adBasis ∈ actual-attributed | allocated-share | agency-total`. Every CM3/ROAS
+figure renders a small basis chip (e.g. "SP actual" / "alloc by rev" /
+"agency"). The SKU×channel matrix legend explains the three bases. No margin
+number without its basis.
+
+## V2.4 Formatting (zero tolerance)
+ALL currency through D.fmtINR (rounded; never raw floats), all % to 1 decimal,
+all units integers. A global guard: any cell that would render >6 significant
+raw digits is a bug. Verifier greps the rendered DOM for `\d{4,}\.\d{3,}`.
+
+## V2.5 Daily grain UI (minimum bar)
+- Sales: daily net-revenue chart per channel (stack/line toggle, 7d MA,
+  range presets 30d/90d/12m/all), built from tier-2/3 history + native where
+  present; per-SKU daily units drill (Categorywise); weekday pattern panel;
+  channel mix over months (stacked area); MoM table per channel with
+  like-for-like partial-month handling; AOV trend.
+- Marketing: monthly spend vs revenue per channel across ALL history (Snell
+  TCOS trend vs the sheet's own TCOS columns as cross-check), May per-SKU
+  deep-dive clearly badged by basis, breakeven-ACOS only where same-window.
+- Finance: unchanged model, plus provenance chips, coverage-aware month list,
+  agency-tier months show channel-level CM (SKU matrix only for native months,
+  with an explicit "needs native reports" note elsewhere).
+- In-tool upload: a visible "Upload reports" button on Finance/Sales/Marketing
+  opening the business upload zones (same modal); per-zone last-upload + tier
+  shown; uploads upsert + override per V2.1.
+
+## V2.6 Acceptance
+A fresh-context founder-analyst reviewer audits the RUNNING tool with real
+data and must find zero critical/major issues across: daily-grain visibility,
+full Snell/Monarch exploitation, working dedup/override upload, margin-basis
+traceability, formatting/sanity, instant-comprehension UX, and depth
+exceeding the inventory module — plus a "nothing left on the table" judgment.

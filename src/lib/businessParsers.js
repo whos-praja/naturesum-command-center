@@ -67,6 +67,31 @@ const SHP_SKU_MAP = {
   "NS-HO-JT-100": "NSJO100", "DI-TE-1-A": "NSACDT30", "NS-SB-030": "NSSBBO30",
 };
 
+// ─── Snell "Categorywise" tab header → canonical code (V2) ───────────────────
+// The three Categorywise tabs (AMZ/FK/Blinkit) carry one DAILY units column per
+// SKU, headered with a free-text product title (verified 2026-06-12). `*N`
+// columns are multipack order-counts that FOLD into the base code as units×N.
+// CRITICAL distinction the titles encode: "Sea Buckthorn Berries 100g" = DRY
+// BERRIES (NSSBDB*), while "Sea Buckthorn powder 100g" = POWDER (NSSB*) — two
+// different product lines that must never be conflated.
+function snellCatHeaderToCode(title) {
+  const t = String(title || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!t || t === "date" || t === "total") return null;
+  // multipack multiplier (e.g. "...100g*2", "jatamansi oil*4")
+  const mult = (() => { const m = t.match(/\*\s*(\d+)\s*$/); return m ? parseInt(m[1], 10) || 1 : 1; })();
+  const base = t.replace(/\*\s*\d+\s*$/, "").trim();
+  const grams = (base.match(/(\d+)\s*(?:g|gm|ml)\b/) || [])[1] || null;
+  let code = null;
+  if (/jatamansi/.test(base)) code = "NSJO100";
+  else if (/acacia catechu/.test(base)) code = "NSACDT30";
+  else if (/sea buckthorn oil/.test(base)) code = grams === "15" ? "NSSBBO15" : grams === "30" ? "NSSBBO30" : null;
+  else if (/sea buckthorn juice/.test(base)) code = grams === "300" ? "NSSBJ300" : grams === "500" ? "NSSBJ500" : null;
+  else if (/moringa powder/.test(base)) code = grams === "100" ? "NSMP100" : grams === "250" ? "NSMP250" : null;
+  else if (/sea buckthorn berries/.test(base)) code = { "100": "NSSBDB100", "250": "NSSBDB250", "500": "NSSBDB500" }[grams] || null;
+  else if (/sea buckthorn powder/.test(base)) code = { "100": "NSSB100", "250": "NSSB250", "500": "NSSB500" }[grams] || null;
+  return code ? { code, mult } : null;
+}
+
 // Blinkit Item Id → canonical (BINDING — key on Item Id, never free-text title).
 const BLINKIT_ITEM_MAP = {
   10270854: "NSSB100", 10282349: "NSSB250",
@@ -169,6 +194,27 @@ function bumpDaily(facts, date, channel, code, fields) {
   const key = `${date}|${channel}|${code}`;
   const cur = facts.daily[key] || { units: 0, netRev: 0 };
   for (const f of Object.keys(fields)) cur[f] = r2((cur[f] || 0) + num(fields[f]));
+  facts.daily[key] = cur;
+}
+
+// ─── Channel-grain accumulators (V2) ─────────────────────────────────────────
+// Channel-grain facts live under the reserved code sentinel "__ch__" so they
+// never collide with per-SKU cells and are skipped by SKU-grain consumers
+// (cmEngine, businessVerification — see businessStore.CH_CODE). Each cell carries
+// {units, grossRev, netRev, adSpend, tier, source}. Monthly + daily variants.
+const CH_CODE = "__ch__";
+function bumpChannelMonthly(facts, month, channel, fields, tier, source) {
+  const key = `${month}|${channel}|${CH_CODE}`;
+  const cur = facts.monthly[key] || { units: 0, grossRev: 0, netRev: 0, adSpend: 0 };
+  for (const f of ["units", "grossRev", "netRev", "adSpend"]) if (fields[f] !== undefined) cur[f] = r2((cur[f] || 0) + num(fields[f]));
+  cur.tier = tier; cur.source = source;
+  facts.monthly[key] = cur;
+}
+function bumpChannelDaily(facts, date, channel, fields, tier, source) {
+  const key = `${date}|${channel}|${CH_CODE}`;
+  const cur = facts.daily[key] || { units: 0, grossRev: 0, netRev: 0, adSpend: 0 };
+  for (const f of ["units", "grossRev", "netRev", "adSpend"]) if (fields[f] !== undefined) cur[f] = r2((cur[f] || 0) + num(fields[f]));
+  cur.tier = tier; cur.source = source;
   facts.daily[key] = cur;
 }
 
@@ -653,6 +699,256 @@ export async function parseSnellSale(file, opts = {}) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 9b · SNELL "Sale" tab — FULL DAILY CHANNEL-GRAIN HISTORY (V2, tier: agency)
+// ═══════════════════════════════════════════════════════════════════════════
+// Emits channel-grain DAILY + MONTHLY-rollup facts {units, grossRev, netRev,
+// adSpend} for amazon/flipkart/blinkit across the WHOLE Sale-tab history
+// (Amazon Aug-2024→, FK Jun-2025→, Blinkit Dec-2025→, incl June-2026 to date).
+// Column choices PINNED + reconciled against native May (documented per channel):
+//   amazon   gross = c20 (Total Gross Value); net = c22 (Final Net Without
+//            Review) AS-IS [M1 fix 2026-06-12]; units = c7 (Total Shipped). c22 is
+//            ALREADY net-of-GST (Snell's net column) — the earlier ÷1.05 double-
+//            discounted every agency Amazon month ~5%. Native-May reconcile:
+//            c22 = 1,213,769 vs native 1,143,450 → +6.15% (return-tail/review
+//            timing; native wins per V2.1 so the agency figure is shadow-only).
+//            adSpend = c23 (Actual AMS Spend).
+//   flipkart gross = c40 (Sale Value Gross FBF+NONFBF); net = c43 (Total Net
+//            Value) AS-IS (Snell's net is already net-of-GST realized, like the
+//            native BIA — May c43 = 274,451 vs native BIA 271,408 → +1.12%, so
+//            NO ÷1.05). units = c35 (Total Shipped). adSpend = c44 (FK Spend Total).
+//   blinkit  gross = c53 (Sale Value Total Gross — May = 281,560 = native EXACT);
+//            Snell's "net" col equals gross (no tax netting) so net = gross ÷ 1.05
+//            (native net/gross = 268,153/281,560 = 0.95238 = 1/1.05). units = c52
+//            (Blinkit Total). adSpend = c56 (Blinkit Spend Total).
+// A channel-day with ALL of {units, gross, net, adSpend} zero is skipped (no
+// coverage) so pre-launch zero rows never create phantom coverage. Returns
+// channel-grain facts (monthly + daily) under "__ch__", plus meta.snellHistory
+// with the May reconciliation deltas.
+const SNELL_NET_DIVISOR_BLINKIT = 1.05; // Snell blinkit "net" == gross; ex-GST = ÷1.05
+export async function parseSnellHistory(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const saleSheet = wb.SheetNames.find((n) => /^sale\s*$/i.test(n) || /^sale$/i.test(n.trim()));
+  if (!saleSheet) { dq.push({ level: "error", code: "SNH_NOSALE", msg: `Snell workbook has no 'Sale' tab (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Snell history: no 'Sale' tab."); }
+  const grid = sheetGrid(wb.Sheets[saleSheet]);
+  if (grid.length < 6) { dq.push({ level: "error", code: "SNH_SHORT", msg: "Snell Sale tab too short." }); throw new Error("Snell history: Sale tab too short."); }
+  const b2 = ffRow(grid[2] || []);
+  const r3 = grid[3] || [];
+  // Resolve the channel-grain columns by header band/leaf (never positional).
+  const C = {
+    amzUnits: findSnellCol(b2, r3, { band: /^total$/i, leaf: /shipped units/i }),       // c7 Amazon Total Shipped Units
+    amzGross: findSnellCol(b2, r3, { band: /total gross value/i, leaf: null }),          // c20
+    amzNet: findSnellCol(b2, r3, { band: /final net without review/i, leaf: null }),     // c22
+    amzAd: findSnellCol(b2, r3, { band: /actual ams spend/i, leaf: null }),              // c23
+    fkUnits: findSnellCol(b2, r3, { band: /^total$/i, leaf: /^shipped$/i }),             // c35 FK Total Shipped
+    fkGross: findSnellCol(b2, r3, { band: /sale value gross/i, leaf: /fbf \+ nonfbf/i }),// c40
+    fkNet: findSnellCol(b2, r3, { band: /sale value net/i, leaf: /total net value/i }),  // c43
+    fkAd: findSnellCol(b2, r3, { band: /flipkart spend\s*total/i, leaf: null }),         // c44
+    bkUnits: findSnellCol(b2, r3, { band: /blinkit/i, leaf: /^total$/i }),               // c52 Blinkit Total
+    bkGross: findSnellCol(b2, r3, { band: /sale value/i, leaf: /total gross value/i }),  // c53
+    bkAd: findSnellCol(b2, r3, { band: /blinkit spend\s*total/i, leaf: null }),          // c56
+  };
+  for (const [k, v] of Object.entries(C)) {
+    if (v === -1) dq.push({ level: "warn", code: "SNH_COL", msg: `Snell history column "${k}" not located — band labels may have changed.` });
+  }
+  const facts = emptyFacts();
+  const get = (r, c) => (c === -1 ? 0 : num(r[c]));
+  const span = {};          // channel → {first, last}
+  const mayCheck = { amazonNet: 0, flipkartNet: 0, blinkitGross: 0 };
+  let dayRows = 0;
+  for (let i = 5; i < grid.length; i++) {
+    const r = grid[i];
+    const d = r[0];
+    if (typeof d !== "number" || d < 30000 || d > 80000) continue; // numeric Excel serial only
+    const iso = excelToISODate(d);
+    const month = monthOf(iso);
+    if (!month) continue;
+    dayRows++;
+    const channels = [
+      // M1 FIX (2026-06-12): c22 "Final Net Without Review" is ALREADY net-of-GST →
+      // use AS-IS. Prior ÷1.05 double-discounted agency Amazon ~5% every month.
+      { ch: "amazon",   units: get(r, C.amzUnits), gross: get(r, C.amzGross), net: get(r, C.amzNet),          ad: get(r, C.amzAd) },
+      { ch: "flipkart", units: get(r, C.fkUnits),  gross: get(r, C.fkGross),  net: get(r, C.fkNet),          ad: get(r, C.fkAd) },
+      { ch: "blinkit",  units: get(r, C.bkUnits),  gross: get(r, C.bkGross),  net: get(r, C.bkGross) / SNELL_NET_DIVISOR_BLINKIT, ad: get(r, C.bkAd) },
+    ];
+    for (const x of channels) {
+      if (!x.units && !x.gross && !x.net && !x.ad) continue;     // no coverage that channel-day → skip
+      const fields = { units: x.units, grossRev: x.gross, netRev: x.net, adSpend: x.ad };
+      bumpChannelDaily(facts, iso, x.ch, fields, "agency", "snell-history");
+      bumpChannelMonthly(facts, month, x.ch, fields, "agency", "snell-history");
+      if (!span[x.ch]) span[x.ch] = { first: iso, last: iso };
+      span[x.ch].last = iso; if (iso < span[x.ch].first) span[x.ch].first = iso;
+      if (month === "2026-05") {
+        if (x.ch === "amazon") mayCheck.amazonNet += x.net;
+        if (x.ch === "flipkart") mayCheck.flipkartNet += x.net;
+        if (x.ch === "blinkit") mayCheck.blinkitGross += x.gross;
+      }
+    }
+  }
+  // May reconciliation deltas (agency vs native anchors) — documented in meta.
+  const NATIVE = { amazonNet: 1143449.84, flipkartNet: 272842.99, blinkitGross: 281560 };
+  const recon = {};
+  for (const k of Object.keys(NATIVE)) {
+    const agency = r2(mayCheck[k]);
+    const native = NATIVE[k];
+    recon[k] = { agency, native, delta: r2(agency - native), deltaPct: native ? r2((agency - native) / native * 100) : null };
+  }
+  facts.meta.snellHistory = {
+    tier: "agency", source: "snell-history",
+    channelSpan: span,
+    netColumnChoice: {
+      amazon: "Final Net Without Review (c22) AS-IS — M1 fix 2026-06-12: ALREADY net-of-GST; prior ÷1.05 double-discounted ~5%. May agency 1,213,769 = +6.15% vs native 1,143,450 (return-tail timing; native wins per V2.1).",
+      flipkart: "Total Net Value (c43) AS-IS — Snell net == realized net-of-GST like native BIA; +0.59% vs native May",
+      blinkit: "Gross (c53) ÷ 1.05 — Snell has no tax-netted net column; native net/gross ratio = 0.95238 = 1/1.05",
+    },
+    mayReconciliation: recon,
+  };
+  dq.push({ level: "info", code: "SNH_OK", msg: `Snell history: ${dayRows} day-rows → ${Object.keys(facts.daily).length} daily + ${Object.keys(facts.monthly).length} monthly channel-grain cells. May recon Δ: amzNet ${recon.amazonNet.deltaPct}% / fkNet ${recon.flipkartNet.deltaPct}% / bkGross ${recon.blinkitGross.deltaPct}%.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9c · SNELL "Categorywise" tabs — DAILY PER-SKU UNITS (V2, tier: agency)
+// ═══════════════════════════════════════════════════════════════════════════
+// The three Categorywise tabs hold DAILY per-SKU UNITS only (never revenue).
+// AMZ tab Aug-2024→, FK tab Jun-2025→, Blinkit tab Dec-2025→. One units column
+// per SKU header (snellCatHeaderToCode); `*N` columns fold into the base code as
+// units × N. Emits SKU-grain UNITS facts (units only; netRev/grossRev untouched
+// so these can NEVER masquerade as revenue) tagged tier "agency". Daily + monthly.
+const SNELL_CAT_TABS = [
+  { re: /amz\s*categorywise/i, channel: "amazon" },
+  { re: /fk\s*categorywise/i, channel: "flipkart" },
+  { re: /blinkit\s*categorywise/i, channel: "blinkit" },
+];
+// Agency per-SKU UNITS are a revenue-LESS series (cross-check / shape only). To
+// guarantee they can NEVER double-count against native per-SKU revenue facts,
+// they are NOT written into facts.monthly/facts.daily (the SKU-revenue keyspace
+// the verification anchors + cmEngine sum). Instead they live in a dedicated,
+// clearly-labelled meta structure: meta.snellSkuUnits = { perChannel, monthly:
+// {"YYYY-MM|channel|CODE": units}, daily: {"YYYY-MM-DD|channel|CODE": units} }.
+// Native > agency precedence is therefore structural (separate namespace) and
+// order-independent; the UI reads agency units only where native is absent.
+export async function parseSnellSkuUnits(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const facts = emptyFacts();
+  const perChannel = {};
+  const skuMonthly = {};   // "YYYY-MM|channel|CODE" → units
+  const skuDaily = {};     // "YYYY-MM-DD|channel|CODE" → units
+  const addU = (map, key, u) => { map[key] = r2((map[key] || 0) + u); };
+  for (const tabDef of SNELL_CAT_TABS) {
+    const name = wb.SheetNames.find((n) => tabDef.re.test(String(n).trim()));
+    if (!name) { dq.push({ level: "warn", code: "SCU_NOTAB", msg: `Snell Categorywise tab for ${tabDef.channel} not found.` }); continue; }
+    const grid = sheetGrid(wb.Sheets[name]);
+    if (grid.length < 3) { dq.push({ level: "warn", code: "SCU_SHORT", msg: `Snell Categorywise '${name}' too short.` }); continue; }
+    // Map each data column to a base code (+ fold mult) from the header (row 0).
+    const header = grid[0] || [];
+    const colMap = {};      // colIndex → { code, mult }
+    let mapped = 0;
+    for (let c = 1; c < header.length; c++) {
+      const hit = snellCatHeaderToCode(header[c]);
+      if (hit) { colMap[c] = hit; mapped++; }
+    }
+    if (mapped === 0) { dq.push({ level: "warn", code: "SCU_NOCOLS", msg: `Snell Categorywise '${name}': no SKU columns mapped.` }); continue; }
+    let dayRows = 0, units = 0; const span = { first: null, last: null };
+    for (let i = 1; i < grid.length; i++) {
+      const r = grid[i];
+      const d = r[0];
+      if (typeof d !== "number" || d < 30000 || d > 80000) continue; // skip "Total"/label rows
+      const iso = excelToISODate(d);
+      const month = monthOf(iso);
+      if (!month) continue;
+      dayRows++;
+      if (!span.first) span.first = iso; span.last = iso;
+      for (const c of Object.keys(colMap)) {
+        const { code, mult } = colMap[c];
+        const u = num(r[c]) * mult;       // *N folds: 1 N-pack order = N base units
+        if (!u) continue;
+        addU(skuDaily, `${iso}|${tabDef.channel}|${code}`, u);
+        addU(skuMonthly, `${month}|${tabDef.channel}|${code}`, u);
+        units += u;
+      }
+    }
+    perChannel[tabDef.channel] = { tab: name, mappedCols: mapped, dayRows, units, span };
+  }
+  facts.meta.snellSkuUnits = { tier: "agency", source: "snell-cat", perChannel, monthly: skuMonthly, daily: skuDaily };
+  const summary = Object.entries(perChannel).map(([ch, v]) => `${ch} ${v.units}u`).join(", ");
+  dq.push({ level: "info", code: "SCU_OK", msg: `Snell SKU units: ${summary || "no tabs"}; ${Object.keys(skuMonthly).length} monthly + ${Object.keys(skuDaily).length} daily agency SKU-unit cells (meta, units only).` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10b · MONARCH — FULL DAILY WEBSITE HISTORY (V2, tier: monarch)
+// ═══════════════════════════════════════════════════════════════════════════
+// Master Sheet = DAILY website log Jun-2025→ (13 mo, incl June-2026 to date).
+// Emits website channel-grain DAILY + MONTHLY facts:
+//   grossRev = col4 (Total Conversion Value — GST-inclusive gross conversion
+//              value; the website TREND series, NOT the authoritative net which
+//              is Shopify net per spec §1.3). units = col1 (Total Sales =
+//              order count). adSpend = liveGoogle + liveMeta.
+//   netSales (col1 Total Sales) is the order-COUNT, mapped to `units`; cancels =
+//   col2 (Total Cancel Order). Google/Meta each have a summary col (6/21) and a
+//   live col (11/27); from Dec-2025 the summary cols zero out and the live cols
+//   carry the value, so we take the MAX of the candidate columns per month/day
+//   (robust to which block the founder fills). Emitted as channel-grain adSpend
+//   plus a per-month meta.monarchHistory {grossConvValue, orders, cancels,
+//   googleSpend, metaSpend, days, partial}.
+export async function parseMonarchHistory(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const masterName = wb.SheetNames.find((n) => /master sheet/i.test(n));
+  if (!masterName) { dq.push({ level: "error", code: "MNH_NOMASTER", msg: `Monarch: no 'Master Sheet' (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Monarch history: no Master Sheet."); }
+  const grid = sheetGrid(wb.Sheets[masterName]);
+  const H = (grid[1] || []).map((h) => String(h || "").trim());
+  const dateCol = H.findIndex((h) => /^date$/i.test(h));
+  const salesCol = H.findIndex((h) => /^total sales$/i.test(h));
+  const cancelCol = H.findIndex((h) => /total cancel/i.test(h));
+  const convCol = H.findIndex((h) => /total conversion value/i.test(h));
+  const googleCols = H.map((h, c) => (/google spend/i.test(h) ? c : -1)).filter((c) => c !== -1);
+  const metaCols = H.map((h, c) => (/meta spend/i.test(h) ? c : -1)).filter((c) => c !== -1);
+  if (dateCol === -1 || googleCols.length === 0 || metaCols.length === 0) {
+    dq.push({ level: "error", code: "MNH_SCHEMA", msg: "Monarch Master Sheet missing Date / Google Spend / Meta Spend columns." });
+    throw new Error("Monarch history: schema drift in Master Sheet.");
+  }
+  const facts = emptyFacts();
+  const byMonth = {};   // ym → { gConv, orders, cancels, gCols:[], mCols:[], days, lastDay }
+  let firstISO = null, lastISO = null;
+  for (let i = 2; i < grid.length; i++) {
+    const r = grid[i];
+    const iso = excelToISODate(r[dateCol]);
+    const ym = monthOf(iso);
+    if (!ym) continue;
+    const conv = convCol !== -1 ? num(r[convCol]) : 0;
+    const orders = salesCol !== -1 ? num(r[salesCol]) : 0;
+    const cancels = cancelCol !== -1 ? num(r[cancelCol]) : 0;
+    const google = Math.max(0, ...googleCols.map((c) => num(r[c])));
+    const meta = Math.max(0, ...metaCols.map((c) => num(r[c])));
+    const ad = google + meta;
+    // Skip fully-blank future-dated rows (no conv, no orders, no spend).
+    if (!conv && !orders && !cancels && !ad) continue;
+    if (!firstISO) firstISO = iso; lastISO = iso;
+    // Daily channel-grain website fact: grossRev = gross conv value, units = orders.
+    bumpChannelDaily(facts, iso, "website", { units: orders, grossRev: conv, adSpend: ad }, "monarch", "monarch-history");
+    bumpChannelMonthly(facts, ym, "website", { units: orders, grossRev: conv, adSpend: ad }, "monarch", "monarch-history");
+    if (!byMonth[ym]) byMonth[ym] = { gConv: 0, orders: 0, cancels: 0, google: 0, meta: 0, days: 0, lastDay: iso };
+    const b = byMonth[ym];
+    b.gConv += conv; b.orders += orders; b.cancels += cancels; b.google += google; b.meta += meta; b.days++; b.lastDay = iso;
+  }
+  // Per-month history (trend + coverage signal). `partial` flagged later in the
+  // store coverage map; here we just record lastDay + days for downstream logic.
+  facts.meta.monarchHistory = {
+    tier: "monarch", source: "monarch-history",
+    span: { first: firstISO, last: lastISO },
+    byMonth: Object.fromEntries(Object.keys(byMonth).sort().map((ym) => {
+      const b = byMonth[ym];
+      return [ym, { grossConvValue: r2(b.gConv), orders: b.orders, cancels: b.cancels, googleSpend: r2(b.google), metaSpend: r2(b.meta), days: b.days, lastDay: b.lastDay }];
+    })),
+  };
+  dq.push({ level: "info", code: "MNH_OK", msg: `Monarch history: ${Object.keys(byMonth).length} months (${firstISO}→${lastISO}); ${Object.keys(facts.daily).length} daily website channel-grain cells.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 10 · MONARCH — website history + Meta/Google monthly channel spend (website)
 // ═══════════════════════════════════════════════════════════════════════════
 // The "Master Sheet" is a daily website log. RECENT months populate the live
@@ -712,6 +1008,210 @@ export async function parseMonarchWeb(file, opts = {}) {
   return { facts, dq };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// E · SNELL "Sale" tab — CANCEL-RATE per channel per month (V2 upside view E)
+// ═══════════════════════════════════════════════════════════════════════════
+// Shipped + cancel UNIT columns per channel → month×channel {shipped, cancelled,
+// total, cancelPct}. Amazon Total Shipped c7 / Cancel c8; FK Total Shipped c35 /
+// Cancel c36; Blinkit Shipped c50 / Cancel c51. cancelPct = cancelled/(ship+canc).
+// Months with no ship+cancel coverage are omitted (never fabricated). Emits
+// meta.snellCancel = { byChannel:{ch:{ym:{shipped,cancelled,total,cancelPct}}},
+// latestByChannel:{ch:{month,cancelPct}} }.
+export async function parseSnellCancel(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const saleSheet = wb.SheetNames.find((n) => /^sale\s*$/i.test(n) || /^sale$/i.test(n.trim()));
+  if (!saleSheet) { dq.push({ level: "error", code: "SCN_NOSALE", msg: `Snell workbook has no 'Sale' tab (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Snell cancel: no 'Sale' tab."); }
+  const grid = sheetGrid(wb.Sheets[saleSheet]);
+  if (grid.length < 6) { dq.push({ level: "error", code: "SCN_SHORT", msg: "Snell Sale tab too short." }); throw new Error("Snell cancel: Sale tab too short."); }
+  const b2 = ffRow(grid[2] || []); const r3 = grid[3] || [];
+  const C = {
+    amzShip: findSnellCol(b2, r3, { band: /^total$/i, leaf: /shipped units/i }),  // c7
+    amzCanc: findSnellCol(b2, r3, { band: /^total$/i, leaf: /cancel units/i }),    // c8
+    fkShip: findSnellCol(b2, r3, { band: /^total$/i, leaf: /^shipped$/i }),        // c35
+    fkCanc: findSnellCol(b2, r3, { band: /^total$/i, leaf: /^cancel$/i }),         // c36
+    bkShip: findSnellCol(b2, r3, { band: /blinkit/i, leaf: /^shipped$/i }),        // c50
+    bkCanc: findSnellCol(b2, r3, { band: /blinkit/i, leaf: /^cancel$/i }),         // c51
+  };
+  for (const [k, v] of Object.entries(C)) if (v === -1) dq.push({ level: "warn", code: "SCN_COL", msg: `Snell cancel column "${k}" not located.` });
+  const chans = [
+    { ch: "amazon", ship: C.amzShip, canc: C.amzCanc },
+    { ch: "flipkart", ship: C.fkShip, canc: C.fkCanc },
+    { ch: "blinkit", ship: C.bkShip, canc: C.bkCanc },
+  ];
+  const acc = {}; for (const x of chans) acc[x.ch] = {};
+  for (let i = 5; i < grid.length; i++) {
+    const r = grid[i]; const d = r[0]; if (typeof d !== "number" || d < 30000 || d > 80000) continue;
+    const ym = monthOf(excelToISODate(d)); if (!ym) continue;
+    for (const x of chans) {
+      const s = x.ship === -1 ? 0 : num(r[x.ship]); const c = x.canc === -1 ? 0 : num(r[x.canc]);
+      if (!s && !c) continue;
+      const cur = acc[x.ch][ym] || { shipped: 0, cancelled: 0 };
+      cur.shipped += s; cur.cancelled += c; acc[x.ch][ym] = cur;
+    }
+  }
+  const byChannel = {}; const latestByChannel = {};
+  for (const x of chans) {
+    const months = Object.keys(acc[x.ch]).sort(); byChannel[x.ch] = {};
+    for (const ym of months) {
+      const { shipped, cancelled } = acc[x.ch][ym]; const total = shipped + cancelled;
+      byChannel[x.ch][ym] = { shipped, cancelled, total, cancelPct: total ? r2(cancelled / total * 100) : 0 };
+    }
+    if (months.length) { const ym = months[months.length - 1]; latestByChannel[x.ch] = { month: ym, cancelPct: byChannel[x.ch][ym].cancelPct }; }
+  }
+  const facts = emptyFacts();
+  facts.meta.snellCancel = { source: "snell-cancel", tier: "agency", columns: C, byChannel, latestByChannel };
+  const summ = chans.map((x) => `${x.ch} ${latestByChannel[x.ch]?.cancelPct ?? "–"}%`).join(", ");
+  dq.push({ level: "info", code: "SCN_OK", msg: `Snell cancel rates (latest month): ${summ}.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// B · MONARCH "SEO - Keywords" — keyword rank-over-time (V2 upside view B)
+// ═══════════════════════════════════════════════════════════════════════════
+// col0 = keyword, cols1+ = rank snapshots with Excel-serial DATE headers (lower
+// rank = better). Keep TOP-30 keywords by best current rank. Emits
+// meta.monarchSeo = { dates:[iso...asc], prev30Date, keywords:[{kw, latest,
+// latestDate, prev30, prev30Date, earliest, earliestDate, best, worst,
+// movement30, movementAll}], totalKeywords }. movement = prev − latest (+ve=improved).
+const SEO_TOP_N = 30;
+export async function parseMonarchSeo(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const seoName = wb.SheetNames.find((n) => /seo\s*-\s*keywords/i.test(n));
+  if (!seoName) { dq.push({ level: "error", code: "SEO_NOTAB", msg: `Monarch: no 'SEO - Keywords' tab (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Monarch SEO: no tab."); }
+  const grid = sheetGrid(wb.Sheets[seoName]);
+  const hdr = grid[0] || [];
+  const dateCols = [];
+  for (let c = 1; c < hdr.length; c++) { const iso = excelToISODate(hdr[c]); if (iso) dateCols.push({ c, iso }); }
+  dateCols.sort((a, b) => (a.iso < b.iso ? -1 : 1));
+  if (!dateCols.length) { dq.push({ level: "error", code: "SEO_NODATES", msg: "Monarch SEO: no date columns." }); throw new Error("Monarch SEO: no date columns."); }
+  const isoList = dateCols.map((d) => d.iso);
+  const latestCol = dateCols[dateCols.length - 1]; const earliestCol = dateCols[0];
+  const latestMs = Date.parse(latestCol.iso);
+  let prev30 = dateCols[dateCols.length - 2] || dateCols[0]; let bestDiff = Infinity;
+  for (const d of dateCols) { if (d.iso >= latestCol.iso) continue; const diff = Math.abs((latestMs - Date.parse(d.iso)) / 86400000 - 30); if (diff < bestDiff) { bestDiff = diff; prev30 = d; } }
+  const rows = [];
+  for (let i = 1; i < grid.length; i++) {
+    const kw = String(grid[i][0] || "").trim(); if (!kw) continue;
+    const rk = (col) => { const v = grid[i][col.c]; const n = num(v); return v === "" || v == null || !Number.isFinite(n) || n === 0 ? null : n; };
+    const latest = rk(latestCol); if (latest == null) continue;
+    const vals = dateCols.map((d) => rk(d)).filter((v) => v != null);
+    const best = vals.length ? Math.min(...vals) : null; const worst = vals.length ? Math.max(...vals) : null;
+    const prev = rk(prev30); const earliest = rk(earliestCol);
+    rows.push({
+      kw, latest, latestDate: latestCol.iso, prev30: prev, prev30Date: prev30.iso,
+      earliest, earliestDate: earliestCol.iso, best, worst,
+      movement30: prev != null ? r2(prev - latest) : null,
+      movementAll: earliest != null ? r2(earliest - latest) : null,
+    });
+  }
+  rows.sort((a, b) => (a.latest - b.latest) || ((b.movementAll || 0) - (a.movementAll || 0)));
+  const keywords = rows.slice(0, SEO_TOP_N);
+  const facts = emptyFacts();
+  facts.meta.monarchSeo = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, keywords, totalKeywords: rows.length };
+  dq.push({ level: "info", code: "SEO_OK", msg: `Monarch SEO: ${rows.length} ranked keywords (kept top ${keywords.length}); snapshots ${isoList.join(", ")}.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// C · MONARCH Master Sheet — Google-vs-Meta monthly efficiency (V2 upside view C)
+// ═══════════════════════════════════════════════════════════════════════════
+// Daily Google/Meta cols → monthly per-platform {spend, convValue, sales, roas,
+// cpa}. spend = MAX of the two candidate spend cols per platform per day (mirrors
+// parseMonarchHistory's max-spend so May ties to the website-ad-total anchor).
+// roas = conv/spend (same-window); cpa = spend/sales. Emits meta.monarchPlatform
+// = { byMonth:{ym:{google:{...}, meta:{...}}} }.
+export async function parseMonarchPlatform(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const masterName = wb.SheetNames.find((n) => /master sheet/i.test(n));
+  if (!masterName) { dq.push({ level: "error", code: "MPL_NOMASTER", msg: `Monarch: no 'Master Sheet' (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Monarch platform: no Master Sheet."); }
+  const grid = sheetGrid(wb.Sheets[masterName]);
+  const H = (grid[1] || []).map((h) => String(h || "").trim());
+  const band = ffRow(grid[0] || []);
+  const dateCol = H.findIndex((h) => /^date$/i.test(h));
+  const findCol = (bandRe, leafRe) => {
+    for (let c = 0; c < Math.max(band.length, H.length); c++) {
+      const B = String(band[c] || "").trim(), L = String(H[c] || "").trim();
+      if (bandRe.test(B) && leafRe.test(L)) return c;
+    }
+    return -1;
+  };
+  const gSpendCols = H.map((h, c) => (/google spend/i.test(h) ? c : -1)).filter((c) => c !== -1);
+  const mSpendCols = H.map((h, c) => (/meta spend/i.test(h) ? c : -1)).filter((c) => c !== -1);
+  const cols = {
+    gSale: findCol(/google ads/i, /^sale$/i), gConv: findCol(/google ads/i, /^conversion value$/i),
+    mSale: findCol(/meta/i, /^sale$/i), mConv: findCol(/meta/i, /^conversion value$/i),
+  };
+  if (dateCol === -1 || !gSpendCols.length || !mSpendCols.length) { dq.push({ level: "error", code: "MPL_SCHEMA", msg: "Monarch platform: Master Sheet missing Date / Google Spend / Meta Spend." }); throw new Error("Monarch platform: schema drift."); }
+  const byMonth = {};
+  for (let i = 2; i < grid.length; i++) {
+    const r = grid[i]; const ym = monthOf(excelToISODate(r[dateCol])); if (!ym) continue;
+    if (!byMonth[ym]) byMonth[ym] = { gS: 0, gCV: 0, gSale: 0, mS: 0, mCV: 0, mSale: 0 };
+    const b = byMonth[ym];
+    b.gS += Math.max(0, ...gSpendCols.map((c) => num(r[c])));
+    b.mS += Math.max(0, ...mSpendCols.map((c) => num(r[c])));
+    if (cols.gConv !== -1) b.gCV += num(r[cols.gConv]);
+    if (cols.gSale !== -1) b.gSale += num(r[cols.gSale]);
+    if (cols.mConv !== -1) b.mCV += num(r[cols.mConv]);
+    if (cols.mSale !== -1) b.mSale += num(r[cols.mSale]);
+  }
+  const platMonth = (spend, conv, sales) => ({ spend: r2(spend), convValue: r2(conv), sales: r2(sales), roas: spend > 0 ? r2(conv / spend) : null, cpa: sales > 0 ? r2(spend / sales) : null });
+  const out = {};
+  for (const ym of Object.keys(byMonth).sort()) { const b = byMonth[ym]; out[ym] = { google: platMonth(b.gS, b.gCV, b.gSale), meta: platMonth(b.mS, b.mCV, b.mSale) }; }
+  const facts = emptyFacts();
+  facts.meta.monarchPlatform = { source: "monarch-platform", tier: "monarch", byMonth: out, columns: cols };
+  dq.push({ level: "info", code: "MPL_OK", msg: `Monarch platform efficiency: ${Object.keys(out).length} months Google/Meta ROAS+CPA.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// A · BUSINESSMODEL Repeats + Returns — HISTORICAL actuals (V2 upside view A)
+// ═══════════════════════════════════════════════════════════════════════════
+// Founder rule 9 restricts BusinessModel to variable-cost %s, EXCEPT these two
+// actuals tabs (explicitly allowed for view A, source-labelled). One uploaded
+// BusinessModel workbook yields both blocks. Emits meta.bmRepeats {shopify[],
+// amazon[], sourceLabel} + meta.bmReturns {monthly[], sourceLabel}.
+export async function parseBmRepeatsReturns(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const SRC_LABEL = "Naturesum_BusinessModel.xlsx (historical actuals — per founder rule 9, source-labelled)";
+  const facts = emptyFacts();
+  const repName = wb.SheetNames.find((n) => /repeats/i.test(n));
+  if (repName) {
+    const g = sheetGrid(wb.Sheets[repName]);
+    const shopify = []; const amazon = [];
+    for (const i of [2, 3, 4, 5]) {
+      const r = g[i]; if (!r) continue;
+      const q = String(r[0] || "").trim(); if (q) shopify.push({ quarter: q, newCustomers: num(r[1]), returningCustomers: num(r[2]), totalCustomers: num(r[3]), repeatPct: r2(num(r[4]) * 100) });
+      const aq = String(r[7] || "").trim(); if (aq) amazon.push({ quarter: aq, repeatCustomers: num(r[8]), repeatShare: r2(num(r[9]) * 100) });
+    }
+    const shopByQ = Object.fromEntries(shopify.map((s) => [s.quarter, s]));
+    const amzByQ = Object.fromEntries(amazon.map((a) => [a.quarter, a]));
+    for (const i of [7, 8, 9, 10]) {
+      const r = g[i]; if (!r) continue;
+      const q = String(r[0] || "").trim();
+      if (q && shopByQ[q]) { shopByQ[q].newCustomerSales = r2(num(r[1])); shopByQ[q].returningCustomerSales = r2(num(r[2])); shopByQ[q].totalSales = r2(num(r[3])); shopByQ[q].returningSalesPct = r2(num(r[4]) * 100); }
+      const aq = String(r[7] || "").trim();
+      if (aq && amzByQ[aq]) { amzByQ[aq].salesFromRepeatShare = r2(num(r[9]) * 100); }
+    }
+    facts.meta.bmRepeats = { source: "bm-repeats", tier: "businessmodel", sourceLabel: SRC_LABEL, shopify, amazon };
+    dq.push({ level: "info", code: "BMR_OK", msg: `BusinessModel Repeats: ${shopify.length} Shopify quarters, ${amazon.length} Amazon quarters.` });
+  } else { dq.push({ level: "warn", code: "BMR_NOTAB", msg: "BusinessModel: no Repeats tab." }); }
+  const retName = wb.SheetNames.find((n) => /returns\(shopify\)/i.test(n) || /^returns/i.test(n.trim()));
+  if (retName) {
+    const g = sheetGrid(wb.Sheets[retName]);
+    const monthly = [];
+    for (let i = 2; i < g.length; i++) { const r = g[i]; if (!r) continue; const iso = excelToISODate(r[0]); if (!iso) continue; monthly.push({ month: iso, returnsInr: r2(num(r[1])), grossInr: r2(num(r[2])), returnPct: r2(num(r[3]) * 100) }); }
+    monthly.sort((a, b) => (a.month < b.month ? -1 : 1));
+    facts.meta.bmReturns = { source: "bm-returns", tier: "businessmodel", sourceLabel: SRC_LABEL, monthly };
+    dq.push({ level: "info", code: "BRT_OK", msg: `BusinessModel Returns: ${monthly.length} months Shopify returns %.` });
+  } else { dq.push({ level: "warn", code: "BRT_NOTAB", msg: "BusinessModel: no Returns tab." }); }
+  if (!repName && !retName) throw new Error("BusinessModel: neither Repeats nor Returns tab found.");
+  return { facts, dq };
+}
+
 // ─── Dispatcher (parallels uploadParsers.FILE_TYPES) ─────────────────────────
 // Upload-zone keys match spec §8: amazon-orders, fk-sales, blinkit-sales,
 // shopify-net, shopify-daily, ads-amazon-sp, ads-fk-pla, ads-google,
@@ -728,6 +1228,15 @@ export const BUSINESS_FILE_TYPES = {
   "ads-google": { label: "Google Product-wise Ads (CSV)", channel: "website", parse: parseGoogleAds },
   "snell-agency": { label: "Snell Sales&Ads Sheet (Sale tab spend)", channel: "*", parse: parseSnellSale },
   "monarch-web": { label: "Monarch Website Sales&Ads Sheet", channel: "website", parse: parseMonarchWeb },
+  // V2 — full-history channel-grain + per-SKU-units parsers (tier 2/3).
+  "snell-history": { label: "Snell Sale tab — full daily channel history (agency)", channel: "*", parse: parseSnellHistory, tier: "agency" },
+  "snell-sku-units": { label: "Snell Categorywise — daily per-SKU units (agency)", channel: "*", parse: parseSnellSkuUnits, tier: "agency" },
+  "monarch-history": { label: "Monarch Master Sheet — full daily website history (monarch)", channel: "website", parse: parseMonarchHistory, tier: "monarch" },
+  // V2 upside views — analytics-only meta (no monthly/daily facts written):
+  "snell-cancel": { label: "Snell Sale tab — cancel-rate per channel (agency)", channel: "*", parse: parseSnellCancel, tier: "agency" },
+  "monarch-seo": { label: "Monarch SEO - Keywords — rank-over-time (monarch)", channel: "website", parse: parseMonarchSeo, tier: "monarch" },
+  "monarch-platform": { label: "Monarch Master Sheet — Google vs Meta efficiency (monarch)", channel: "website", parse: parseMonarchPlatform, tier: "monarch" },
+  "bm-repeats": { label: "BusinessModel — Repeats & Returns (historical actuals)", channel: "*", parse: parseBmRepeatsReturns, tier: "businessmodel" },
 };
 
 export async function parseBusinessFile(type, file, opts = {}) {
@@ -738,3 +1247,5 @@ export async function parseBusinessFile(type, file, opts = {}) {
 
 // Exposed for the offline twin + verification re-derivation.
 export { ASIN_MAP, AMZ_MSKU_MAP, FK_SKU_MAP, SHP_SKU_MAP, BLINKIT_ITEM_MAP, num, r2, excelToISODate };
+// V2 — channel-grain sentinel + Categorywise resolver exposed for the twin/store.
+export { CH_CODE, snellCatHeaderToCode };

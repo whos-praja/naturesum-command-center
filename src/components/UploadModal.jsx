@@ -88,15 +88,65 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 // clearSource+contrib-snapshot guarantees parse-twice == parse-once). The list
 // is driven off BUSINESS_FILE_TYPES so the channel/zone set is never hardcoded.
 const BIZ_ZONES = Object.entries(BUSINESS_FILE_TYPES).map(([key, def]) => ({
-  key, label: def.label, channel: def.channel, parse: def.parse,
+  key, label: def.label, channel: def.channel, parse: def.parse, tier: def.tier || null,
 })).filter((z) => z.label);
+
+// Per-zone provenance tier (drives the small TIER chip) + a one-line
+// "what this unlocks" hint so the founder knows what each upload buys them.
+// Tier semantics mirror spec V2.1: native = per-SKU revenue grain (best);
+// agency = Snell channel/units history; monarch = website daily history.
+// Anything not listed defaults to "native" (the May per-SKU sources).
+const BIZ_ZONE_META = {
+  // ── Tier-1 NATIVE (per-SKU revenue grain — May 2026) ──
+  "amazon-orders": { tier: "native", unlocks: "Per-SKU Amazon revenue, units & returns — upgrades any month it covers from agency to SKU-grain CM." },
+  "fk-sales":      { tier: "native", unlocks: "Per-SKU Flipkart net-BIA revenue & units (multipacks folded) — SKU-grain CM3 for Flipkart." },
+  "blinkit-sales": { tier: "native", unlocks: "Per-SKU Blinkit revenue & units (keyed on Item Id) — SKU-grain CM3 for Blinkit." },
+  "shopify-net":   { tier: "native", unlocks: "Per-SKU website Net sales & units (month total) — SKU-grain CM3 for the website." },
+  "shopify-daily": { tier: "native", unlocks: "Daily website revenue SHAPE (trend only — never the monthly total)." },
+  "ads-amazon-sp": { tier: "native", unlocks: "Per-ASIN Amazon SP spend — turns Amazon ROAS/ACOS from agency-total into product-attributed." },
+  "ads-fk-pla":    { tier: "native", unlocks: "Per-SKU Flipkart PLA spend — product-attributed Flipkart ad basis." },
+  "ads-google":    { tier: "native", unlocks: "Per-product Google spend — product-attributed website ad basis." },
+  // ── Tier-2 AGENCY (Snell) ──
+  "snell-agency":  { tier: "agency", unlocks: "May channel-total ad spend (AMS / FK / Blinkit) — the v1 single-month spend pins." },
+  "snell-history": { tier: "agency", unlocks: "FULL daily channel history — Amazon Aug-24→, Flipkart Jun-25→, Blinkit Dec-25→ (incl. June MTD): units, gross/net revenue & ad spend. This is what powers the multi-month sales & spend charts." },
+  "snell-sku-units": { tier: "agency", unlocks: "Daily per-SKU UNITS from the Categorywise tabs (units only, never revenue) — fills the SKU-units drill where native reports haven't landed yet." },
+  // ── Tier-3 MONARCH (website) ──
+  "monarch-web":     { tier: "monarch", unlocks: "May website Google + Meta channel-total spend." },
+  "monarch-history": { tier: "monarch", unlocks: "FULL daily website history Jun-25→ — conversion value, cancels & Google/Meta spend. Powers the 12-month website trend." },
+  // ── V2 upside views (analytics-only meta) ──
+  "snell-cancel":     { tier: "agency", unlocks: "Cancel-rate per channel per month (shipped vs cancelled units) — powers the Sales cancel-rate trend with threshold coloring." },
+  "monarch-seo":      { tier: "monarch", unlocks: "SEO keyword rank-over-time (top 30) — rank now vs ~30d/earliest, movement arrows. Powers the Marketing SEO panel." },
+  "monarch-platform": { tier: "monarch", unlocks: "Google vs Meta monthly ROAS + CPA side-by-side — the budgeting decision view on Marketing." },
+  "bm-repeats":       { tier: "businessmodel", unlocks: "Historical repeat % + returns trend (Shopify repeat by quarter, Amazon repeat share, Shopify returns % by month) — powers the Sales retention/returns panel." },
+};
+const bizZoneMeta = (key) => BIZ_ZONE_META[key] || { tier: "native", unlocks: null };
+
+// Tier chip colors — native (best, brand green), agency (amber), monarch (blue).
+const TIER_CHIP = {
+  native:  { bg: "rgba(63,114,80,0.14)",  fg: "var(--success, #3F7250)", tip: "Tier-1 NATIVE — per-SKU revenue grain (authoritative; wins over agency)" },
+  agency:  { bg: "rgba(176,122,31,0.14)",  fg: "var(--warning, #B07A1F)", tip: "Tier-2 AGENCY (Snell) — channel-grain history + per-SKU units" },
+  monarch: { bg: "rgba(40,116,240,0.12)",  fg: "#2874F0",                 tip: "Tier-3 MONARCH — website daily history" },
+  businessmodel: { bg: "rgba(110,90,160,0.14)", fg: "#6E5AA0",            tip: "BusinessModel — historical actuals (repeats/returns), source-labelled per founder rule 9" },
+};
 
 // Month-scoped files have NO date column, so their parser takes opts.month
 // (defaults to 2026-05 in the parser). The rest derive month from row dates and
 // ignore the picker. We surface a month picker only where it actually matters.
+// The V2 history parsers (snell-history, snell-sku-units, monarch-history) read
+// the date off every row, so they are NOT month-scoped.
 const BIZ_MONTH_SCOPED = new Set(["shopify-net", "ads-google", "ads-fk-pla", "snell-agency", "monarch-web"]);
 const DEFAULT_BIZ_MONTH = "2026-05";
 const ALL_BIZ_FORMATS = ".csv,.txt,.tsv,.xlsx,.xls";
+
+// Group the zones by tier for the business tab so the founder sees the three
+// source tiers laid out (native first — it's the upgrade target).
+const BIZ_TIER_ORDER = ["native", "agency", "monarch", "businessmodel"];
+const BIZ_TIER_HEADING = {
+  native:  { title: "Native per-SKU reports (May 2026)", sub: "Tier-1 — SKU-grain revenue, units & product-attributed ads. These WIN over agency for any month they cover." },
+  agency:  { title: "Snell agency history (multi-month)", sub: "Tier-2 — daily channel-grain revenue/units/spend + per-SKU units. Powers the long-term sales & marketing trends." },
+  monarch: { title: "Monarch website history (multi-month)", sub: "Tier-3 — daily website conversion value, cancels & Google/Meta spend." },
+  businessmodel: { title: "BusinessModel historical actuals", sub: "Repeats & returns actuals (source-labelled per founder rule 9) — retention/returns trends only, never cost assumptions." },
+};
 
 // Highest-severity DQ level in a flag list → drives the badge color. The
 // parsers always emit at least one info flag, so "info" is the floor.
@@ -112,7 +162,25 @@ function dqCounts(dq) {
   return c;
 }
 
-export function UploadModal({ onClose }) {
+// Small provenance-tier badge (native / agency / monarch) shared by the section
+// headings and each business zone. Tier colors mirror BizCoveragePanel's legend.
+function TierChip({ tier }) {
+  const t = TIER_CHIP[tier] || TIER_CHIP.native;
+  return (
+    <span
+      title={t.tip}
+      style={{
+        marginLeft: 8, fontSize: 9.5, padding: "1px 5px", borderRadius: 3,
+        background: t.bg, color: t.fg, fontWeight: 700, letterSpacing: "0.04em",
+        textTransform: "uppercase",
+      }}
+    >
+      {tier}
+    </span>
+  );
+}
+
+export function UploadModal({ onClose, defaultTab = "inventory" }) {
   const [store, setStore] = useState(() => loadMultiFile() || { uploadedAt: null, files: {} });
   // Business fact-store snapshot — its own store (ns.businessPerf). We keep a
   // tick to re-read meta.uploads after each business upload so provenance
@@ -120,8 +188,10 @@ export function UploadModal({ onClose }) {
   const [bizStore, setBizStore] = useState(() => loadBusinessFacts());
   const refreshBiz = () => setBizStore(loadBusinessFacts());
   // Two sections: Inventory (multiFile snapshot) + Business Performance (fact
-  // store). Inventory is the historical default tab.
-  const [tab, setTab] = useState("inventory");
+  // store). Inventory is the historical default; the business pages' "Upload
+  // reports" button opens this modal with defaultTab="business" so the founder
+  // lands directly on the sources that feed Finance/Sales/Marketing.
+  const [tab, setTab] = useState(defaultTab === "business" ? "business" : "inventory");
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -215,18 +285,33 @@ export function UploadModal({ onClose }) {
               ))}
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <div className="muted" style={{ fontSize: 11.5, marginBottom: 2 }}>
-                Drop the monthly source exports. Each writes AGGREGATED facts (month×channel×SKU) to the durable business store — no raw rows kept. Re-uploading the same source REPLACES its prior facts (idempotent, never double-counted). Month-scoped files (Shopify net, Google/FK ads, Snell, Monarch) use the month picker; the rest read the date off each row.
+                Drop your source exports — each writes AGGREGATED facts (month×channel×SKU) to the durable business store; no raw rows kept. Re-uploading a source REPLACES its prior facts (idempotent, never double-counted). <strong>Native</strong> reports win over <strong>agency/Monarch</strong> history for any month they cover, so uploading a month's native files automatically upgrades it to SKU-grain. Month-scoped files (Shopify net, Google/FK ads, May Snell/Monarch) use the month picker; everything else reads the date off each row.
               </div>
-              {BIZ_ZONES.map((zone) => (
-                <BizUploadZone
-                  key={zone.key}
-                  zone={zone}
-                  upload={bizUploads.find((u) => u.sourceTag === zone.key) || null}
-                  onChange={refreshBiz}
-                />
-              ))}
+              {BIZ_TIER_ORDER.map((tier) => {
+                const zonesInTier = BIZ_ZONES.filter((z) => bizZoneMeta(z.key).tier === tier);
+                if (zonesInTier.length === 0) return null;
+                const head = BIZ_TIER_HEADING[tier];
+                return (
+                  <div key={tier} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, borderBottom: "1px solid var(--border-soft)", paddingBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)" }}>{head.title}</span>
+                      <TierChip tier={tier} />
+                    </div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: -4 }}>{head.sub}</div>
+                    {zonesInTier.map((zone) => (
+                      <BizUploadZone
+                        key={zone.key}
+                        zone={zone}
+                        meta={bizZoneMeta(zone.key)}
+                        upload={bizUploads.find((u) => u.sourceTag === zone.key) || null}
+                        onChange={refreshBiz}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -543,8 +628,10 @@ function UploadZone({ zone, entry, onUpdate }) {
 // data-quality flags + provenance. Re-uploading replaces the source's facts
 // (idempotent — the store snapshots each source's contribution so a second
 // parse subtracts the first exactly: parse-twice == parse-once).
-function BizUploadZone({ zone, upload, onChange }) {
+function BizUploadZone({ zone, upload, onChange, meta = null }) {
   const monthScoped = BIZ_MONTH_SCOPED.has(zone.key);
+  const tier = meta?.tier || "native";
+  const unlocks = meta?.unlocks || null;
   const [stage, setStage] = useState("idle"); // idle | parsing | error | uploaded
   const [error, setError] = useState(null);
   const [dragging, setDragging] = useState(false);
@@ -641,7 +728,8 @@ function BizUploadZone({ zone, upload, onChange }) {
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
             {zone.label}
-            <span style={{ marginLeft: 8, fontSize: 9.5, padding: "1px 5px", borderRadius: 3, background: "var(--bg-soft, rgba(0,0,0,0.05))", color: "var(--ink-3)", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            <TierChip tier={tier} />
+            <span style={{ marginLeft: 6, fontSize: 9.5, padding: "1px 5px", borderRadius: 3, background: "var(--bg-soft, rgba(0,0,0,0.05))", color: "var(--ink-3)", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase" }}>
               {chTag}
             </span>
             {isLoaded && (
@@ -671,6 +759,15 @@ function BizUploadZone({ zone, upload, onChange }) {
           ) : (
             <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
               Accepts {ALL_BIZ_FORMATS}
+            </div>
+          )}
+
+          {/* What this upload unlocks — so the founder knows what each source
+              buys them before picking a file. */}
+          {unlocks && (
+            <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, lineHeight: 1.4, display: "flex", gap: 4 }}>
+              <span style={{ color: tier === "native" ? "var(--success)" : "var(--ink-4)", fontWeight: 700, flexShrink: 0 }}>↑ unlocks</span>
+              <span>{unlocks}</span>
             </div>
           )}
 

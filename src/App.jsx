@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Sidebar, Topbar, NAV } from "./components/Nav.jsx";
 import NSData from "./data.js";
+import { mergedFacts } from "./lib/businessStore.js";
 import PageHome from "./pages/PageHome.jsx";
 import PageSales from "./pages/PageSales.jsx";
 import PageInventory from "./pages/PageInventory.jsx";
@@ -55,6 +56,25 @@ const App = () => {
   }, [theme]);
 
   const D = NSData;
+
+  // M6 — the sidebar footer no longer reads "Last sync · 21 May" (which looked
+  // like stale data). Instead it shows "Data through <latest fact date>" derived
+  // from the live fact store (meta.latestDataDate, baked by the build = max date
+  // across all monthly/daily facts), plus the app build date as separate context.
+  // This is real provenance, not a fabricated sync clock. Computed once — the
+  // bundled baseline is static within a session unless a report is uploaded.
+  const dataProvenance = useMemo(() => {
+    try {
+      const meta = mergedFacts()?.meta || {};
+      return {
+        latestDataDate: meta.latestDataDate || null,
+        appBuildDate: meta.appBuildDate || null,
+      };
+    } catch {
+      return { latestDataDate: null, appBuildDate: null };
+    }
+  }, []);
+
   // Pages backed by REAL derived data (inventory + the rebuilt Business
   // Performance pages) are never preview-blurred. Spec §9: "Un-gate these
   // pages from preview/blur mode." Extensible — add a section id here as each
@@ -104,7 +124,7 @@ const App = () => {
 
   return (
     <div className="app" data-screen-label={screenLabel}>
-      <Sidebar active={active} onNav={goTo} role={role} alertsByRole={alertsByRole}/>
+      <Sidebar active={active} onNav={goTo} role={role} alertsByRole={alertsByRole} dataProvenance={dataProvenance}/>
       <div className="main">
         <Topbar
           active={active}

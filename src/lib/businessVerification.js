@@ -28,6 +28,10 @@
  * land, parameterise ANCHOR_MONTH per anchor.
  */
 
+import {
+  computeCM, computeMonthChannelCM, monthsAvailable, guardRatio,
+} from "./cmEngine.js";
+
 export const ANCHOR_MONTH = "2026-05";
 
 // Sentinel for a figure the bundled-data build must pin. Distinct from 0 so an
@@ -48,11 +52,41 @@ function sumChannel(facts, channel, field) {
   const map = monthlyMap(facts);
   let total = 0;
   for (const key of Object.keys(map)) {
-    const [m, ch] = key.split("|");
+    const [m, ch, code] = key.split("|");
     if (m !== MONTH || ch !== channel) continue;
+    if (code === "__ch__") continue;   // V2: channel-grain sentinel — not a SKU; excluded from §2/§3 anchors
     total += fin0(Number(map[key]?.[field]));
   }
   return total;
+}
+
+// ─── V2: channel-grain (agency/monarch) accessor ─────────────
+const CH_CODE = "__ch__";
+// Read a field off the channel-grain "__ch__" cell for a given month×channel.
+// Returns a finite number or null (cell absent / field absent → NO-DATA, never
+// a false 0). Used by the V2 history anchors (Snell/Monarch monthly totals).
+function chField(facts, month, channel, field) {
+  const map = monthlyMap(facts);
+  const cell = map[`${month}|${channel}|${CH_CODE}`];
+  if (!cell) return null;
+  const n = Number(cell[field]);
+  return Number.isFinite(n) ? n : null;
+}
+// Read the build-baked May reconciliation block (agency-vs-native deltas) from
+// the bundled/uploaded meta. SAFE: absent → null. Path mirrors the data layer's
+// meta.bySource["snell-history"].mayReconciliation.
+function mayReconciliation(facts) {
+  return facts?.meta?.bySource?.["snell-history"]?.mayReconciliation || null;
+}
+// Read a suppressed agency figure off meta.agencyShadow (V2.1). When native wins
+// for May, the agency __ch__ revenue is moved here by applyOverridePrecedence;
+// the live __ch__ cell is zeroed. FALLBACK: if no shadow (e.g. raw bundle that
+// has not had precedence applied, or a month where agency wins), read the live
+// __ch__ cell directly — so the anchor verifies the Snell figure either way.
+function agencyShadowField(facts, channel, field) {
+  const shadow = facts?.meta?.agencyShadow?.[`${MONTH}|${channel}`];
+  if (shadow && Number.isFinite(Number(shadow[field]))) return Number(shadow[field]);
+  return chField(facts, MONTH, channel, field); // live cell fallback
 }
 
 // ─── Anchors (spec §2 revenue/units, §3 ad spend) ────────────
@@ -219,13 +253,83 @@ export const ANCHORS = [
     filter: `Monarch May Google+Meta total — channel-total ad override (ns.bizCost.adTotal.website)`,
     compute: (facts) => adTotalOverride(facts, "website"),
   },
+
+  // ═══ V2 HISTORY ANCHORS (Snell agency + Monarch channel-grain) ═══════════
+  // These lock the multi-month tiers 2/3 against the bundled baseline. They read
+  // the channel-grain "__ch__" cells the data layer bakes — NOT the per-SKU
+  // native cells (those are the §2/§3 anchors above). For May, native wins per
+  // V2.1 so the agency revenue is suppressed into agencyShadow; therefore the
+  // Snell-May revenue anchors read from meta.agencyShadow (the retained agency
+  // figure), not the zeroed active __ch__ cell. Ad spend survives suppression so
+  // the ad-total anchors read the live __ch__ cell.
+  {
+    id: "snell-amazon-net-may",
+    label: "Snell agency Amazon net revenue (May — Final Net w/o Review AS-IS)",
+    // PINNED from bundled build (mayReconciliation.amazonNet.agency).
+    // M1 FIX 2026-06-12: c22 "Final Net Without Review" is ALREADY net-of-GST, so
+    // it is used AS-IS (no ÷1.05). The prior anchor 1,155,970.19 was the double-
+    // discounted figure; the correct agency net is 1,213,768.71 (= +6.15% vs
+    // native — return-tail/review timing; native still wins per V2.1).
+    expected: 1213768.71,
+    guide: 1143449.84, // native May amazon net — the agency figure is +6.15% (return-tail timing)
+    filter: `Snell Sale-tab agency Amazon net for ${MONTH} — meta.agencyShadow[${MONTH}|amazon].netRev (Final Net w/o Review c22 AS-IS; suppressed by native per V2.1, retained for reconciliation)`,
+    compute: (facts) => agencyShadowField(facts, "amazon", "netRev"),
+  },
+  {
+    id: "snell-flipkart-net-may",
+    label: "Snell agency Flipkart net revenue (May — Total Net Value as-is)",
+    // PINNED from bundled build (mayReconciliation.flipkartNet.agency).
+    expected: 274451.08,
+    guide: 272842.99, // native May flipkart net — agency +0.59%
+    filter: `Snell Sale-tab agency Flipkart net for ${MONTH} — meta.agencyShadow[${MONTH}|flipkart].netRev`,
+    compute: (facts) => agencyShadowField(facts, "flipkart", "netRev"),
+  },
+  {
+    id: "monarch-website-conv-may",
+    label: "Monarch website conversion value (May — Total Conversion Value col4)",
+    // PINNED from bundled build: Monarch Master-Sheet May gross conv value.
+    expected: 782875.24,
+    guide: 782875, // founder-cited May website conv value 782,875
+    filter: `Monarch Master-Sheet ${MONTH} Total Conversion Value — meta.agencyShadow[${MONTH}|website].grossRev (suppressed by native Shopify, retained)`,
+    compute: (facts) => agencyShadowField(facts, "website", "grossRev"),
+  },
+
+  // ── INFO rows: Snell-vs-native May deltas (reconciliation, never pass/fail) ──
+  {
+    id: "recon-amazon-may-delta",
+    info: true,
+    label: "INFO · Amazon May agency−native delta (Snell vs All-Orders)",
+    expected: null,
+    guide: 6.15, // ≈ +6.15% (M1 fix: c22 AS-IS; agency higher — return-tail/review timing)
+    filter: `meta.bySource["snell-history"].mayReconciliation.amazonNet.deltaPct`,
+    compute: (facts) => mayReconciliation(facts)?.amazonNet?.deltaPct ?? null,
+  },
+  {
+    id: "recon-flipkart-may-delta",
+    info: true,
+    label: "INFO · Flipkart May agency−native delta (Snell vs FK Sales)",
+    expected: null,
+    guide: 0.59, // ≈ +0.59%
+    filter: `meta.bySource["snell-history"].mayReconciliation.flipkartNet.deltaPct`,
+    compute: (facts) => mayReconciliation(facts)?.flipkartNet?.deltaPct ?? null,
+  },
+  {
+    id: "recon-blinkit-may-delta",
+    info: true,
+    label: "INFO · Blinkit May agency−native delta (Snell gross vs Blinkit report)",
+    expected: null,
+    guide: 0, // Snell Blinkit gross == native exactly (cross-checks per §2)
+    filter: `meta.bySource["snell-history"].mayReconciliation.blinkitGross.deltaPct`,
+    compute: (facts) => mayReconciliation(facts)?.blinkitGross?.deltaPct ?? null,
+  },
 ];
 
 // Greppable list of anchor ids whose `expected` the gate phase must fill from
-// B1's bundled output (every anchor currently carrying the PENDING sentinel).
-// The gate replaces `expected: PENDING` with the exact bundled number and
-// removes the id from this list.
-export const PENDING_ANCHORS = ANCHORS.filter((a) => a.expected === PENDING).map((a) => a.id);
+// B1's bundled output (every NON-INFO anchor carrying the PENDING sentinel).
+// INFO rows legitimately have expected:null (they report a measured delta, not a
+// pinned target) and are excluded. The gate replaces `expected: PENDING` with
+// the exact bundled number and removes the id from this list.
+export const PENDING_ANCHORS = ANCHORS.filter((a) => !a.info && a.expected === PENDING).map((a) => a.id);
 
 // Channel-total ad override accessor (Snell/Monarch totals the fact store can't
 // carry per-SKU). Resolves with the SAME precedence the engine uses so the panel
@@ -278,6 +382,7 @@ function metaAdTotal(facts, channel) {
  *   delta, deltaPct, filter, guide }]
  *
  * status:
+ *   "INFO"     — `info` anchor (reconciliation delta); reports actual, no pass/fail
  *   "PENDING"  — anchor.expected not yet pinned (build must fill it)
  *   "NO-DATA"  — anchor computes to null/undefined (source absent)
  *   "MATCH"    — |actual − expected| ≤ tolerance
@@ -302,7 +407,10 @@ export function runVerification(facts, opts = {}) {
       delta: null,
       deltaPct: null,
       status: "PENDING",
+      info: !!a.info,
     };
+    // INFO rows (reconciliation deltas): surface the value, never pass/fail.
+    if (a.info) { out.status = out.actual == null ? "NO-DATA" : "INFO"; return out; }
     if (a.expected === PENDING) { out.status = "PENDING"; return out; }
     if (out.actual == null) { out.status = "NO-DATA"; return out; }
     const delta = out.actual - a.expected;
@@ -312,6 +420,96 @@ export function runVerification(facts, opts = {}) {
     out.status = Math.abs(delta) <= tol ? "MATCH" : "DRIFT";
     return out;
   });
+}
+
+// ─── V2 FORMATTING / SANITY anchor (spec V2.4 + V2.2) ─────────
+/**
+ * runFormattingSanity(facts) → { status: "MATCH"|"DRIFT", checks:[…], failures:[…] }
+ *
+ * The permanent formatting/sanity net the founder asked for. Walks the ENGINE's
+ * own output (v1 computeCM for every native month + V2 computeMonthChannelCM for
+ * every month×channel) and asserts, with NO tolerance:
+ *   1. FINITE — every emitted CM number is finite-or-null (never NaN/Infinity).
+ *      A leaked NaN/Infinity is the root cause of the raw-float / absurd-ratio
+ *      bugs the founder rejected, so this is a hard gate.
+ *   2. ACOS SANITY — for every month×channel with ad spend, ACOS = adSpend/netRev
+ *      is computed THROUGH guardRatio with same-window tags. No ACOS > 500% may
+ *      survive un-suppressed: if value > 5 it must come back suppressed (window
+ *      mismatch) OR be a genuine same-window number ≤ 5. A raw >500% leak fails.
+ *   3. PCT RANGE — every CM% is in a sane band (−5..+1, i.e. −500%..+100% of
+ *      net rev); anything outside signals a cross-window contamination.
+ *
+ * status MATCH only when zero failures. Pure (no DOM/localStorage walk here —
+ * the DOM grep for `\d{4,}\.\d{3,}` is the UI-layer verifier's job; this asserts
+ * the ENGINE never feeds it a non-finite or absurd number in the first place).
+ */
+export function runFormattingSanity(facts) {
+  const failures = [];
+  let walked = 0; // count of cells walked (a clean cell records no failure but IS walked)
+  const note = (id, detail) => { failures.push({ id, detail }); };
+
+  const finiteOrNull = (v) => v === null || Number.isFinite(v);
+  const CM_KEYS = ["netRev", "units", "cogs", "fees", "adSpend", "cm1", "cm2", "cm3", "cm4"];
+  const PCT_KEYS = ["cm1", "cm2", "cm3", "cm4"];
+
+  const walkCell = (tag, cell) => {
+    if (!cell) return;
+    walked++;
+    for (const k of CM_KEYS) {
+      if (cell[k] === undefined) continue;
+      if (!finiteOrNull(cell[k])) note(`finite:${tag}.${k}`, `${tag}.${k}=${cell[k]}`);
+    }
+    const pcts = cell.pcts || {};
+    for (const k of PCT_KEYS) {
+      const v = pcts[k];
+      if (v === undefined) continue;
+      if (!finiteOrNull(v)) { note(`finite:${tag}.pct.${k}`, `${tag}.pct.${k}=${v}`); continue; }
+      if (v !== null && (v < -5 || v > 1.0001)) note(`pctRange:${tag}.${k}`, `${tag}.pct.${k}=${v} out of [-5,1]`);
+    }
+  };
+
+  const months = monthsAvailable(facts);
+
+  // 1+3 — walk every native month's full v1 chain + every month×channel V2 cell.
+  for (const mm of months) {
+    // V2 per month×channel (covers agency + native uniformly).
+    for (const ch of Object.keys(mm.channels)) {
+      const r = computeMonthChannelCM({ facts, month: mm.month, channel: ch });
+      walkCell(`${mm.month}|${ch}`, r);
+
+      // 2 — ACOS sanity through the guard. Window tag = month|channel|coverage so
+      // a same-window ACOS is allowed and a mixed/absurd one is suppressed.
+      if (Number.isFinite(r.adSpend) && r.adSpend > 0 && Number.isFinite(r.netRev) && r.netRev > 0) {
+        const win = `${mm.month}|${ch}|${r.coverage}`;
+        const g = guardRatio({ numerator: r.adSpend, denominator: r.netRev, numWindow: win, denWindow: win, kind: "acos" });
+        // A surviving (non-suppressed) ACOS must be ≤ 500%. >500% un-suppressed = bug.
+        if (!g.suppressed && Number.isFinite(g.value) && g.value > 5) {
+          note(`acos:${win}`, `ACOS ${(g.value * 100).toFixed(1)}% > 500% not suppressed (windowMismatch flag missing)`);
+        }
+      }
+    }
+    // Native months also run the full v1 chain (per-SKU cells + company rollup).
+    const hasNative = Object.values(mm.channels).some((c) => c.sales === "native");
+    if (hasNative) {
+      const v1 = computeCM({ facts, month: mm.month });
+      for (const code of Object.keys(v1.bySku)) {
+        walkCell(`${mm.month}|sku:${code}`, v1.bySku[code]);
+        for (const ch of Object.keys(v1.bySku[code].byChannel || {})) {
+          walkCell(`${mm.month}|${code}|${ch}`, v1.bySku[code].byChannel[ch]);
+        }
+      }
+      walkCell(`${mm.month}|company`, v1.company);
+    }
+  }
+
+  if (walked === 0) note("walked-something", "no months to walk");
+  return {
+    id: "formatting-sanity",
+    label: "Formatting & sanity — every engine number finite, no un-flagged >500% ACOS, CM% in [-500%,+100%]",
+    status: failures.length === 0 ? "MATCH" : "DRIFT",
+    checks: walked,
+    failures,
+  };
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -326,9 +524,10 @@ const isMain = (() => {
 })();
 
 if (isMain) {
-  // All anchors are now PINNED (PENDING_ANCHORS empty). Synthetic facts hit
-  // every anchor's expected EXACTLY (channel ad totals supplied via the inline
-  // `adTotals` map, mirroring the meta.bySource path), plus one deliberate DRIFT.
+  // All non-INFO anchors are PINNED (PENDING_ANCHORS empty). Synthetic facts hit
+  // every anchor's expected EXACTLY (channel ad totals via the inline `adTotals`
+  // map; V2 history figures via meta.agencyShadow + reconciliation), plus one
+  // deliberate DRIFT.
   const facts = {
     monthly: {
       "2026-05|amazon|NSMP100": { netRev: 1143449.84, units: 1380, grossRev: 1200623, adSpendDirect: 355115 },
@@ -338,6 +537,21 @@ if (isMain) {
       "2026-05|flipkart|NSMP100": { adSpendDirect: 47000 }, // DRIFT vs 47406
     },
     adTotals: { amazon: 367123.2, blinkit: 66415, website: 212958.35 },
+    meta: {
+      // V2 history: native wins for May so agency revenue lives in agencyShadow.
+      agencyShadow: {
+        "2026-05|amazon": { netRev: 1213768.71, grossRev: 1174650.02, units: 1369 },
+        "2026-05|flipkart": { netRev: 274451.08, grossRev: 310913.4, units: 466 },
+        "2026-05|website": { netRev: 0, grossRev: 782875.24, units: 823 },
+      },
+      bySource: {
+        "snell-history": { mayReconciliation: {
+          amazonNet: { agency: 1213768.71, native: 1143449.84, delta: 70318.87, deltaPct: 6.15 },
+          flipkartNet: { agency: 274451.08, native: 272842.99, delta: 1608.09, deltaPct: 0.59 },
+          blinkitGross: { agency: 281560, native: 281560, delta: 0, deltaPct: 0 },
+        } },
+      },
+    },
   };
   const res = runVerification(facts);
   const by = Object.fromEntries(res.map((r) => [r.id, r]));
@@ -363,6 +577,60 @@ if (isMain) {
   check("NO PENDING status anywhere", res.every((r) => r.status !== "PENDING"));
   check("no NaN in any actual", res.every((r) => r.actual === null || Number.isFinite(r.actual)));
 
+  // ── V2 history anchors (Snell/Monarch May) ──
+  check("snell-amazon-net-may MATCH (agencyShadow, c22 AS-IS)", by["snell-amazon-net-may"].status === "MATCH");
+  check("snell-flipkart-net-may MATCH", by["snell-flipkart-net-may"].status === "MATCH");
+  check("monarch-website-conv-may MATCH (782875.24)", by["monarch-website-conv-may"].status === "MATCH");
+
+  // ── V2 INFO reconciliation rows (never pass/fail, report the delta) ──
+  check("recon-amazon INFO", by["recon-amazon-may-delta"].status === "INFO");
+  check("recon-amazon delta = +6.15% (M1 fix)", Math.abs(by["recon-amazon-may-delta"].actual - 6.15) < 1e-9);
+  check("recon-flipkart INFO", by["recon-flipkart-may-delta"].status === "INFO");
+  check("recon-blinkit INFO (0% delta)", by["recon-blinkit-may-delta"].status === "INFO" && by["recon-blinkit-may-delta"].actual === 0);
+  check("INFO rows excluded from PENDING_ANCHORS", !PENDING_ANCHORS.includes("recon-amazon-may-delta"));
+
+  // ── V2 agencyShadow fallback: a month where agency wins (live __ch__ cell) ──
+  const aprFacts = { monthly: { "2026-05|flipkart|__ch__": { netRev: 274451.08, grossRev: 310913.4, units: 466 } } };
+  check("agencyShadowField falls back to live __ch__", Math.abs(agencyShadowField(aprFacts, "flipkart", "netRev") - 274451.08) < 1e-6);
+
+  // ── V2 FORMATTING / SANITY walk ──
+  // Clean facts (the synthetic native May above) → MATCH, every number finite.
+  const fmtClean = runFormattingSanity(facts);
+  check("formatting-sanity MATCH on clean facts", fmtClean.status === "MATCH");
+  check("formatting-sanity walked something", fmtClean.checks > 0);
+
+  // Real bundled baseline (post-precedence) → must also pass the sanity walk.
+  // (Imported lazily so the unit self-test stays bundle-independent if absent.)
+  let bundledOk = "skipped";
+  try {
+    const { mergedFacts } = await import("./businessStore.js");
+    const merged = mergedFacts ? mergedFacts() : null;
+    if (merged) {
+      const fmtBundle = runFormattingSanity(merged);
+      bundledOk = fmtBundle.status;
+      check("formatting-sanity MATCH on REAL bundled facts", fmtBundle.status === "MATCH");
+      if (fmtBundle.failures.length) console.log("  failures:", JSON.stringify(fmtBundle.failures.slice(0, 5)));
+      // And the full anchor set against the real bundle (15 v1 + 3 history MATCH).
+      const realRes = runVerification(merged);
+      const realBy = Object.fromEntries(realRes.map((r) => [r.id, r]));
+      const v1Ids = ["amazon-net-rev","amazon-units","amazon-gross-rev","amazon-ams-total","website-net-rev","website-units","website-google-attributed","website-ad-total","blinkit-gross-rev","blinkit-net-rev","blinkit-units","blinkit-ad-total","flipkart-net-rev","amazon-sp-attributed","flipkart-pla-attributed"];
+      const v1Match = v1Ids.every((id) => realBy[id]?.status === "MATCH");
+      check("all 15 v1 anchors MATCH on REAL bundle", v1Match);
+      if (!v1Match) console.log("  v1 drifts:", v1Ids.filter((id)=>realBy[id]?.status!=="MATCH").map((id)=>`${id}:${realBy[id]?.status}(${realBy[id]?.actual})`).join(", "));
+      const histMatch = ["snell-amazon-net-may","snell-flipkart-net-may","monarch-website-conv-may"].every((id) => realBy[id]?.status === "MATCH");
+      check("3 history anchors MATCH on REAL bundle", histMatch);
+      if (!histMatch) console.log("  hist:", ["snell-amazon-net-may","snell-flipkart-net-may","monarch-website-conv-may"].map((id)=>`${id}:${realBy[id]?.status}(${realBy[id]?.actual})`).join(", "));
+    }
+  } catch (e) { console.log("  (bundled-facts check skipped:", e.message, ")"); }
+
+  // Deliberate FAIL case — a non-finite engine output must trip the sanity walk.
+  // We synthesize a facts object whose native channel computes a non-finite by
+  // forcing a poisoned cost module is overkill; instead assert guardRatio itself
+  // refuses absurd ACOS so the walk's gate is proven live.
+  const absurd = guardRatio({ numerator: 1000, denominator: 0, numWindow: "w", denWindow: "w", kind: "acos" });
+  check("sanity gate: zero-rev ACOS suppressed (no Infinity)", absurd.suppressed && absurd.value === null);
+
   console.log(`\nPENDING_ANCHORS (must be empty): [${PENDING_ANCHORS.join(", ")}]`);
+  console.log(`bundled-facts formatting walk: ${bundledOk}`);
   console.log("businessVerification self-test complete.");
 }

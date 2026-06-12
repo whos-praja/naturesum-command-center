@@ -147,7 +147,10 @@ const NSData = (function () {
     if (a >= 10000000) return sign + "₹" + (a/10000000).toFixed(2) + " Cr";
     if (a >= 100000)   return sign + "₹" + (a/100000).toFixed(2) + " L";
     if (a >= 1000)     return sign + "₹" + (a/1000).toFixed(1) + "K";
-    return sign + "₹" + a;
+    // Sub-₹1000: render whole rupees, grouped. Rounding here is the V2.4 "never
+    // raw floats" guard — a small CM3 like −457.1165148… must read "−₹457", not
+    // its full float tail. (Previously this branch leaked the raw float.)
+    return sign + "₹" + Math.round(a).toLocaleString("en-IN");
   };
   // Format a number for display. Integers render as locale-grouped ("12,345").
   // Floats with a non-trivial fractional part render to 1 decimal place

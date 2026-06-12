@@ -525,6 +525,22 @@ input, select, textarea { font-family: inherit; font-size: inherit; }
 .badge.brand { background: var(--brand-soft); color: var(--brand); border-color: var(--brand-line); }
 .badge.dot::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: inline-block; }
 
+/* ---------- COVERAGE BADGES (Business Performance V2) ---------- */
+/* The honesty markers for a (month×channel) figure's data tier:
+   native = per-SKU revenue export · agency = Snell/Monarch channel-grain ·
+   MTD = partial month (still accruing). Used on PageSales / Finance / Marketing. */
+.cov-badge {
+  display: inline-flex; align-items: center;
+  font-size: 9.5px; font-weight: 600; line-height: 1;
+  padding: 2px 6px; border-radius: 4px;
+  letter-spacing: 0.02em; text-transform: uppercase;
+  border: 1px solid transparent; white-space: nowrap; vertical-align: middle;
+}
+.cov-badge.sm { font-size: 8.5px; padding: 1.5px 5px; }
+.cov-badge.cov-native { background: var(--success-soft); color: var(--success); border-color: #BFD3C4; }
+.cov-badge.cov-agency { background: var(--info-soft); color: var(--info); border-color: #BCCDD4; }
+.cov-badge.cov-mtd    { background: var(--warning-soft); color: var(--warning); border-color: #DBC487; }
+
 /* ---------- TABLE ---------- */
 .table {
   width: 100%;

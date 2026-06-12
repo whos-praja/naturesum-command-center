@@ -31,8 +31,21 @@ const NAV = [
   { id: "alerts",      label: "Alerts",          icon: "alerts",      roles: ["founder","office","ops","ads","marketplace","vcfo"] },
 ];
 
-const Sidebar = ({ active, onNav, role, alertsByRole }) => {
+// "2026-06-10" → "10 Jun 2026". Bad/missing input → null (caller falls back).
+const fmtDataDate = (iso) => {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, mo, d] = iso.split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(d)} ${names[Number(mo) - 1] || mo} ${y}`;
+};
+
+const Sidebar = ({ active, onNav, role, alertsByRole, dataProvenance }) => {
   const visible = NAV.filter(n => n.roles.includes(role));
+  // M6 — provenance footer. "Data through <latest fact date>" is the honest
+  // label: it is the newest date present in the fact store, NOT a sync clock.
+  // The build date is shown separately so neither reads as data staleness.
+  const dataThrough = fmtDataDate(dataProvenance?.latestDataDate);
+  const buildDate = fmtDataDate(dataProvenance?.appBuildDate);
   // simple split: first is Home, rest grouped under "WORKSPACE", alerts at end
   return (
     <aside className="sidebar">
@@ -71,11 +84,18 @@ const Sidebar = ({ active, onNav, role, alertsByRole }) => {
           <span className="dot"/>
           All integrations live
         </div>
-        <div style={{ paddingLeft: 12, color: "#6F756B", fontSize: 10.5 }}>
-          Last sync · 21 May, 10:42 IST
+        <div
+          style={{ paddingLeft: 12, color: "#6F756B", fontSize: 10.5 }}
+          title={
+            dataThrough
+              ? `Business fact store contains data up to ${dataThrough} (newest order/invoice/spend date across all sources). This is data freshness, not a live sync clock.`
+              : "Latest data date unavailable from the fact store."
+          }
+        >
+          {dataThrough ? `Data through · ${dataThrough}` : "Data freshness · —"}
         </div>
         <div style={{ marginTop: 8, color: "#9CA098" }}>
-          v1.0.4 · build 2026.05.21
+          {buildDate ? `app build · ${buildDate}` : "v1.0.4"}
         </div>
       </div>
     </aside>

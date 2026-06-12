@@ -289,3 +289,46 @@ output; `npm run build` clean. May headline: netRev ₹21,12,823 · CM1 ₹11,63
 (55.1%) · CM2 ₹6,45,619 (30.6%) · CM3 −₹48,283 (−2.3%) · CM4 hidden (no fixed
 cost set). See `docs/VERIFICATION-BUSINESS-2026-06.md` for the anchor table,
 hand-recomputed CM chains, durability proofs, and the 5 caveats.
+
+---
+
+## FIXER ROUND 1 (2026-06-12) — founder-analyst audit follow-up
+
+Four findings from the fresh-context founder-analyst review of the running tool, all fixed. All verification anchors stay green (15/15 v1 + 3 history MATCH on the rebuilt bundle); engine 17/17 + verification self-tests pass; `npm run build` clean.
+
+**[MAJOR] Finding 1 — Amazon history truncated at Jun-2025 in the headline Sales views.**
+The MoM table, channel-mix area, and AOV trend used `monthlyNetRevByChannel(facts, { lastN: 13 })`, clipping the 22-month monthly history (Amazon back to Aug-2024) to the last 13 months. The daily net-revenue chart's "all" range stopped at Jun-2025 because `thinDailyHistory(13)` dropped all daily cells older than 13 months for the localStorage budget.
+- `src/pages/PageSales.jsx` — removed the `lastN: 13` cap on `headline`; MoM / channel-mix / AOV now span the full Aug-2024→ monthly history (zero bundle cost — monthly facts already existed back that far).
+- `scripts/build-business-data.cjs` — `thinDailyHistory(monthsKept, keepFullSpan=["amazon"])` now retains Amazon's ENTIRE daily span (the 0-to-1 growth curve) while keeping the 13-month cap for FK/Blinkit/website. Rebuilt: Amazon daily now runs **2024-08-02 → 2026-06-10 (583 days)**; bundle 575 KB → 620 KB (+8%, justified). All anchors re-verified green.
+
+**[MINOR] Finding 4 — header/per-chart copy now matches the real coverage windows.** Updated the "How to read" note + the daily-chart, MoM, and section subtitles to state honestly that monthly views span the full agency history (Amazon Aug-2024, FK/website Jun-2025, Blinkit Dec-2025) and that daily grain follows the same per-channel windows. Added a per-channel "since <first day>" marker to the daily-chart legend so each series' window is explicit.
+
+**[MINOR] Finding 2 — wrong ad-basis label on Flipkart/Website rows (Finance page).** `AdBasisChip` showed "SP actual" (Amazon Sponsored Products terminology) on every ACTUAL-basis row including Flipkart and Website. Made the chip channel-aware (`ACTUAL_LABEL_BY_CHANNEL = { amazon: "SP actual", flipkart: "PLA actual", website: "Google actual" }`), matching the Marketing page vocabulary exactly. Applied `channel={…}` to the per-channel waterfall, the agency-month channel-CM table, and the SKU drill rows. Generic legend chips clarified to "per-product attribution (Amazon SP · Flipkart PLA · website Google)".
+
+**[MINOR] Finding 3 — platform-fee % inputs showed raw 4-decimal floats.** The Cost-inputs `FeeRow` input rendered `(fee.pct*100).toFixed(4)` → "27.5413%", violating the V2.4 "% to 1 decimal" contract. Now displays 1 decimal (27.5% / 24.8% / 10.4% / 23.3% / 25.7%); the precise baked fraction is unchanged in the engine, and the dirty-check compares against the shown 1-dp value so an untouched default never spuriously flags Save or rounds the stored fraction.
+
+---
+
+## FIXER ROUND 2 (2026-06-12) — v2 founder-analyst review: 6 minors closed + 5 "left on the table" views built
+
+The v2 business module passed a fresh founder-analyst review with **zero critical/major**. This round closes the 6 `[MINOR]` findings and builds the 5 upside views the reviewer flagged as data-already-loaded. All anchors stay green (18 v1+history MATCH + 3 INFO on the rebuilt bundle); engine + verification self-tests pass; `npm run build` clean; SSR-render of all three pages = zero render errors, zero raw-float (`\d{4,}\.\d{3,}`) hits.
+
+### The 6 minors
+
+- **[M1] Snell agency Amazon net was double-GST-discounted.** The build divided Snell "Final Net Without Review" (c22) by 1.05 — but that column is ALREADY net-of-GST, so every agency Amazon month ran ~5% low. `scripts/build-business-data.cjs` now uses `C.amzNet` **AS-IS** (no `/1.05`). Agency Amazon net corrected: **Nov-25 761,266 → 799,329 · Mar-26 1,215,940 → 1,276,737**; May agency net 1,213,769 (= **+6.15%** vs native 1,143,450 — return-tail/review timing; native still wins per V2.1, agency is shadow-only). Anchors `snell-amazon-net-may` (1,213,768.71) and `recon-amazon-may-delta` (+6.15%) updated and re-verified MATCH; the build's `netColumnChoice.amazon` note records the methodology. May agency-vs-native recon re-checked sane (+6.15% Amazon / +0.59% FK / 0% Blinkit-gross).
+- **[M2] Marketing all-period ad-spend headline (₹51.15L) itemized.** New `PeriodSpendItemization` hover-popover (same style as the AMS card) breaks the total down by channel — naming each channel's ad source incl. the **FK-side Google Spend column** on the Monarch Master Sheet for website — with each channel's spend window (first→last month). MTD June excluded.
+- **[M3] Agency-only Blinkit months get the Δ reconciliation chip.** New `BlinkitAgencyReconNote` (Finance waterfall) surfaces, for agency-tier Blinkit months, the proxy net (gross÷1.05, CESS-blind) vs the estimated true tax-netted net and the Δ — the same Δ treatment as the native↔agency note, badged "proxy — upload native to resolve."
+- **[M4] Alloc-by-rev rows excluded from the SKU "losing per ad rupee" COUNT.** Marketing's loss count is now `losingAll.filter(r => r.basis !== ALLOC)` (SKU-attributed only); alloc-by-rev loss-rows stay **visible (greyed)** in the table and are reported separately at the channel level ("+N alloc-by-rev channels above breakeven — channel-level, excluded from the count"). Caption + legend updated.
+- **[M5] CM-trend early-ramp months annotated, not alarming.** `CMTrendView` marks any month whose company (or channel) net revenue is below the low-base floor as **"low base · ₹X rev"**; the chart caps the plotted CM3% for those months (uncapped value stays in the tooltip + table) so Dec-24 (−268.6% CM3 over a tiny base) no longer crushes the axis or reads as an alarm.
+- **[M6] Footer "Last sync · 21 May 10:42 IST" replaced with data freshness.** The sidebar footer (`Nav.jsx`) now reads **"Data through · <latest data date>"** (= `meta.latestDataDate`, baked by the build as the max order/invoice/spend date across all facts = **10 Jun 2026**) plus **"app build · <date>"** as separate context. No more sync-clock that read as staleness.
+
+### The 5 upside views (data already in loaded sources; source-labelled per founder rule 9)
+
+- **[A] Retention + returns trend** (Sales) — `RetentionReturnsPanel` from BusinessModel "Repeats" + "Returns" tabs (HISTORICAL actuals): Shopify repeat % by quarter (**7.9% → 15.1%**), Amazon repeat share, returning-customer sales %, and Shopify returns % by month (14 months).
+- **[B] SEO keyword-rank panel** (Marketing) — `SeoKeywordRanks` from Monarch "SEO - Keywords" tab: top keywords with rank-now vs 30/90d-ago and movement arrows (30 kept keywords across 4 snapshots).
+- **[C] Google vs Meta efficiency** (Marketing) — `PlatformEfficiency` from Monarch daily Google/Meta ROAS+CPA columns: monthly ROAS + CPA per platform side-by-side (13 months) — the budgeting decision view, with a same-window guard and a one-line steer.
+- **[D] Per-SKU × channel monthly units mix** (Sales) — `SkuChannelMix` from Snell Categorywise daily per-SKU units (269 monthly SKU keys): the per-SKU drill gains a channel-split monthly-bars view ("which channel is this SKU winning/losing on").
+- **[E] Cancel-rate KPI** (Sales) — `CancelRatePanel` from Snell Sale-tab shipped-vs-cancel unit columns (+ Amazon All-Orders cancelled rows): cancel-rate trend per channel (amazon/flipkart/blinkit) with threshold coloring.
+
+### Gate result (FIXER ROUND 2, 2026-06-12)
+`runVerification(BUNDLED_BUSINESS)` = **18 MATCH · 3 INFO · 0 DRIFT/PENDING/NO-DATA**; `runFormattingSanity` walks 124 engine cells with 0 failures. cmEngine self-test 61/61, businessVerification self-test 34/34. `scripts/build-business-data.cjs` reproduces `bundledBusinessData.js` with zero data diff (timestamps only — idempotent). `npm run build` clean. SSR-render (PageSales/PageMarketing/PageFinance + every Finance tab) — **zero render errors, zero raw-float regex hits**; all minor + view markers present against real data. Harnesses: `scripts/ssr-gate.mjs`, `scripts/ssr-spotcheck.mjs`. M1 spot-check: agency Nov-25 amazon net **799,329** (sheet-consistent), Mar-26 **1,276,737**.
