@@ -46,6 +46,8 @@ import {
   returningRevenue,
   costChangeHistory,
   geoConcentration,
+  websiteReturnsTrend,
+  skuForecast,
 } from "../lib/bizAnalytics.js";
 // Shared biz presentation layer (rubric IX/72 — one red, one pill, one ⓘ).
 import {
@@ -82,6 +84,9 @@ import {
   CostChangeView,
   GeoConcentrationView,
   BasketTrendView,
+  WebsiteReturnsTrendView,
+  SkuForecastView,
+  SkuVariantFoldBadge,
 } from "../components/biz/InsightViews.jsx";
 
 /**
@@ -627,7 +632,7 @@ const PageSales = ({ initialTab } = {}) => {
             padded={false}
             style={{ marginBottom: 16 }}
           >
-            <SkuHistoryTable skuUnitsHistory={skuUnitsHistory} onDrill={setDrillSku} />
+            <SkuHistoryTable skuUnitsHistory={skuUnitsHistory} onDrill={setDrillSku} variantFold={facts.meta?.skuVariantFold || {}} />
           </Card>
 
           {/* MAY per-SKU revenue breakdown (native) + anomaly callouts. */}
@@ -691,6 +696,15 @@ const PageSales = ({ initialTab } = {}) => {
           >
             <ReturnsSection facts={facts} month={lastFullMonth} channels={channels} />
           </Card>
+
+          {/* VI/47 · the WEBSITE return-rate TREND + spike flags — the Shopify
+              counterpart to the Amazon/Flipkart cancel rate. The per-channel
+              Returns table above shows website "—" (no per-order return line in
+              source); this surfaces BusinessModel's 14-month Returns(Shopify)
+              series so website returns aren't a permanent dash. */}
+          <div style={{ marginBottom: 16 }}>
+            <WebsiteReturnsTrendView data={websiteReturnsTrend(facts)} D={D} title="Website return-rate trend · Shopify (spike-flagged)" />
+          </div>
 
           {/* CANCEL-RATE trend per channel. */}
           {cancel && (
@@ -1171,6 +1185,16 @@ function ForecastTab({ facts, channels, D }) {
       : {};
   const fc = useMemo(() => forecast(facts, { ...fcArgs, horizonMonths: 3 }), [facts, grain, channel, sku, allCh]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // VII-52 · the DEEP SKU-grain banded forecast — fits the agency per-SKU UNITS
+  // history (multi-month depth) then prices at the native realized ₹/unit, so the
+  // SKU forecast carries a real method + uncertainty band (not the thin 2-point
+  // native-revenue line the generic forecast() falls back to at SKU grain). Always
+  // computed for the selected SKU; surfaced below the chart whenever a SKU is in play.
+  const skuFc = useMemo(
+    () => (skuOptions.length ? skuForecast(facts, { sku: sku || skuOptions[0], channel: allCh ? undefined : channel, horizonMonths: 3 }) : null),
+    [facts, sku, channel, allCh, skuOptions]
+  );
+
   const grainLabel = grain === "company" ? "Company (all channels)"
     : grain === "channel" ? chMeta(channels.includes(channel) ? channel : channels[0]).name
       : `${skuShort(sku)}${allCh ? " · all channels" : ` · ${chMeta(channel).name}`}`;
@@ -1241,6 +1265,28 @@ function ForecastTab({ facts, channels, D }) {
       </div>
 
       <ForecastChart fc={fc} D={D} metric={metric} height={260} />
+
+      {/* VII-52 · DEEP SKU-grain banded forecast. The chart above is the generic
+          trailing-trend forecaster (company/channel/SKU on native revenue); this
+          panel is the dedicated SKU forecaster that fits the multi-month agency
+          per-SKU UNITS series and prices at the native ₹/unit — a real method +
+          uncertainty band at SKU grain, not the thin 2-point native line. Driven
+          by the same SKU selector above; switch grain to "SKU" to pick the SKU. */}
+      {skuFc && (
+        <div style={{ marginTop: 16 }}>
+          {grain !== "sku" && (
+            <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+              Deep SKU-grain forecast below is for <strong>{skuShort(sku || skuOptions[0])}</strong>{allCh ? " · all channels" : ` · ${chMeta(channel).name}`} — switch grain to <strong>SKU</strong> above to pick a different SKU/channel.
+            </div>
+          )}
+          <SkuForecastView
+            data={skuFc}
+            D={D}
+            skuLabel={skuShort(sku || skuOptions[0])}
+            title="SKU forecast · deep agency-units series · units · ₹ · CM3 (banded)"
+          />
+        </div>
+      )}
     </Card>
   );
 }
@@ -2222,7 +2268,7 @@ function buildSkuUnitsHistory(facts) {
   return { bySku, monthList: [...monthSet].sort() };
 }
 
-function SkuHistoryTable({ skuUnitsHistory, onDrill }) {
+function SkuHistoryTable({ skuUnitsHistory, onDrill, variantFold = {} }) {
   const { bySku, monthList } = skuUnitsHistory;
   const codes = Object.keys(bySku).sort((a, b) => bySku[b].total - bySku[a].total);
   if (codes.length === 0) {
@@ -2256,7 +2302,9 @@ function SkuHistoryTable({ skuUnitsHistory, onDrill }) {
               <td>
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   <span>{skuShort(code)} <span className="muted" style={{ fontSize: 11 }}>{skuVariant(code)}</span></span>
-                  <span className="sku">{code}</span>
+                  {/* I-7 · variant-fold badge — only when this canonical SKU actually
+                      folds >1 raw variant (Amazon `_MP` twin / Flipkart `*N`). */}
+                  <span className="sku">{code}<SkuVariantFoldBadge fold={variantFold[code]} /></span>
                 </div>
               </td>
               <td>

@@ -12,6 +12,10 @@
  *   CostChangeView        ← costChangeHistory(facts)          (f)
  *   GeoConcentrationView  ← geoConcentration(facts, {month})  (g)
  *   BasketTrendView       ← basketTrend(facts)                (VI-45)
+ *   WebsiteReturnsTrendView ← websiteReturnsTrend(facts)      (VI-47)
+ *   SkuForecastView       ← skuForecast(facts, {sku})         (VII-52)
+ *   SkuVariantFoldBadge   ← facts.meta.skuVariantFold[code]   (I-7)
+ *   AmazonSpDailyView     ← facts.meta.bySource["ads-amazon-sp"] (XI/III)
  *
  * Every ₹ via D.fmtINR (inr), %→1dp (pct1), integer units. Tables use overflowX
  * auto (no 390px overflow). Shared with the three biz pages.
@@ -450,6 +454,192 @@ export function MonarchSourceTabsView({ data, D = defaultD, title = "Monarch sou
           </div>
         </div>
       )}
+    </Shell>
+  );
+}
+
+// ── (VI-47) Shopify WEBSITE return-rate trend + spike flags. The website
+//    counterpart to the Amazon/Flipkart shipped-vs-cancel rate — the returns
+//    area showed "—" for website because nothing surfaced this monthly series. ──
+export function WebsiteReturnsTrendView({ data, D = defaultD, title = "Website return-rate trend (Shopify)" }) {
+  const inr = inrOf(D);
+  if (!data || !data.available || !Array.isArray(data.months) || data.months.length === 0) {
+    return <Shell title={title} badge={<span className="cov-badge cov-agency sm">website</span>}>
+      <div className="muted" style={{ fontSize: 12.5 }}>{data?.note || "No website return series in source — website returns read as no-data, never a fabricated 0."}</div>
+    </Shell>;
+  }
+  const months = data.months;
+  const maxPct = Math.max(1, ...months.map((m) => Number(m.returnPct) || 0));
+  const latest = data.latest;
+  const prior = data.prior;
+  // MoM direction on the latest read (return-% DOWN is good → success colour).
+  const latestDelta = latest && Number.isFinite(latest.momDeltaPts) ? latest.momDeltaPts : null;
+  return (
+    <Shell title={title} badge={<span className="cov-badge cov-agency sm">BusinessModel · Returns(Shopify)</span>} note={data.note}>
+      {/* Headline: latest return-% + MoM move + series mean / peak. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "baseline", marginBottom: 10 }}>
+        <div>
+          <div className="muted" style={{ fontSize: 10 }}>Latest ({fmtMonth(latest?.month)})</div>
+          <div className="mono" style={{ fontSize: 16, color: latest && latest.spike ? "var(--critical)" : "var(--ink)" }}>{Number.isFinite(latest?.returnPct) ? `${latest.returnPct.toFixed(1)}%` : "—"}</div>
+          {latestDelta != null && (
+            <div className="muted" style={{ fontSize: 10, color: latestDelta <= 0 ? "var(--success)" : "var(--warning)" }}>
+              {latestDelta <= 0 ? "▼" : "▲"} {Math.abs(latestDelta).toFixed(1)}pts vs {fmtMonth(prior?.month)}
+            </div>
+          )}
+        </div>
+        <div><div className="muted" style={{ fontSize: 10 }}>On gross</div><div className="mono" style={{ fontSize: 13 }}>{inr(latest?.grossInr)}</div><div className="muted" style={{ fontSize: 9.5 }}>{inr(latest?.returnsInr)} returned</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>Series mean</div><div className="mono" style={{ fontSize: 13 }}>{Number.isFinite(data.mean) ? `${data.mean.toFixed(1)}%` : "—"}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>Peak</div><div className="mono" style={{ fontSize: 13, color: "var(--critical)" }}>{data.peak ? `${data.peak.returnPct.toFixed(1)}%` : "—"}</div><div className="muted" style={{ fontSize: 9.5 }}>{data.peak ? fmtMonth(data.peak.month) : ""}</div></div>
+      </div>
+      {/* Monthly return-% bars; spike months tinted critical + ⚑. */}
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 56, marginBottom: 4 }}>
+        {months.map((m) => (
+          <div key={m.month} title={`${fmtMonth(m.month)}: ${m.returnPct.toFixed(1)}% return${m.spike ? ` · SPIKE (${m.spikeReason})` : ""}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+            <div style={{ width: "100%", maxWidth: 20, height: `${Math.max(4, ((Number(m.returnPct) || 0) / maxPct) * 100)}%`, background: m.spike ? "var(--critical)" : "#E47911", opacity: m.spike ? 0.95 : 0.78, borderRadius: "2px 2px 0 0" }} />
+            <span className="muted" style={{ fontSize: 8, whiteSpace: "nowrap" }}>{fmtMonth(m.month).split(" ")[0]}</span>
+          </div>
+        ))}
+      </div>
+      {/* Spike callout — names the months that broke pattern. */}
+      {(data.spikes || []).length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--critical)", lineHeight: 1.45 }}>
+          ⚑ Return spikes (≥{data.spikeSigma}σ above trailing mean or ≥8pts MoM): {data.spikes.map((s) => `${fmtMonth(s.month)} ${s.returnPct.toFixed(1)}%`).join(", ")}
+        </div>
+      )}
+    </Shell>
+  );
+}
+
+// ── (VII-52) SKU-grain banded forecast — fits the DEEP agency UNITS series then
+//    prices at the native realized ₹/unit, so the SKU forecast carries a real
+//    method + uncertainty band (not the thin 2-point native-revenue line). ──
+function confTone(c) {
+  return c === "medium" ? "var(--success)" : c === "low" ? "var(--warning)" : c === "very-low" ? "var(--critical)" : "var(--ink-3)";
+}
+export function SkuForecastView({ data, D = defaultD, title = "SKU forecast · units · ₹ · CM3 (banded)", skuLabel }) {
+  const inr = inrOf(D);
+  if (!data || !Array.isArray(data.forecast) || data.forecast.length === 0) {
+    return <Shell title={title} badge={<span className="cov-badge cov-agency sm">agency units</span>}>
+      <div className="muted" style={{ fontSize: 12.5 }}>{data?.note || "— no forecastable history for this SKU."}</div>
+    </Shell>;
+  }
+  const head = skuLabel || data.sku;
+  const chTag = data.channel ? data.channel : "all channels";
+  const unitsOnly = data.pricePerUnit == null; // ₹/CM3 withheld (never fabricated).
+  return (
+    <Shell
+      title={title}
+      badge={<span className="cov-badge cov-agency sm">{head} · {chTag}</span>}
+      note={data.note}
+    >
+      {/* Method + confidence — the stated rubric-52 method string, verbatim. */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <span className="badge" style={{ fontSize: 9.5, background: "var(--border-soft)", color: confTone(data.confidence) }}>confidence · {data.confidence}</span>
+        <span className="muted" style={{ fontSize: 10 }}>{data.basis}</span>
+      </div>
+      <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.5, marginBottom: 10 }}>
+        <strong>Method.</strong>&nbsp;{data.method}
+      </div>
+      {/* Forward rows: units / ₹ / CM3 each with a low–high band. */}
+      <div style={{ width: "100%", overflowX: "auto" }}>
+        <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+          <thead>
+            <tr style={{ textAlign: "right", color: "var(--ink-3)", borderBottom: "1px solid var(--border)" }}>
+              <th style={{ textAlign: "left", padding: "5px 8px" }}>Month</th>
+              <th style={{ padding: "5px 8px" }}>Units (band)</th>
+              <th style={{ padding: "5px 8px" }}>Net ₹ (band)</th>
+              <th style={{ padding: "5px 8px" }}>CM3 (band)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.forecast.map((p) => (
+              <tr key={p.month} style={{ borderBottom: "1px solid var(--border-soft)" }}>
+                <td style={{ textAlign: "left", padding: "5px 8px" }}>{fmtMonth(p.month)}{p.partial && <span className="muted" style={{ fontSize: 9 }}> · MTD-paced</span>}</td>
+                <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{u(p.units)} <span className="muted" style={{ fontSize: 9.5 }}>({u(p.unitsLow)}–{u(p.unitsHigh)})</span></td>
+                <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{unitsOnly ? "—" : <>{inr(p.netRev)} <span className="muted" style={{ fontSize: 9.5 }}>({inr(p.netRevLow)}–{inr(p.netRevHigh)})</span></>}</td>
+                <td className="mono" style={{ textAlign: "right", padding: "5px 8px", color: p.cm3 != null && p.cm3 < 0 ? "var(--critical)" : "var(--ink)" }}>{unitsOnly || p.cm3 == null ? "—" : <>{inr(p.cm3)} <span className="muted" style={{ fontSize: 9.5 }}>({inr(p.cm3Low)}–{inr(p.cm3High)})</span></>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {unitsOnly && (
+        <div className="muted" style={{ fontSize: 10, marginTop: 6 }}>Units forecast only — no native realized ₹/unit for this SKU, so ₹ and CM3 are withheld (never fabricated).</div>
+      )}
+    </Shell>
+  );
+}
+
+// ── (I-7) SKU-variant fold badge — a small inspectable badge reading
+//    "NSSBJ500 = NSSBJ500ML + NSSBJ500ML_MP folded" (Amazon `_MP` twin) or
+//    Flipkart `*N` multipack. Renders ONLY when a SKU actually folds >1 variant.
+//    `fold` is facts.meta.skuVariantFold[canonicalCode]. ──
+export function SkuVariantFoldBadge({ fold }) {
+  if (!fold || !fold.anyFolded || !fold.byChannel) return null;
+  // pick the channel that actually folded (>1 component); skip 1-component groups.
+  const entry = Object.values(fold.byChannel).find((c) => c && c.folded && Array.isArray(c.components) && c.components.length > 1);
+  if (!entry) return null;
+  const chShort = entry.channel === "flipkart" ? "FK" : entry.channel === "amazon" ? "AMZ" : String(entry.channel || "").slice(0, 3).toUpperCase();
+  const tip = `${entry.label}\n${entry.rule || ""}${entry.components ? "\nComponents: " + entry.components.map((c) => `${c.rawSku} (${u(c.units)}u${c.isMp ? " · _MP" : ""})`).join(", ") : ""}`;
+  return (
+    <span
+      className="badge"
+      title={tip}
+      style={{ fontSize: 8.5, marginLeft: 6, background: "var(--border-soft)", color: "var(--ink-3)", cursor: "help", verticalAlign: "middle" }}
+    >
+      ⨁ {chShort} ×{entry.components.length} folded
+    </span>
+  );
+}
+
+// ── (XI/III) Amazon SP per-DAY spend series — the ₹ anchor re-derived from the
+//    per-ASIN file's own daily series (Σ by-day = the SP total, reconciliation
+//    ties). Distinct from the Snell channel-grain total: this is the SP file's
+//    OWN daily granularity. `data` is facts.meta.bySource["ads-amazon-sp"]. ──
+export function AmazonSpDailyView({ data, D = defaultD, title = "Amazon SP per-day spend (per-ASIN file)" }) {
+  const inr = inrOf(D);
+  const byDay = data && data.byDay ? data.byDay : null;
+  const days = byDay ? Object.keys(byDay).sort() : [];
+  if (!byDay || days.length === 0) {
+    return <Shell title={title} badge={<span className="cov-badge cov-native sm">Amazon SP · native</span>}>
+      <div className="muted" style={{ fontSize: 12.5 }}>No Amazon SP per-day series in source (needs the per-ASIN SP export).</div>
+    </Shell>;
+  }
+  const series = days.map((d) => ({ date: d, spend: Number(byDay[d]) || 0 }));
+  const total = data.amazonSpTotal != null ? Number(data.amazonSpTotal) : series.reduce((a, s) => a + s.spend, 0);
+  const maxV = Math.max(1, ...series.map((s) => s.spend));
+  const avg = series.length ? total / series.length : 0;
+  const rec = data.reconciliation || null;
+  const ties = rec ? !!rec.ties : null;
+  const fmtDay = (iso) => { const [, , dd] = String(iso).split("-"); return dd ? `${parseInt(dd, 10)} ${fmtMonth(iso).split(" ")[0]}` : iso; };
+  return (
+    <Shell
+      title={title}
+      badge={<span className="cov-badge cov-native sm">Amazon SP · native · {days.length} days</span>}
+      note={`Σ of the ${days.length} daily per-ASIN spend cells = ${inr(total)} — the attributed-SP anchor re-derives end-to-end from this daily series${ties ? " (reconciliation ties)" : ""}. Window ${data.span ? `${data.span.first} → ${data.span.last}` : ""}.`}
+    >
+      <div style={{ display: "flex", gap: 18, marginBottom: 10, flexWrap: "wrap" }}>
+        <div><div className="muted" style={{ fontSize: 10 }}>SP total (Σ days)</div><div className="mono" style={{ fontSize: 16 }}>{inr(total)}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>Avg / day</div><div className="mono" style={{ fontSize: 16 }}>{inr(avg)}</div></div>
+        <div><div className="muted" style={{ fontSize: 10 }}>Days</div><div className="mono" style={{ fontSize: 16 }}>{u(days.length)}</div></div>
+        {ties != null && (
+          <div><div className="muted" style={{ fontSize: 10 }}>Reconciles</div><div className="mono" style={{ fontSize: 16, color: ties ? "var(--success)" : "var(--warning)" }}>{ties ? "ties ✓" : "drift"}</div></div>
+        )}
+      </div>
+      {/* per-day spend sparkline (bars). */}
+      <svg viewBox="0 0 100 30" preserveAspectRatio="none" style={{ width: "100%", height: 64, display: "block" }}>
+        {series.map((s, i) => {
+          const bw = 100 / series.length;
+          const h = (s.spend / maxV) * 28;
+          return <rect key={i} x={i * bw + bw * 0.12} y={30 - h} width={bw * 0.76} height={Math.max(0.4, h)} fill="#E47911" opacity={0.82}>
+            <title>{`${fmtDay(s.date)} · ${inr(s.spend)}`}</title>
+          </rect>;
+        })}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+        <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(series[0].date)}</span>
+        <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(series[series.length - 1].date)}</span>
+      </div>
     </Shell>
   );
 }

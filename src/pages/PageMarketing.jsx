@@ -35,7 +35,7 @@ import BizStateGuard from "../components/biz/BizStateGuard.jsx";
 import { BlinkitAdProxy } from "../components/biz/BlinkitAdProxy.jsx";
 import { ForecastChart } from "../components/biz/ForecastChart.jsx";
 import { ActionQueue } from "../components/biz/ActionQueue.jsx";
-import { CashbackTrendView, ConversionGapView, MonarchSourceTabsView } from "../components/biz/InsightViews.jsx";
+import { CashbackTrendView, ConversionGapView, MonarchSourceTabsView, AmazonSpDailyView } from "../components/biz/InsightViews.jsx";
 
 /**
  * PageMarketing — Business Performance module, V2 ADDENDUM (2026-06-12).
@@ -385,6 +385,15 @@ const PageMarketing = () => {
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
         <AmsDailySpend facts={facts} D={D} skuMonth={skuMonth} />
         <WebsiteSplit facts={facts} D={D} />
+      </div>
+
+      {/* ── 3b. XI/III · Amazon SP per-DAY spend series (per-ASIN file's OWN daily
+          granularity). The AMS panel above uses the Snell channel-grain total and
+          cites the SP file's total only as a scalar cross-check; this surfaces the
+          SP file's per-day series so the ₹3,55,115 attributed-SP anchor is
+          re-derivable end-to-end (Σ by-day = total, reconciliation ties). ──────── */}
+      <div style={{ marginBottom: 14 }}>
+        <AmazonSpDailyView data={facts?.meta?.bySource?.["ads-amazon-sp"]} D={D} title="Amazon SP per-day spend · per-ASIN file (₹ anchor re-derived)" />
       </div>
 
       {/* ── (c) · Ad-reporting inflation + (d) Flipkart cashback settlement drag.
