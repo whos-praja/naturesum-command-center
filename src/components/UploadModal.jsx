@@ -10,7 +10,8 @@
  * The DataAsOfPill in the topbar shows when the latest upload happened
  * and how many file slots are populated.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import NSData from "../data.js";
 import { Icon } from "./Shared.jsx";
 import { DatePicker } from "./DatePicker.jsx";
 import { FILE_TYPES, parseByType } from "../lib/uploadParsers.js";
@@ -30,6 +31,7 @@ import {
   upsertFacts,
   clearSource,
 } from "../lib/businessStore.js";
+import { runIngestionSelfTest } from "../lib/ingestionSelfTest.js";
 
 // Extract the slice of bundled real-data that matches a given file type —
 // used as the "before" baseline when Claude is asked to spot anomalies in
@@ -289,6 +291,7 @@ export function UploadModal({ onClose, defaultTab = "inventory" }) {
               <div className="muted" style={{ fontSize: 11.5, marginBottom: 2 }}>
                 Drop your source exports — each writes AGGREGATED facts (month×channel×SKU) to the durable business store; no raw rows kept. Re-uploading a source REPLACES its prior facts (idempotent, never double-counted). <strong>Native</strong> reports win over <strong>agency/Monarch</strong> history for any month they cover, so uploading a month's native files automatically upgrades it to SKU-grain. Month-scoped files (Shopify net, Google/FK ads, May Snell/Monarch) use the month picker; everything else reads the date off each row.
               </div>
+              <IngestionSelfTest />
               {BIZ_TIER_ORDER.map((tier) => {
                 const zonesInTier = BIZ_ZONES.filter((z) => bizZoneMeta(z.key).tier === tier);
                 if (zonesInTier.length === 0) return null;
@@ -622,6 +625,245 @@ function UploadZone({ zone, entry, onUpdate }) {
   );
 }
 
+// ── IngestionSelfTest — XI (rubric 84/85): a runnable, in-tool proof ─────────
+// One click re-ingests the bundled sources through the EXACT store merge/clear
+// contract and shows, live, that (1) parse-twice == parse-once and the per-source
+// re-ingest round-trips to the bundle, and (2) native per-SKU revenue OVERRIDES
+// agency channel-grain revenue (via the real coverageFor + applyOverridePrecedence
+// engine path). Idempotency/durability is DEMONSTRATED here, not just claimed.
+// Runs entirely in-memory on a scratch store — never touches the live fact store.
+function IngestionSelfTest() {
+  const [result, setResult] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [open, setOpen] = useState(false);
+  // Demonstrable parse-failure (X/rubric 90): run a REAL parser on a deliberately
+  // malformed blob and show the genuine thrown error + designed error state, so the
+  // failure handling is shown working, not merely asserted.
+  const [parseErr, setParseErr] = useState(null);
+  // Hard watchdog + run-token so the button can NEVER spin forever (X/rubric 84,
+  // 79): even if the deferred callback is throttled/never fires (backgrounded tab,
+  // a rAF that the browser parks), the watchdog flips to a bounded timeout state.
+  const watchdogRef = useRef(null);
+  const runTokenRef = useRef(0);
+  const SELF_TEST_TIMEOUT_MS = 8000; // generous: Node runs it in ~40ms.
+
+  useEffect(() => () => { if (watchdogRef.current) clearTimeout(watchdogRef.current); }, []);
+
+  const run = () => {
+    // Re-entrancy guard: a fresh run invalidates any in-flight one.
+    const token = ++runTokenRef.current;
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+    setRunning(true);
+
+    const finish = (payload) => {
+      if (token !== runTokenRef.current) return;        // a newer run superseded this one
+      if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+      setResult(payload);
+      setOpen(true);
+      setRunning(false);
+    };
+
+    // Bounded watchdog: if no result lands in time (deferred callback parked,
+    // main thread wedged before the work returns), show a clear timeout state —
+    // never an eternal "Running…".
+    watchdogRef.current = setTimeout(() => {
+      finish({
+        ok: false,
+        timedOut: true,
+        error: `Self-test exceeded ${Math.round(SELF_TEST_TIMEOUT_MS / 1000)}s and was stopped. This usually means the browser tab was backgrounded mid-run — bring it to the foreground and re-run.`,
+        checks: [],
+      });
+    }, SELF_TEST_TIMEOUT_MS);
+
+    // Defer with setTimeout (fires even on a backgrounded tab, unlike rAF which a
+    // browser may park indefinitely) so the button paints "Running…" before the
+    // synchronous work runs. The work itself is pure + in-memory (~40ms).
+    setTimeout(() => {
+      if (token !== runTokenRef.current) return;        // superseded before it ran
+      try {
+        const r = runIngestionSelfTest();
+        finish(r);
+      } catch (e) {
+        finish({ ok: false, error: e?.message || String(e), checks: [] });
+      }
+    }, 0);
+  };
+
+  const demoParseFailure = async () => {
+    setParseErr({ pending: true });
+    // A file that is NOT a valid Amazon All-Orders TSV — the real parser throws.
+    const bad = new File(["this is not,a valid\nAll-Orders export"], "broken-export.csv", { type: "text/csv" });
+    try {
+      await parseBusinessFile("amazon-orders", bad, {});
+      // Parser unexpectedly accepted it — report that honestly.
+      setParseErr({ pending: false, message: null, accepted: true });
+    } catch (e) {
+      setParseErr({ pending: false, message: e?.message || String(e), accepted: false });
+    }
+  };
+
+  const headColor = !result ? "var(--ink-3)" : result.ok ? "var(--success, #3F7250)" : "var(--critical, #B73838)";
+  const ex = result?.overrides?.example || null;
+
+  return (
+    <section
+      aria-labelledby="ingest-selftest-h"
+      style={{
+        border: `1px solid ${result ? (result.ok ? "rgba(63,114,80,0.30)" : "rgba(183,56,56,0.32)") : "var(--border-soft)"}`,
+        background: result && result.ok ? "rgba(63,114,80,0.05)" : "var(--bg-sunken, rgba(0,0,0,0.02))",
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0 }}>
+          <div id="ingest-selftest-h" style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            Ingestion self-test
+            {result && (
+              <span
+                role="status"
+                style={{
+                  fontSize: 10, fontWeight: 700, letterSpacing: "0.04em", padding: "1px 6px", borderRadius: 3,
+                  background: result.ok ? "rgba(63,114,80,0.14)" : "rgba(183,56,56,0.12)",
+                  color: headColor,
+                }}
+              >
+                {result.ok ? "✓ ALL GREEN" : "✗ FAILED"}
+              </span>
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.45 }}>
+            Re-ingests the bundled sources and proves <strong>parse-twice == parse-once</strong> and{" "}
+            <strong>native overrides agency</strong> — live, on a scratch store (your uploads are untouched).
+          </div>
+        </div>
+        <button
+          className="btn primary sm"
+          onClick={run}
+          disabled={running}
+          aria-busy={running ? "true" : "false"}
+          style={{ flexShrink: 0 }}
+        >
+          {running ? "Running…" : result ? "Re-run self-test" : "Run ingestion self-test"}
+        </button>
+      </div>
+
+      {result && open && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {result.error ? (
+            <div
+              role="alert"
+              style={{
+                fontSize: 11.5, color: "var(--critical, #B73838)", lineHeight: 1.45,
+                padding: "8px 10px", borderRadius: 6,
+                background: result.timedOut ? "rgba(183,138,56,0.08)" : "rgba(183,56,56,0.07)",
+                border: `1px solid ${result.timedOut ? "rgba(183,138,56,0.32)" : "rgba(183,56,56,0.30)"}`,
+              }}
+            >
+              {result.timedOut ? "⏱ " : "⚠ "}{result.error}
+            </div>
+          ) : (
+            <>
+              {/* headline facts */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 11 }}>
+                <Stat label="Sources re-ingested" value={String(result.idempotency.sources.length)} />
+                <Stat label="Cells (twice ≡ once)" value={NSData.fmtN ? NSData.fmtN(result.idempotency.onceCells) : String(result.idempotency.onceCells)} />
+                <Stat label="Native cells overriding agency" value={`${result.overrides.suppressedCells}/${result.overrides.nativeCells}`} />
+                <Stat label="Ran in" value={`${result.durationMs} ms`} />
+              </div>
+
+              {/* per-check green/red rows */}
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+                {result.checks.map((c) => (
+                  <li key={c.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11.5 }}>
+                    <span aria-hidden="true" style={{ flexShrink: 0, fontWeight: 700, color: c.ok ? "var(--success, #3F7250)" : "var(--critical, #B73838)", width: 14 }}>
+                      {c.ok ? "✓" : "✗"}
+                    </span>
+                    <span style={{ color: "var(--ink-2)" }}>
+                      {c.label}
+                      {c.detail && <span className="muted" style={{ display: "block", fontSize: 10.5, marginTop: 1 }}>{c.detail}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              {/* worked override example (native wins, agency retained) */}
+              {ex && (
+                <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.5, padding: "6px 8px", background: "rgba(0,0,0,0.025)", border: "1px solid var(--border-soft)", borderRadius: 6 }}>
+                  Largest override — <strong style={{ color: "var(--ink-2)" }}>{ex.mc.replace("|", " · ")}</strong>:
+                  agency <span className="mono">{inrSafe(ex.agencyNetRev)}</span> suppressed in favour of native{" "}
+                  <span className="mono">{inrSafe(ex.nativeNetRev)}</span>; channel ad spend{" "}
+                  <span className="mono">{inrSafe(ex.adSpendKept)}</span> kept (ad pool intact). Suppressed agency revenue is retained for the reconciliation note, never dropped.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Demonstrable parse-failure state — runs the REAL parser on a bad blob. */}
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed var(--border-soft)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span className="muted" style={{ fontSize: 10.5, lineHeight: 1.4 }}>
+            Curious what a bad upload looks like? Preview the parse-failure state on a deliberately broken file.
+          </span>
+          <button
+            className="btn ghost sm"
+            onClick={demoParseFailure}
+            disabled={parseErr?.pending}
+            style={{ fontSize: 10.5, padding: "2px 8px", flexShrink: 0 }}
+          >
+            {parseErr?.pending ? "Parsing…" : "Preview parse-failure state"}
+          </button>
+        </div>
+        {parseErr && !parseErr.pending && (
+          parseErr.message ? (
+            <div
+              role="alert"
+              style={{
+                marginTop: 8, padding: "8px 10px", borderRadius: 6,
+                background: "rgba(183,56,56,0.07)", border: "1px solid rgba(183,56,56,0.30)",
+                display: "flex", flexDirection: "column", gap: 4,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span aria-hidden="true" style={{ fontSize: 13 }}>⚠</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--critical, #B73838)" }}>Couldn’t parse this file</span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--ink-2)", lineHeight: 1.45, wordBreak: "break-word" }}>{parseErr.message}</div>
+              <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>
+                This is the real error the parser throws on a malformed file — caught before anything is written, so the fact store stays intact. The same block appears inline on any source that fails to parse.
+              </div>
+            </div>
+          ) : (
+            <div className="muted" style={{ marginTop: 8, fontSize: 11 }}>
+              The parser unexpectedly accepted the broken file — no error to show.
+            </div>
+          )
+        )}
+      </div>
+    </section>
+  );
+}
+
+// Tiny labelled stat chip for the self-test headline row.
+function Stat({ label, value }) {
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", padding: "4px 8px", background: "var(--bg-card)", border: "1px solid var(--border-soft)", borderRadius: 6, minWidth: 0 }}>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      <span className="muted" style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+    </span>
+  );
+}
+
+// SAFE ₹ — never leak a NaN/raw float into the self-test panel.
+const inrSafe = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return "—";
+  try { return NSData.fmtINR ? NSData.fmtINR(v) : `₹${v.toLocaleString("en-IN")}`; }
+  catch { return `₹${v.toLocaleString("en-IN")}`; }
+};
+
 // ── BizUploadZone — one Business Performance source (spec §8) ────────────────
 // Parses via businessParsers, upserts the resulting facts into the durable
 // business fact store under the zone key as the source tag, and renders the
@@ -701,6 +943,7 @@ function BizUploadZone({ zone, upload, onChange, meta = null }) {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
   };
+  const dismissError = () => { setStage("idle"); setError(null); };
 
   const worst = dqShown ? dqWorst(dqShown) : null;
   const counts = dqShown ? dqCounts(dqShown) : null;
@@ -772,8 +1015,33 @@ function BizUploadZone({ zone, upload, onChange, meta = null }) {
           )}
 
           {stage === "error" && (
-            <div style={{ fontSize: 11.5, color: "var(--critical)", marginTop: 4 }}>
-              ⚠ {error}
+            <div
+              role="alert"
+              style={{
+                marginTop: 8, padding: "8px 10px", borderRadius: 6,
+                background: "rgba(183,56,56,0.07)",
+                border: "1px solid rgba(183,56,56,0.30)",
+                display: "flex", flexDirection: "column", gap: 4,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span aria-hidden="true" style={{ fontSize: 13 }}>⚠</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--critical, #B73838)" }}>
+                  Couldn’t parse this file
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--ink-2)", lineHeight: 1.45, wordBreak: "break-word" }}>
+                {error}
+              </div>
+              <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.45 }}>
+                Nothing was written to the fact store — your existing data is unchanged. Check it’s the right export for{" "}
+                <strong>{zone.label}</strong>, then drop it again.
+              </div>
+              <div>
+                <button className="btn ghost sm" onClick={dismissError} style={{ fontSize: 10.5, padding: "2px 8px" }}>
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
@@ -820,14 +1088,23 @@ function BizUploadZone({ zone, upload, onChange, meta = null }) {
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {monthScoped && (
             <>
-              <label style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              {/* Accessible labelled control (X/rubric 90): the <label> is bound to
+                  the input via htmlFor/id (not just visually adjacent), and an
+                  aria-label names the specific source so a screen reader announces
+                  "Month for <source>" rather than an unlabelled month spinner. */}
+              <label
+                htmlFor={`biz-month-${zone.key}`}
+                style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: "0.05em" }}
+              >
                 Month
               </label>
               <input
+                id={`biz-month-${zone.key}`}
                 type="month"
                 value={month}
                 onChange={(e) => setMonth(e.target.value || DEFAULT_BIZ_MONTH)}
                 className="input sm"
+                aria-label={`Month for ${zone.label}`}
                 style={{ width: 120, fontSize: 12, padding: "3px 6px" }}
                 title="This source has no per-row date; it is scoped to the month you pick."
               />

@@ -16904,92 +16904,107 @@ export const BUNDLED_BUSINESS = {
     "uploads": [
       {
         "sourceTag": "amazon-orders",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "fk-sales",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "blinkit-sales",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "shopify-net",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "shopify-daily",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "ads-amazon-sp",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "ads-fk-pla",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "ads-google",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "snell-agency",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-web",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "snell-history",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "snell-sku-units",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-history",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "snell-cancel",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-seo",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-platform",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "bm-repeats",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       },
       {
         "sourceTag": "bm-returns",
-        "at": "2026-06-12T10:40:20.817Z",
+        "at": "2026-06-13T15:04:17.609Z",
+        "baked": true
+      },
+      {
+        "sourceTag": "snell-ordermix",
+        "at": "2026-06-13T15:04:17.609Z",
+        "baked": true
+      },
+      {
+        "sourceTag": "monarch-extra",
+        "at": "2026-06-13T15:04:17.609Z",
+        "baked": true
+      },
+      {
+        "sourceTag": "cogs-history",
+        "at": "2026-06-13T15:04:17.609Z",
         "baked": true
       }
     ],
@@ -17016,6 +17031,257 @@ export const BUNDLED_BUSINESS = {
           "units": 23,
           "value": 17155
         },
+        "geo": {
+          "source": "amazon-all-orders ship-state",
+          "asOf": null,
+          "byMonthState": {
+            "2026-05|UTTAR PRADESH": {
+              "units": 146,
+              "netRev": 120473.23,
+              "returns": 5
+            },
+            "2026-05|MAHARASHTRA": {
+              "units": 150,
+              "netRev": 116896.15,
+              "returns": 3
+            },
+            "2026-05|UTTARAKHAND": {
+              "units": 31,
+              "netRev": 24609.52,
+              "returns": 0
+            },
+            "2026-05|WEST BENGAL": {
+              "units": 87,
+              "netRev": 72322.78,
+              "returns": 1
+            },
+            "2026-05|BIHAR": {
+              "units": 45,
+              "netRev": 40431.4,
+              "returns": 2
+            },
+            "2026-05|DELHI": {
+              "units": 128,
+              "netRev": 106203.69,
+              "returns": 2
+            },
+            "2026-05|JHARKHAND": {
+              "units": 31,
+              "netRev": 22313.33,
+              "returns": 0
+            },
+            "2026-05|JAMMU & KASHMIR": {
+              "units": 19,
+              "netRev": 15189.55,
+              "returns": 0
+            },
+            "2026-05|TELANGANA": {
+              "units": 59,
+              "netRev": 49304.71,
+              "returns": 1
+            },
+            "2026-05|PUNJAB": {
+              "units": 120,
+              "netRev": 109572.31,
+              "returns": 0
+            },
+            "2026-05|RAJASTHAN": {
+              "units": 71,
+              "netRev": 59648.58,
+              "returns": 2
+            },
+            "2026-05|KARNATAKA": {
+              "units": 74,
+              "netRev": 63579.99,
+              "returns": 1
+            },
+            "2026-05|ASSAM": {
+              "units": 23,
+              "netRev": 18086.63,
+              "returns": 1
+            },
+            "2026-05|GOA": {
+              "units": 4,
+              "netRev": 2681.9,
+              "returns": 0
+            },
+            "2026-05|TAMIL NADU": {
+              "units": 21,
+              "netRev": 19293.34,
+              "returns": 0
+            },
+            "2026-05|HIMACHAL PRADESH": {
+              "units": 10,
+              "netRev": 8612.38,
+              "returns": 0
+            },
+            "2026-05|MADHYA PRADESH": {
+              "units": 37,
+              "netRev": 28576.18,
+              "returns": 1
+            },
+            "2026-05|MEGHALAYA": {
+              "units": 6,
+              "netRev": 5497.13,
+              "returns": 0
+            },
+            "2026-05|GUJARAT": {
+              "units": 90,
+              "netRev": 72306.68,
+              "returns": 1
+            },
+            "2026-05|ANDAMAN & NICOBAR ISLANDS": {
+              "units": 4,
+              "netRev": 3919.99,
+              "returns": 0
+            },
+            "2026-05|HARYANA": {
+              "units": 82,
+              "netRev": 64168.54,
+              "returns": 1
+            },
+            "2026-05|UTRAKHAND": {
+              "units": 1,
+              "netRev": 657.14,
+              "returns": 0
+            },
+            "2026-05|ODISHA": {
+              "units": 34,
+              "netRev": 25963.82,
+              "returns": 2
+            },
+            "2026-05|CHHATTISGARH": {
+              "units": 19,
+              "netRev": 17224.74,
+              "returns": 0
+            },
+            "2026-05|NAGALAND": {
+              "units": 4,
+              "netRev": 2919.04,
+              "returns": 0
+            },
+            "2026-05|ANDHRA PRADESH": {
+              "units": 35,
+              "netRev": 30935.2,
+              "returns": 0
+            },
+            "2026-05|GUJURAT": {
+              "units": 2,
+              "netRev": 1142.86,
+              "returns": 0
+            },
+            "2026-05|UP": {
+              "units": 3,
+              "netRev": 3095.24,
+              "returns": 0
+            },
+            "2026-05|MANIPUR": {
+              "units": 4,
+              "netRev": 3825.71,
+              "returns": 0
+            },
+            "2026-05|ARUNACHAL PRADESH": {
+              "units": 6,
+              "netRev": 5879.99,
+              "returns": 0
+            },
+            "2026-05|TRIPURA": {
+              "units": 2,
+              "netRev": 1942.85,
+              "returns": 0
+            },
+            "2026-05|SIKKIM": {
+              "units": 3,
+              "netRev": 2904.77,
+              "returns": 0
+            },
+            "2026-05|TG": {
+              "units": 1,
+              "netRev": 657.14,
+              "returns": 0
+            },
+            "2026-05|MH": {
+              "units": 1,
+              "netRev": 428.57,
+              "returns": 0
+            },
+            "2026-05|CHATTISGARH": {
+              "units": 2,
+              "netRev": 1333.33,
+              "returns": 0
+            },
+            "2026-05|KERALA": {
+              "units": 13,
+              "netRev": 10272.39,
+              "returns": 0
+            },
+            "2026-05|GJ": {
+              "units": 1,
+              "netRev": 1285.71,
+              "returns": 0
+            },
+            "2026-05|PUDUCHERRY": {
+              "units": 1,
+              "netRev": 1040,
+              "returns": 0
+            },
+            "2026-05|CHANDIGARH": {
+              "units": 4,
+              "netRev": 2759.04,
+              "returns": 0
+            },
+            "2026-05|RJ": {
+              "units": 1,
+              "netRev": 1040,
+              "returns": 0
+            },
+            "2026-05|HR": {
+              "units": 1,
+              "netRev": 657.14,
+              "returns": 0
+            },
+            "2026-05|JH": {
+              "units": 1,
+              "netRev": 678.1,
+              "returns": 0
+            },
+            "2026-05|AP": {
+              "units": 1,
+              "netRev": 928.57,
+              "returns": 0
+            },
+            "2026-05|UTTARPRADESH": {
+              "units": 1,
+              "netRev": 1095.24,
+              "returns": 0
+            },
+            "2026-05|DADRA AND NAGAR HAVELI AND DAMAN AND DIU": {
+              "units": 1,
+              "netRev": 1095.24,
+              "returns": 0
+            },
+            "2026-04|GUJARAT": {
+              "units": 1,
+              "netRev": 1095.24,
+              "returns": 0
+            },
+            "2026-04|WEST BENGAL": {
+              "units": 1,
+              "netRev": 1095.24,
+              "returns": 0
+            },
+            "2026-04|RAJASTHAN": {
+              "units": 1,
+              "netRev": 404.76,
+              "returns": 0
+            },
+            "2026-04|MAHARASHTRA": {
+              "units": 1,
+              "netRev": 1095.24,
+              "returns": 0
+            }
+          }
+        },
         "mcfShare": {
           "share": 1,
           "rawProxy": 1.02,
@@ -17026,10 +17292,64 @@ export const BUNDLED_BUSINESS = {
           "source": "All-Orders Non-Amazon units × website per-unit net price (May build, capped [0,1])"
         }
       },
+      "amazon-order-composition": {
+        "source": "amazon-all-orders order-id grouping",
+        "tier": "native",
+        "byMonth": [
+          {
+            "month": "2026-04",
+            "orders": 4,
+            "units": 4,
+            "netRev": 3690.48,
+            "singleOrders": 4,
+            "multiOrders": 0,
+            "multiUnits": 0,
+            "upo": 1,
+            "multiPct": 0,
+            "fbaOrders": 3,
+            "mfnOrders": 1,
+            "fbaUnits": 3,
+            "mfnUnits": 1,
+            "fbaPct": 0.75,
+            "b2bOrders": 0,
+            "b2cOrders": 4,
+            "b2bUnits": 0,
+            "b2cUnits": 4,
+            "b2bPct": 0
+          },
+          {
+            "month": "2026-05",
+            "orders": 1326,
+            "units": 1426,
+            "netRev": 1176126.67,
+            "singleOrders": 1251,
+            "multiOrders": 75,
+            "multiUnits": 175,
+            "upo": 1.08,
+            "multiPct": 0.06,
+            "fbaOrders": 940,
+            "mfnOrders": 386,
+            "fbaUnits": 1010,
+            "mfnUnits": 416,
+            "fbaPct": 0.71,
+            "b2bOrders": 35,
+            "b2cOrders": 1291,
+            "b2bUnits": 47,
+            "b2cUnits": 1379,
+            "b2bPct": 0.03
+          }
+        ]
+      },
       "fk-sales": {
         "flipkartCashback": {
           "value": 11931.08,
-          "rows": 428
+          "rows": 428,
+          "byMonth": {
+            "2026-05": {
+              "value": 11931.08,
+              "rows": 428
+            }
+          }
         }
       },
       "ads-amazon-sp": {
@@ -17041,7 +17361,20 @@ export const BUNDLED_BUSINESS = {
       "ads-google": {
         "googleProductTotal": 116648.42,
         "googleAttributed": 116648.42,
-        "googleUnattributed": 0
+        "googleUnattributed": 0,
+        "matchByCode": {
+          "NSSBDB500": "exact-needle",
+          "NSSBDB250": "exact-needle",
+          "NSSBDB100": "exact-needle",
+          "NSMP100": "exact-needle",
+          "NSJO100": "exact-needle",
+          "NSSBJ300": "exact-needle",
+          "NSMP250": "exact-needle",
+          "NSSB500": "exact-needle",
+          "NSSB250": "exact-needle",
+          "NSSBJ500": "exact-needle",
+          "NSSB100": "exact-needle"
+        }
       },
       "snell-agency": {
         "snellChannelSpend": {
@@ -17184,7 +17517,21 @@ export const BUNDLED_BUSINESS = {
             "span": {
               "first": "2024-08-01",
               "last": "2026-06-30"
-            }
+            },
+            "tabTotal": {
+              "NSJO100": 1040,
+              "NSSBDB100": 1220,
+              "NSSBDB250": 2134,
+              "NSSBDB500": 1898,
+              "NSSBBO15": 539,
+              "NSSBBO30": 255,
+              "NSACDT30": 189,
+              "NSSB100": 1343,
+              "NSSB250": 1328,
+              "NSSB500": 31
+            },
+            "tabTotalUnits": 9977,
+            "dailySeriesUnits": 15154
           },
           "flipkart": {
             "tab": "FK Categorywise",
@@ -17194,7 +17541,25 @@ export const BUNDLED_BUSINESS = {
             "span": {
               "first": "2025-06-01",
               "last": "2026-06-30"
-            }
+            },
+            "tabTotal": {
+              "NSJO100": 30,
+              "NSSBDB100": 1412,
+              "NSSBDB250": 1014,
+              "NSSBDB500": 307,
+              "NSSBBO15": 16,
+              "NSSBBO30": 16,
+              "NSACDT30": 5,
+              "NSMP100": 1,
+              "NSMP250": 2,
+              "NSSB100": 521,
+              "NSSB250": 555,
+              "NSSB500": 12,
+              "NSSBJ300": 116,
+              "NSSBJ500": 34
+            },
+            "tabTotalUnits": 4041,
+            "dailySeriesUnits": 5398
           },
           "blinkit": {
             "tab": "Blinkit Categorywise",
@@ -17204,7 +17569,10 @@ export const BUNDLED_BUSINESS = {
             "span": {
               "first": "2025-12-01",
               "last": "2026-06-30"
-            }
+            },
+            "tabTotal": {},
+            "tabTotalUnits": 0,
+            "dailySeriesUnits": 2241
           }
         },
         "monthly": {
@@ -22227,6 +22595,8 @@ export const BUNDLED_BUSINESS = {
           "2026-02-18"
         ],
         "prev30Date": "2026-01-20",
+        "latestDate": "2026-02-18",
+        "staleAsOf": "2026-02-18",
         "keywords": [
           {
             "kw": "naturesum sea buckthorn berry",
@@ -22617,6 +22987,188 @@ export const BUNDLED_BUSINESS = {
             "worst": 45,
             "movement30": 4,
             "movementAll": 4
+          },
+          {
+            "kw": "jatamansi benefits for hair",
+            "latest": 44,
+            "latestDate": "2026-02-18",
+            "prev30": 49,
+            "prev30Date": "2026-01-20",
+            "earliest": 49,
+            "earliestDate": "2026-01-20",
+            "best": 43,
+            "worst": 52,
+            "movement30": 5,
+            "movementAll": 5
+          },
+          {
+            "kw": "sea buckthorn extract powder for sale",
+            "latest": 61,
+            "latestDate": "2026-02-18",
+            "prev30": 58,
+            "prev30Date": "2026-01-20",
+            "earliest": 58,
+            "earliestDate": "2026-01-20",
+            "best": 46,
+            "worst": 61,
+            "movement30": -3,
+            "movementAll": -3
+          },
+          {
+            "kw": "sea buckthorn berry nutrition facts",
+            "latest": 77,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 77,
+            "worst": 100,
+            "movement30": 23,
+            "movementAll": 23
+          },
+          {
+            "kw": "acacia catechu uses",
+            "latest": 82,
+            "latestDate": "2026-02-18",
+            "prev30": 78,
+            "prev30Date": "2026-01-20",
+            "earliest": 78,
+            "earliestDate": "2026-01-20",
+            "best": 76,
+            "worst": 90,
+            "movement30": -4,
+            "movementAll": -4
+          },
+          {
+            "kw": "sea buckthorn oil",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "buckthorn oil",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "sea buckthorn oil india",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "sea buckthorn seed oil",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "where can i buy sea buckthorn berries",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "sea buckthorn berry where to buy",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "catechu",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "acacia tea",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "Sea Buckthorn Powder",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 100,
+            "prev30Date": "2026-01-20",
+            "earliest": 100,
+            "earliestDate": "2026-01-20",
+            "best": 100,
+            "worst": 100,
+            "movement30": 0,
+            "movementAll": 0
+          },
+          {
+            "kw": "buy sea buckthorn fruit powder",
+            "latest": 100,
+            "latestDate": "2026-02-18",
+            "prev30": 69,
+            "prev30Date": "2026-01-20",
+            "earliest": 69,
+            "earliestDate": "2026-01-20",
+            "best": 47,
+            "worst": 100,
+            "movement30": -31,
+            "movementAll": -31
           }
         ],
         "totalKeywords": 44
@@ -22855,7 +23407,11 @@ export const BUNDLED_BUSINESS = {
             "newCustomerSales": 653840.47,
             "returningCustomerSales": 81581.9,
             "totalSales": 735422.37,
-            "returningSalesPct": 11.09
+            "returningSalesPct": 11.09,
+            "newAOV": 624.49,
+            "returningAOV": 906.47,
+            "aovGap": 281.98,
+            "aovGapPct": 45.15
           },
           {
             "quarter": "Q4 2025",
@@ -22866,7 +23422,11 @@ export const BUNDLED_BUSINESS = {
             "newCustomerSales": 1139153.85,
             "returningCustomerSales": 181322.21,
             "totalSales": 1320476.06,
-            "returningSalesPct": 13.73
+            "returningSalesPct": 13.73,
+            "newAOV": 629.37,
+            "returningAOV": 831.75,
+            "aovGap": 202.38,
+            "aovGapPct": 32.16
           },
           {
             "quarter": "Q1 2026",
@@ -22877,7 +23437,11 @@ export const BUNDLED_BUSINESS = {
             "newCustomerSales": 1542925.16,
             "returningCustomerSales": 314711.92,
             "totalSales": 1857637.08,
-            "returningSalesPct": 16.94
+            "returningSalesPct": 16.94,
+            "newAOV": 669.38,
+            "returningAOV": 983.47,
+            "aovGap": 314.09,
+            "aovGapPct": 46.92
           },
           {
             "quarter": "Q2 2026",
@@ -22888,7 +23452,11 @@ export const BUNDLED_BUSINESS = {
             "newCustomerSales": 1009210.76,
             "returningCustomerSales": 242984.97,
             "totalSales": 1252195.73,
-            "returningSalesPct": 19.4
+            "returningSalesPct": 19.4,
+            "newAOV": 771.57,
+            "returningAOV": 1042.85,
+            "aovGap": 271.28,
+            "aovGapPct": 35.16
           }
         ],
         "amazon": [
@@ -23008,9 +23576,1485 @@ export const BUNDLED_BUSINESS = {
             "returnPct": 15.4
           }
         ]
+      },
+      "snell-ordermix": {
+        "source": "snell-ordermix",
+        "tier": "agency",
+        "byMonth": {
+          "2024-08": {
+            "channel": "amazon",
+            "nonAdvtUnits": 2,
+            "reviewUnits": 0,
+            "organicUnits": 2,
+            "reviewAmt": 0,
+            "organicAmt": 2300
+          },
+          "2024-09": {
+            "channel": "amazon",
+            "nonAdvtUnits": 2,
+            "reviewUnits": 0,
+            "organicUnits": 2,
+            "reviewAmt": 0,
+            "organicAmt": 2300
+          },
+          "2024-11": {
+            "channel": "amazon",
+            "nonAdvtUnits": 7,
+            "reviewUnits": 4,
+            "organicUnits": 7,
+            "reviewAmt": 4270.85,
+            "organicAmt": 8015
+          },
+          "2024-12": {
+            "channel": "amazon",
+            "nonAdvtUnits": 40,
+            "reviewUnits": 29,
+            "organicUnits": 23,
+            "reviewAmt": 33205,
+            "organicAmt": 25811.02
+          },
+          "2025-01": {
+            "channel": "amazon",
+            "nonAdvtUnits": 11,
+            "reviewUnits": 0,
+            "organicUnits": 38,
+            "reviewAmt": 0,
+            "organicAmt": 42920
+          },
+          "2025-02": {
+            "channel": "amazon",
+            "nonAdvtUnits": 62,
+            "reviewUnits": 21,
+            "organicUnits": 86,
+            "reviewAmt": 21805,
+            "organicAmt": 88552.75
+          },
+          "2025-03": {
+            "channel": "amazon",
+            "nonAdvtUnits": 138,
+            "reviewUnits": 11,
+            "organicUnits": 223,
+            "reviewAmt": 10466.43,
+            "organicAmt": 193334.68
+          },
+          "2025-04": {
+            "channel": "amazon",
+            "nonAdvtUnits": 199,
+            "reviewUnits": 8,
+            "organicUnits": 345,
+            "reviewAmt": 7992,
+            "organicAmt": 275507.14
+          },
+          "2025-05": {
+            "channel": "amazon",
+            "nonAdvtUnits": 281,
+            "reviewUnits": 3,
+            "organicUnits": 411,
+            "reviewAmt": 2795,
+            "organicAmt": 299156
+          },
+          "2025-06": {
+            "channel": "amazon",
+            "nonAdvtUnits": 69,
+            "reviewUnits": 1,
+            "organicUnits": 165,
+            "reviewAmt": 1075,
+            "organicAmt": 171410
+          },
+          "2025-07": {
+            "channel": "amazon",
+            "nonAdvtUnits": 246,
+            "reviewUnits": 16,
+            "organicUnits": 441,
+            "reviewAmt": 6985,
+            "organicAmt": 392225.97
+          },
+          "2025-08": {
+            "channel": "amazon",
+            "nonAdvtUnits": 284,
+            "reviewUnits": 2,
+            "organicUnits": 618,
+            "reviewAmt": 780,
+            "organicAmt": 489513.52
+          },
+          "2025-09": {
+            "channel": "amazon",
+            "nonAdvtUnits": 260,
+            "reviewUnits": 2,
+            "organicUnits": 559,
+            "reviewAmt": 3096,
+            "organicAmt": 417355.63
+          },
+          "2025-10": {
+            "channel": "amazon",
+            "nonAdvtUnits": 428,
+            "reviewUnits": 0,
+            "organicUnits": 904,
+            "reviewAmt": 0,
+            "organicAmt": 655565.47
+          },
+          "2025-11": {
+            "channel": "amazon",
+            "nonAdvtUnits": 522,
+            "reviewUnits": 0,
+            "organicUnits": 1098,
+            "reviewAmt": 0,
+            "organicAmt": 890362.38
+          },
+          "2025-12": {
+            "channel": "amazon",
+            "nonAdvtUnits": 706,
+            "reviewUnits": 0,
+            "organicUnits": 1360,
+            "reviewAmt": 0,
+            "organicAmt": 1043963.69
+          },
+          "2026-01": {
+            "channel": "amazon",
+            "nonAdvtUnits": 953,
+            "reviewUnits": 0,
+            "organicUnits": 1840,
+            "reviewAmt": 0,
+            "organicAmt": 1388591.42
+          },
+          "2026-02": {
+            "channel": "amazon",
+            "nonAdvtUnits": 831,
+            "reviewUnits": 0,
+            "organicUnits": 1587,
+            "reviewAmt": 0,
+            "organicAmt": 1227345.33
+          },
+          "2026-03": {
+            "channel": "amazon",
+            "nonAdvtUnits": 947,
+            "reviewUnits": 0,
+            "organicUnits": 1798,
+            "reviewAmt": 0,
+            "organicAmt": 1420899.1
+          },
+          "2026-04": {
+            "channel": "amazon",
+            "nonAdvtUnits": 563,
+            "reviewUnits": 0,
+            "organicUnits": 1283,
+            "reviewAmt": 0,
+            "organicAmt": 1068835.77
+          },
+          "2026-05": {
+            "channel": "amazon",
+            "nonAdvtUnits": 680,
+            "reviewUnits": 33,
+            "organicUnits": 1515,
+            "reviewAmt": 26939.99,
+            "organicAmt": 1304681.16
+          },
+          "2026-06": {
+            "channel": "amazon",
+            "nonAdvtUnits": 278,
+            "reviewUnits": 0,
+            "organicUnits": 549,
+            "reviewAmt": 0,
+            "organicAmt": 473102.84
+          }
+        },
+        "reconciliation": {
+          "totalRow": {
+            "shippedUnits": 8793,
+            "grossValue": 7706700.28,
+            "nonAdvtUnits": 5041,
+            "reviewUnits": 97,
+            "organicUnits": 9709
+          },
+          "dailySeries": {
+            "shippedUnits": 13437,
+            "grossValue": 11844188.01,
+            "nonAdvtUnits": 7509,
+            "reviewUnits": 130,
+            "organicUnits": 14854,
+            "reviewAmt": 119410.27,
+            "organicAmt": 11881748.87,
+            "dayRows": 699
+          },
+          "deltaUnits": 4644,
+          "deltaGross": 4137487.73,
+          "note": "Snell's own 'Total' row (r4) is a founder-curated narrower window and does NOT equal the sum of the daily rows. Both are surfaced so the gap (daily-series − Total-row) is an explicit reconciliation, not a hidden inconsistency. The full daily series is authoritative for trend/history; the Total row is the founder's headline snapshot."
+        },
+        "columns": {
+          "amzShipUnits": 7,
+          "amzGross": 20,
+          "nonAdvt": 12,
+          "review": 13,
+          "organic": 14,
+          "reviewAmt": 18,
+          "organicAmt": 19
+        },
+        "columnFallbacks": []
+      },
+      "monarch-extra": {
+        "source": "monarch-extra-tabs",
+        "tier": "monarch",
+        "march2025": {
+          "tab": "March 2025",
+          "labels": [
+            "Total oders",
+            "cancel oders total",
+            "after removing cancel orders",
+            "total sales value",
+            "Cancel order value",
+            "after removing cancel order - sales value",
+            "spent",
+            "total google order",
+            "Cancel",
+            "sales",
+            "Cancel Sales Value",
+            "sales value",
+            "after removing cancel sales value",
+            "ROAS",
+            "Actual ROAS",
+            "total  order",
+            "cancel order",
+            "sales",
+            "sales value",
+            "total order",
+            "Cancel",
+            "sales",
+            "sales value"
+          ],
+          "monthly": {
+            "month": "2025-03",
+            "totalOrders": 1476,
+            "cancelOrders": 232,
+            "salesValue": 1023750.5,
+            "netSalesValue": 876416.5,
+            "dayRows": 32
+          },
+          "daily": [
+            {
+              "date": "1 -3- 25",
+              "totalOrders": 17,
+              "cancelOrders": 7,
+              "netOrders": 10,
+              "salesValue": 11000,
+              "cancelValue": 3890,
+              "netSalesValue": 7110
+            },
+            {
+              "date": "2 -3- 25",
+              "totalOrders": 21,
+              "cancelOrders": 3,
+              "netOrders": 18,
+              "salesValue": 15208.75,
+              "cancelValue": 2310,
+              "netSalesValue": 12898.75
+            },
+            {
+              "date": "3 -3- 25",
+              "totalOrders": 8,
+              "cancelOrders": 4,
+              "netOrders": 4,
+              "salesValue": 7061,
+              "cancelValue": 2111,
+              "netSalesValue": 4950
+            },
+            {
+              "date": "4 -3- 25",
+              "totalOrders": 17,
+              "cancelOrders": 1,
+              "netOrders": 16,
+              "salesValue": 13349,
+              "cancelValue": 470,
+              "netSalesValue": 12879
+            },
+            {
+              "date": "5 -3- 25",
+              "totalOrders": 18,
+              "cancelOrders": 2,
+              "netOrders": 16,
+              "salesValue": 11991,
+              "cancelValue": 1540,
+              "netSalesValue": 10451
+            },
+            {
+              "date": "6 -3- 25",
+              "totalOrders": 16,
+              "cancelOrders": 1,
+              "netOrders": 15,
+              "salesValue": 8219.75,
+              "cancelValue": 470,
+              "netSalesValue": 7749.75
+            },
+            {
+              "date": "7 -3- 25",
+              "totalOrders": 12,
+              "cancelOrders": 1,
+              "netOrders": 11,
+              "salesValue": 8212,
+              "cancelValue": 770,
+              "netSalesValue": 7442
+            },
+            {
+              "date": "8 -3- 25",
+              "totalOrders": 21,
+              "cancelOrders": 2,
+              "netOrders": 19,
+              "salesValue": 15004,
+              "cancelValue": 1240,
+              "netSalesValue": 13764
+            },
+            {
+              "date": "9 -3- 25",
+              "totalOrders": 18,
+              "cancelOrders": 2,
+              "netOrders": 16,
+              "salesValue": 14280,
+              "cancelValue": 1850,
+              "netSalesValue": 12430
+            },
+            {
+              "date": "10 -3- 25",
+              "totalOrders": 15,
+              "cancelOrders": 2,
+              "netOrders": 13,
+              "salesValue": 12579.75,
+              "cancelValue": 1550,
+              "netSalesValue": 11029.75
+            },
+            {
+              "date": "11 -3- 25",
+              "totalOrders": 32,
+              "cancelOrders": 2,
+              "netOrders": 30,
+              "salesValue": 24694,
+              "cancelValue": 1471,
+              "netSalesValue": 23223
+            },
+            {
+              "date": "12 -3- 25",
+              "totalOrders": 26,
+              "cancelOrders": 4,
+              "netOrders": 22,
+              "salesValue": 20442,
+              "cancelValue": 2570,
+              "netSalesValue": 17872
+            },
+            {
+              "date": "13 -3- 25",
+              "totalOrders": 28,
+              "cancelOrders": 3,
+              "netOrders": 25,
+              "salesValue": 13988.75,
+              "cancelValue": 1410,
+              "netSalesValue": 12578.75
+            },
+            {
+              "date": "14 -3- 25",
+              "totalOrders": 42,
+              "cancelOrders": 4,
+              "netOrders": 38,
+              "salesValue": 31334.25,
+              "cancelValue": 2180,
+              "netSalesValue": 29154.25
+            },
+            {
+              "date": "15 -3- 25",
+              "totalOrders": 36,
+              "cancelOrders": 8,
+              "netOrders": 28,
+              "salesValue": 24959.5,
+              "cancelValue": 5698.75,
+              "netSalesValue": 19260.75
+            },
+            {
+              "date": "16 -3- 25",
+              "totalOrders": 38,
+              "cancelOrders": 6,
+              "netOrders": 32,
+              "salesValue": 28397,
+              "cancelValue": 3240,
+              "netSalesValue": 25157
+            },
+            {
+              "date": "17 -3- 25",
+              "totalOrders": 39,
+              "cancelOrders": 7,
+              "netOrders": 32,
+              "salesValue": 29717.25,
+              "cancelValue": 5957.5,
+              "netSalesValue": 23759.75
+            },
+            {
+              "date": "18 -3- 25",
+              "totalOrders": 27,
+              "cancelOrders": 5,
+              "netOrders": 22,
+              "salesValue": 15586.25,
+              "cancelValue": 3240,
+              "netSalesValue": 12346.25
+            },
+            {
+              "date": "19 -3- 25",
+              "totalOrders": 30,
+              "cancelOrders": 7,
+              "netOrders": 23,
+              "salesValue": 20550,
+              "cancelValue": 3930,
+              "netSalesValue": 16620
+            },
+            {
+              "date": "20 -3- 25",
+              "totalOrders": 27,
+              "cancelOrders": 2,
+              "netOrders": 25,
+              "salesValue": 17726.25,
+              "cancelValue": 1380,
+              "netSalesValue": 16346.25
+            },
+            {
+              "date": "21 -3- 25",
+              "totalOrders": 20,
+              "cancelOrders": 3,
+              "netOrders": 17,
+              "salesValue": 13579,
+              "cancelValue": 1770,
+              "netSalesValue": 11809
+            },
+            {
+              "date": "22 -3- 25",
+              "totalOrders": 23,
+              "cancelOrders": 1,
+              "netOrders": 22,
+              "salesValue": 17361,
+              "cancelValue": 390,
+              "netSalesValue": 16971
+            },
+            {
+              "date": "23 -3- 25",
+              "totalOrders": 30,
+              "cancelOrders": 6,
+              "netOrders": 24,
+              "salesValue": 19910,
+              "cancelValue": 2640,
+              "netSalesValue": 17270
+            },
+            {
+              "date": "24 -3- 25",
+              "totalOrders": 31,
+              "cancelOrders": 6,
+              "netOrders": 25,
+              "salesValue": 21294,
+              "cancelValue": 4530,
+              "netSalesValue": 16764
+            },
+            {
+              "date": "25 -3- 25",
+              "totalOrders": 28,
+              "cancelOrders": 6,
+              "netOrders": 22,
+              "salesValue": 18401.25,
+              "cancelValue": 3540,
+              "netSalesValue": 14861.25
+            },
+            {
+              "date": "26 -3- 25",
+              "totalOrders": 24,
+              "cancelOrders": 3,
+              "netOrders": 21,
+              "salesValue": 17457.5,
+              "cancelValue": 2208.75,
+              "netSalesValue": 15248.75
+            },
+            {
+              "date": "27 -3- 25",
+              "totalOrders": 21,
+              "cancelOrders": 4,
+              "netOrders": 17,
+              "salesValue": 13572,
+              "cancelValue": 3840,
+              "netSalesValue": 9732
+            },
+            {
+              "date": "28 -3- 25",
+              "totalOrders": 18,
+              "cancelOrders": 3,
+              "netOrders": 15,
+              "salesValue": 10591,
+              "cancelValue": 2070,
+              "netSalesValue": 8521
+            },
+            {
+              "date": "29 -3- 25",
+              "totalOrders": 24,
+              "cancelOrders": 3,
+              "netOrders": 21,
+              "salesValue": 15062,
+              "cancelValue": 1770,
+              "netSalesValue": 13292
+            },
+            {
+              "date": "30 -3- 25",
+              "totalOrders": 17,
+              "cancelOrders": 5,
+              "netOrders": 12,
+              "salesValue": 11938.25,
+              "cancelValue": 2550,
+              "netSalesValue": 9388.25
+            },
+            {
+              "date": "31 -3- 25",
+              "totalOrders": 14,
+              "cancelOrders": 3,
+              "netOrders": 11,
+              "salesValue": 8408.75,
+              "cancelValue": 1080,
+              "netSalesValue": 7328.75
+            },
+            {
+              "date": "Total",
+              "totalOrders": 738,
+              "cancelOrders": 116,
+              "netOrders": 622,
+              "salesValue": 511875.25,
+              "cancelValue": 73667,
+              "netSalesValue": 438208.25
+            }
+          ]
+        },
+        "weekly": {
+          "tab": "Weekly Comparsion",
+          "blocks": [
+            {
+              "title": "7 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "3 - 9 Oct",
+                  "cost": 10591.83,
+                  "sales": 47,
+                  "salesValue": 37519,
+                  "roas": 3.54,
+                  "cpa": 225.36
+                },
+                {
+                  "platform": "meta",
+                  "date": "3 - 9 Oct",
+                  "cost": 17049.72,
+                  "sales": 79,
+                  "salesValue": 53717,
+                  "roas": 3.15,
+                  "cpa": 215.82
+                },
+                {
+                  "platform": "google",
+                  "date": "10 - 16 Oct",
+                  "cost": 11718.2,
+                  "sales": 46,
+                  "salesValue": 35772,
+                  "roas": 3.05,
+                  "cpa": 254.74
+                },
+                {
+                  "platform": "meta",
+                  "date": "10 - 16 Oct",
+                  "cost": 13727.3,
+                  "sales": 57,
+                  "salesValue": 40584,
+                  "roas": 2.96,
+                  "cpa": 240.83
+                }
+              ]
+            },
+            {
+              "title": "Last 3 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "11 - 13 Oct",
+                  "cost": 5646.02,
+                  "sales": 21,
+                  "salesValue": 17126,
+                  "roas": 3.03,
+                  "cpa": 268.86
+                },
+                {
+                  "platform": "meta",
+                  "date": "11 - 13 Oct",
+                  "cost": 5839.25,
+                  "sales": 23,
+                  "salesValue": 19981,
+                  "roas": 3.42,
+                  "cpa": 253.88
+                },
+                {
+                  "platform": "google",
+                  "date": "14 - 16 Oct",
+                  "cost": 3807.78,
+                  "sales": 19,
+                  "salesValue": 13660,
+                  "roas": 3.59,
+                  "cpa": 200.41
+                },
+                {
+                  "platform": "meta",
+                  "date": "14 - 16 Oct",
+                  "cost": 5980.69,
+                  "sales": 28,
+                  "salesValue": 16984,
+                  "roas": 2.84,
+                  "cpa": 213.6
+                }
+              ]
+            },
+            {
+              "title": "Last 7 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "9-15 oct",
+                  "cost": 12715,
+                  "sales": 47,
+                  "salesValue": 36922,
+                  "roas": 2.9,
+                  "cpa": 270.53
+                },
+                {
+                  "platform": "meta",
+                  "date": "9-15 oct",
+                  "cost": 13727,
+                  "sales": 58,
+                  "salesValue": 42161,
+                  "roas": 3.07,
+                  "cpa": 236.67
+                },
+                {
+                  "platform": "google",
+                  "date": "16-22 Oct",
+                  "cost": 7981,
+                  "sales": 38,
+                  "salesValue": 33719,
+                  "roas": 4.22,
+                  "cpa": 210.03
+                },
+                {
+                  "platform": "meta",
+                  "date": "16-22 Oct",
+                  "cost": 11881,
+                  "sales": 57,
+                  "salesValue": 37878,
+                  "roas": 3.19,
+                  "cpa": 208.44
+                }
+              ]
+            },
+            {
+              "title": "Last 3 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "17 - 19 oct",
+                  "cost": 3349,
+                  "sales": 21,
+                  "salesValue": 19010,
+                  "roas": 5.68,
+                  "cpa": 159.48
+                },
+                {
+                  "platform": "meta",
+                  "date": "17 - 19 oct",
+                  "cost": 5992,
+                  "sales": 24,
+                  "salesValue": 17220,
+                  "roas": 2.87,
+                  "cpa": 249.67
+                },
+                {
+                  "platform": "google",
+                  "date": "20 - 22 oct",
+                  "cost": 3415,
+                  "sales": 13,
+                  "salesValue": 11844,
+                  "roas": 3.47,
+                  "cpa": 262.69
+                },
+                {
+                  "platform": "meta",
+                  "date": "20 - 22 oct",
+                  "cost": 3929,
+                  "sales": 20,
+                  "salesValue": 12690,
+                  "roas": 3.23,
+                  "cpa": 196.45
+                }
+              ]
+            },
+            {
+              "title": "Last 7 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "16 - 22 Nov",
+                  "cost": 14036.54,
+                  "sales": 55,
+                  "salesValue": 52787,
+                  "roas": 3.76,
+                  "cpa": 255.21
+                },
+                {
+                  "platform": "meta",
+                  "date": "16 - 22 Nov",
+                  "cost": 20559.1,
+                  "sales": 100,
+                  "salesValue": 62130,
+                  "roas": 3.02,
+                  "cpa": 205.59
+                },
+                {
+                  "platform": "google",
+                  "date": "9 - 15 Nov",
+                  "cost": 8261.98,
+                  "sales": 49,
+                  "salesValue": 44218,
+                  "roas": 5.35,
+                  "cpa": 168.61
+                },
+                {
+                  "platform": "meta",
+                  "date": "9 - 15 Nov",
+                  "cost": 17880.97,
+                  "sales": 68,
+                  "salesValue": 40128,
+                  "roas": 2.24,
+                  "cpa": 262.96
+                }
+              ]
+            },
+            {
+              "title": "Last 3 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "17 - 19 oct",
+                  "cost": 0,
+                  "sales": 0,
+                  "salesValue": 0,
+                  "roas": 0,
+                  "cpa": 0
+                },
+                {
+                  "platform": "meta",
+                  "date": "17 - 19 oct",
+                  "cost": 0,
+                  "sales": 0,
+                  "salesValue": 0,
+                  "roas": 0,
+                  "cpa": 0
+                },
+                {
+                  "platform": "google",
+                  "date": "20 - 22 oct",
+                  "cost": 0,
+                  "sales": 0,
+                  "salesValue": 0,
+                  "roas": 0,
+                  "cpa": 0
+                },
+                {
+                  "platform": "meta",
+                  "date": "20 - 22 oct",
+                  "cost": 0,
+                  "sales": 0,
+                  "salesValue": 0,
+                  "roas": 0,
+                  "cpa": 0
+                }
+              ]
+            },
+            {
+              "title": "Last 7 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Dec - 7 Dec",
+                  "cost": 14150,
+                  "sales": 80,
+                  "salesValue": 65383,
+                  "roas": 4.62,
+                  "cpa": 176.88
+                },
+                {
+                  "platform": "meta",
+                  "date": "1 Dec - 7 Dec",
+                  "cost": 26776,
+                  "sales": 108,
+                  "salesValue": 63422,
+                  "roas": 2.37,
+                  "cpa": 247.93
+                },
+                {
+                  "platform": "google",
+                  "date": "24 - 30 Nov",
+                  "cost": 12408,
+                  "sales": 64,
+                  "salesValue": 50623,
+                  "roas": 4.08,
+                  "cpa": 193.88
+                },
+                {
+                  "platform": "meta",
+                  "date": "24 - 30 Nov",
+                  "cost": 24764,
+                  "sales": 93,
+                  "salesValue": 58481,
+                  "roas": 2.36,
+                  "cpa": 266.28
+                }
+              ]
+            },
+            {
+              "title": "7 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 7 Jan",
+                  "cost": 11487,
+                  "sales": 45,
+                  "salesValue": 39259,
+                  "roas": 3.42,
+                  "cpa": 255.27
+                },
+                {
+                  "platform": "meta",
+                  "date": "1 Jan - 7 Jan",
+                  "cost": 30391,
+                  "sales": 125,
+                  "salesValue": 80047,
+                  "roas": 2.63,
+                  "cpa": 243.13
+                },
+                {
+                  "platform": "google",
+                  "date": "8 Jan - 14 Jan",
+                  "cost": 12042,
+                  "sales": 48,
+                  "salesValue": 42325,
+                  "roas": 3.51,
+                  "cpa": 250.88
+                },
+                {
+                  "platform": "meta",
+                  "date": "8 Jan - 14 Jan",
+                  "cost": 30413,
+                  "sales": 155,
+                  "salesValue": 89530,
+                  "roas": 2.94,
+                  "cpa": 196.21
+                },
+                {
+                  "platform": "google",
+                  "date": "15 Jan- 21 Jan",
+                  "cost": 13120,
+                  "sales": 44,
+                  "salesValue": 36880,
+                  "roas": 2.81,
+                  "cpa": 298.18
+                },
+                {
+                  "platform": "meta",
+                  "date": "15 Jan- 21 Jan",
+                  "cost": 29600,
+                  "sales": 162,
+                  "salesValue": 93340,
+                  "roas": 3.15,
+                  "cpa": 182.72
+                },
+                {
+                  "platform": "google",
+                  "date": "22 Jan- 27 Jan",
+                  "cost": 12063,
+                  "sales": 73,
+                  "salesValue": 58999.5,
+                  "roas": 4.89,
+                  "cpa": 165.25
+                },
+                {
+                  "platform": "meta",
+                  "date": "22 Jan- 27 Jan",
+                  "cost": 26260.9,
+                  "sales": 148,
+                  "salesValue": 97008,
+                  "roas": 3.69,
+                  "cpa": 177.44
+                }
+              ]
+            },
+            {
+              "title": "Comparsion With Last Month",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Dec - 27 Dec",
+                  "cost": 156811,
+                  "sales": 789,
+                  "salesValue": 561198,
+                  "roas": 3.5,
+                  "cpa": 198
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 27 Jan",
+                  "cost": 165381,
+                  "sales": 842,
+                  "salesValue": 569397,
+                  "roas": 3.44,
+                  "cpa": 196.41
+                }
+              ]
+            },
+            {
+              "title": "Comparsion With Last Month",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 3 Jan",
+                  "cost": 17358,
+                  "sales": 65,
+                  "salesValue": 48027,
+                  "roas": 2.77,
+                  "cpa": 267.05
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Feb - 3 Feb",
+                  "cost": 18928,
+                  "sales": 97,
+                  "salesValue": 72882,
+                  "roas": 4,
+                  "cpa": 195.13
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 9 Jan",
+                  "cost": 52772,
+                  "sales": 232,
+                  "salesValue": 160957,
+                  "roas": 3,
+                  "cpa": 227.47
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Feb - 9 Feb",
+                  "cost": 52261,
+                  "sales": 250,
+                  "salesValue": 189205,
+                  "roas": 3.9,
+                  "cpa": 209.04
+                }
+              ]
+            },
+            {
+              "title": "10 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 10 Jan",
+                  "cost": 15629,
+                  "sales": 69,
+                  "salesValue": 60374,
+                  "roas": 3.86,
+                  "cpa": 226.51
+                },
+                {
+                  "platform": "meta",
+                  "date": "1 Jan - 10 Jan",
+                  "cost": 42794,
+                  "sales": 118,
+                  "salesValue": 118007,
+                  "roas": 2.76,
+                  "cpa": 362.66
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Feb - 10 Feb",
+                  "cost": 14369.21,
+                  "sales": 73,
+                  "salesValue": 66381,
+                  "roas": 4.62,
+                  "cpa": 196.84
+                },
+                {
+                  "platform": "meta",
+                  "date": "1 Feb - 10 Feb",
+                  "cost": 43932.24,
+                  "sales": 199,
+                  "salesValue": 136962,
+                  "roas": 3.12,
+                  "cpa": 220.77
+                }
+              ]
+            },
+            {
+              "title": "3 days Comparsion",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "15 Jan - 17 Jan",
+                  "cost": 5855,
+                  "sales": 20,
+                  "salesValue": 15188,
+                  "roas": 2.59,
+                  "cpa": 292.75
+                },
+                {
+                  "platform": "meta",
+                  "date": "15 Jan - 17 Jan",
+                  "cost": 12235,
+                  "sales": 61,
+                  "salesValue": 36619,
+                  "roas": 2.99,
+                  "cpa": 200.57
+                },
+                {
+                  "platform": "google",
+                  "date": "15 Feb - 17 Feb",
+                  "cost": 9127,
+                  "sales": 33,
+                  "salesValue": 31959,
+                  "roas": 3.5,
+                  "cpa": 276.58
+                },
+                {
+                  "platform": "meta",
+                  "date": "15 Feb - 17 Feb",
+                  "cost": 13636,
+                  "sales": 57,
+                  "salesValue": 47151,
+                  "roas": 3.46,
+                  "cpa": 239.23
+                }
+              ]
+            },
+            {
+              "title": "Comparsion With Last Month",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "11 Jan - 24 Jan",
+                  "cost": 24641,
+                  "sales": 92,
+                  "salesValue": 78367,
+                  "roas": 3.18,
+                  "cpa": 267.84
+                },
+                {
+                  "platform": "google",
+                  "date": "11 Feb - 24 Feb",
+                  "cost": 37395,
+                  "sales": 146,
+                  "salesValue": 138289,
+                  "roas": 3.8,
+                  "cpa": 256.13
+                }
+              ]
+            },
+            {
+              "title": "Comparsion With Last Month",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 24 Jan",
+                  "cost": 41942.33,
+                  "sales": 161,
+                  "salesValue": 138741,
+                  "roas": 3.31,
+                  "cpa": 260.51
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Feb - 24 Feb",
+                  "cost": 51757,
+                  "sales": 219,
+                  "salesValue": 204670,
+                  "roas": 4.2,
+                  "cpa": 236.33
+                }
+              ]
+            },
+            {
+              "title": "Comparsion With Last Month",
+              "rows": [
+                {
+                  "platform": "google",
+                  "date": "1 Jan - 24 Jan",
+                  "cost": 144698,
+                  "sales": 715,
+                  "salesValue": 477604,
+                  "roas": 3.3,
+                  "cpa": 202.37
+                },
+                {
+                  "platform": "google",
+                  "date": "1 Feb - 24 Feb",
+                  "cost": 156500,
+                  "sales": 644,
+                  "salesValue": 525703,
+                  "roas": 3.36,
+                  "cpa": 243.01
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "cogs-history": {
+        "source": "Naturesum_Unit_COGS Notes column",
+        "asOf": "2026-06-11",
+        "byCode": {
+          "NSACDT30": {
+            "productName": "Diabetes Care Cold Brew with Acacia Catechu",
+            "current": {
+              "rmPerKg": 150,
+              "totalCogs": 150,
+              "asOf": "2026-06-11"
+            },
+            "prior": [],
+            "changed": false,
+            "noteRaw": "RM Rs150/unit & Pkg Rs0 carried from Apr'26 MIS; packaging is a placeholder - update when known"
+          },
+          "NSJO100": {
+            "productName": "Naturesum Jatamansi & Rosemary Hair Oil 100 ML",
+            "current": {
+              "rmPerKg": 375,
+              "totalCogs": 375,
+              "asOf": "2026-06-11"
+            },
+            "prior": [],
+            "changed": false,
+            "noteRaw": "RM Rs375/unit & Pkg Rs0 carried from Apr'26 MIS; packaging is a placeholder - update when known"
+          },
+          "NSSB100": {
+            "productName": "Pure Sea Buckthorn Berries Powder 100 GM",
+            "current": {
+              "rmPerKg": 1115,
+              "totalCogs": 133,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 1050,
+                "note": "RM was Rs1050 → Rs1115 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,115/kg landed (user, 11-Jun-26; was Rs1,050). Pkg: Rs21.5 std 100gm rate (user, 11-Jun-26)"
+          },
+          "NSSB250": {
+            "productName": "Pure Sea Buckthorn Dry Berries Powder 250 GM",
+            "current": {
+              "rmPerKg": 1115,
+              "totalCogs": 305.25,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 1050,
+                "note": "RM was Rs1050 → Rs1115 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,115/kg landed (user, 11-Jun-26; was Rs1,050). Pkg: Rs26.5 std 250gm rate (user, 11-Jun-26)"
+          },
+          "NSSB500": {
+            "productName": "Pure Sea Buckthorn Dry Berries Powder 500 GM",
+            "current": {
+              "rmPerKg": 1115,
+              "totalCogs": 582.5,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 1050,
+                "note": "RM was Rs1050 → Rs1115 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,115/kg landed (user, 11-Jun-26; was Rs1,050). Pkg: Rs25 std 500gm rate (user, 11-Jun-26)"
+          },
+          "NSSBDB100": {
+            "productName": "Pure Sea Buckthorn Dry Berries 100 GM",
+            "current": {
+              "rmPerKg": 1150,
+              "totalCogs": 136.5,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 800,
+                "note": "RM was Rs800 → Rs1150 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,150/kg landed (user, 11-Jun-26; was Rs800). Pkg: Rs21.5 std 100gm rate (user, 11-Jun-26)"
+          },
+          "NSSBDB250": {
+            "productName": "Pure Sea Buckthorn Dry Berries 250 GM",
+            "current": {
+              "rmPerKg": 1150,
+              "totalCogs": 314,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 800,
+                "note": "RM was Rs800 → Rs1150 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,150/kg landed (user, 11-Jun-26; was Rs800). Pkg: Rs26.5 std 250gm rate (user, 11-Jun-26)"
+          },
+          "NSSBDB500": {
+            "productName": "Pure Sea Buckthorn Dry Berries 500 GM",
+            "current": {
+              "rmPerKg": 1150,
+              "totalCogs": 600,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 800,
+                "note": "RM was Rs800 → Rs1150 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs1,150/kg landed (user, 11-Jun-26; was Rs800). Pkg: Rs25 std 500gm rate (user, 11-Jun-26)"
+          },
+          "NSMP100": {
+            "productName": "Moringa Powder 100 GM",
+            "current": {
+              "rmPerKg": 180,
+              "totalCogs": 39.5,
+              "asOf": "2026-06-11"
+            },
+            "prior": [],
+            "changed": false,
+            "noteRaw": "RM: Rs180/kg = Rs170/kg supplier + Rs2,000 freight over 200kg; Indian supplier, no duty (user, 11-Jun-26). Pkg: Rs21.5 std 100gm rate"
+          },
+          "NSMP250": {
+            "productName": "Moringa Powder 250 GM",
+            "current": {
+              "rmPerKg": 180,
+              "totalCogs": 71.5,
+              "asOf": "2026-06-11"
+            },
+            "prior": [],
+            "changed": false,
+            "noteRaw": "RM: Rs180/kg = Rs170/kg supplier + Rs2,000 freight over 200kg; Indian supplier, no duty (user, 11-Jun-26). Pkg: Rs26.5 std 250gm rate"
+          },
+          "NSSBBO15": {
+            "productName": "Sea Buckthorn Berry Oil 15 ML",
+            "current": {
+              "rmPerKg": 11500,
+              "totalCogs": 180.5,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 18000,
+                "note": "RM was Rs18000 → Rs11500 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs11,500/L landed (user, 11-Jun-26; was Rs18,000). Pkg: Rs8 carried from Apr'26 MIS, confirmed unchanged"
+          },
+          "NSSBBO30": {
+            "productName": "Sea Buckthorn Berry Oil 30 ML",
+            "current": {
+              "rmPerKg": 11500,
+              "totalCogs": 353,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 18000,
+                "note": "RM was Rs18000 → Rs11500 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs11,500/L landed (user, 11-Jun-26; was Rs18,000). Pkg: Rs8 carried from Apr'26 MIS, confirmed unchanged"
+          },
+          "NSSBJ300": {
+            "productName": "Naturesum Sea Buckthorn Berry Juice 300ml",
+            "current": {
+              "rmPerKg": 470,
+              "totalCogs": 232.7,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 200,
+                "note": "RM was Rs200 → Rs470 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs470/L landed estimate (user, 11-Jun-26; was Rs200). Pkg: Rs91.7 bottle, carried from Apr'26 MIS, confirmed unchanged"
+          },
+          "NSSBJ500": {
+            "productName": "Naturesum Sea Buckthorn Berry Juice 500ml",
+            "current": {
+              "rmPerKg": 470,
+              "totalCogs": 342.3,
+              "asOf": "2026-06-11"
+            },
+            "prior": [
+              {
+                "rmPerKg": 200,
+                "note": "RM was Rs200 → Rs470 (per Unit_COGS Notes, 11-Jun-26)"
+              }
+            ],
+            "changed": true,
+            "noteRaw": "RM: Rs470/L landed estimate (user, 11-Jun-26; was Rs200). Pkg: Rs107.3 bottle, carried from Apr'26 MIS, confirmed unchanged"
+          }
+        }
+      }
+    },
+    "skuIdentity": {
+      "NSACDT30": {
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
+      },
+      "NSJO100": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSMP100": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSMP250": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSB100": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSB250": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSB500": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSBBO15": {
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
+      },
+      "NSSBBO30": {
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
+      },
+      "NSSBDB100": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSBDB250": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSBDB500": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSBJ300": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+      },
+      "NSSBJ500": {
+        "fuzzy": true,
+        "fuzzyVia": [
+          {
+            "source": "ads-google",
+            "method": "exact-needle",
+            "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
+          }
+        ],
+        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
       }
     },
     "latestDataDate": "2026-06-10",
-    "appBuildDate": "2026-06-12"
+    "appBuildDate": "2026-06-13"
   }
 };

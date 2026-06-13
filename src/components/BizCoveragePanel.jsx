@@ -29,7 +29,7 @@
 import { useMemo } from "react";
 import { Card } from "./Shared.jsx";
 import NSData from "../data.js";
-import { channelsIn, coverageFor } from "../lib/businessStore.js";
+import { channelsIn, coverageFor, isChannelGrainKey } from "../lib/businessStore.js";
 import { monthsAvailable } from "../lib/cmEngine.js";
 import { getCostCard } from "../lib/costInputs.js";
 
@@ -83,7 +83,7 @@ export default function BizCoveragePanel({ facts, month = null, compact = false 
     );
   }
 
-  const { months, channels, grid, upgrades, recon, skuRows, cogsMisses, adCaveats, counts } = model;
+  const { months, channels, grid, upgrades, recon, skuRows, skuMonth, cogsMisses, adCaveats, counts, skuResolution } = model;
 
   return (
     <Card
@@ -266,6 +266,16 @@ export default function BizCoveragePanel({ facts, month = null, compact = false 
             </div>
           </div>
         )}
+
+        {/* ── 5b · SKU × MONTH × channel gap map (rubric 34, tri-axis) ─────── */}
+        {!compact && skuMonth && Object.keys(skuMonth).length > 0 && (
+          <SkuMonthGapMap skuMonth={skuMonth} months={months} channels={channels} />
+        )}
+
+        {/* ── 6 · SKU identity-resolution audit (param 7 + XI/84) ─────────── */}
+        {!compact && skuResolution && skuResolution.total > 0 && (
+          <SkuResolutionAudit res={skuResolution} />
+        )}
       </div>
     </Card>
   );
@@ -302,6 +312,129 @@ function cellBox(sales) {
   };
 }
 
+// ── SKU identity-resolution audit block ──────────────────────────────────────
+// Clean state → a quiet green "all N codes resolve" line (the founder learns the
+// guard exists and is passing). Unresolved codes → an amber list with a nearest-
+// canonical suggestion (likely rename) or a "new SKU" hint, so a slightly-renamed
+// marketplace code is caught instead of silently dropping its CM (rubric 7/84).
+// SKU × MONTH × channel gap map (rubric 34). The existing grids cover month×channel
+// and SKU×channel; this is the missing tri-axis cut — for each SKU, a month strip
+// where a cell's fill reflects how many channels carry NATIVE per-SKU coverage that
+// month (blank = genuine gap, "·" = no data, not a zero). The founder sees exactly
+// which SKU×channel×month cells are covered at a glance.
+function SkuMonthGapMap({ skuMonth, months, channels }) {
+  // newest months on the right; cap to the last 12 so the strip stays scannable.
+  const monthCols = months.slice().reverse().slice(-12);
+  const codes = Object.keys(skuMonth).sort();
+  const nCh = Math.max(1, channels.length);
+  // fill ramp: 0 channels = gap (muted dot), 1..all = greener with more coverage.
+  const cellStyle = (set) => {
+    const n = set ? set.size : 0;
+    if (n === 0) return { bg: "transparent", fg: "var(--ink-4)", mark: "·" };
+    const frac = n / nCh;
+    const alpha = 0.18 + 0.55 * frac;
+    return { bg: `rgba(63,114,80,${alpha.toFixed(2)})`, fg: "var(--success, #3F7250)", mark: String(n) };
+  };
+  return (
+    <div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", marginBottom: 6 }}>
+        SKU × month native coverage{" "}
+        <span className="muted" style={{ fontWeight: 400 }}>(cell = # channels with native per-SKU data that month · blank · = no native coverage, not a zero)</span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data-table" style={{ width: "100%", fontSize: 10.5 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: "4px 8px" }}>SKU</th>
+              {monthCols.map((m) => (
+                <th key={m} style={{ textAlign: "center", padding: "4px 4px", whiteSpace: "nowrap" }}>{fmtMonth(m)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {codes.map((code) => (
+              <tr key={code}>
+                <td style={{ padding: "3px 8px", fontWeight: 600 }} className="mono" title={code}>{code}</td>
+                {monthCols.map((m) => {
+                  const set = skuMonth[code]?.[m];
+                  const st = cellStyle(set);
+                  const chList = set ? [...set].map(chLabel).join(", ") : "no native per-SKU data";
+                  return (
+                    <td key={m} style={{ padding: 2, textAlign: "center" }}>
+                      <div title={`${code} · ${fmtMonth(m)} — ${chList}`}
+                        style={{ background: st.bg, color: st.fg, borderRadius: 3, padding: "3px 0", fontWeight: 700, minWidth: 22 }}>
+                        {st.mark}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="muted" style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.5 }}>
+        A number is the count of channels with native per-SKU coverage for that SKU that month (darker = more channels);
+        a <strong>·</strong> is an honest gap — no native per-SKU report for that SKU×month (agency months sell at channel
+        grain, so per-SKU coverage there reads blank until a native export is uploaded). This is the SKU×channel×month
+        cut of the month×channel grid above — nothing is a silent zero.
+      </div>
+    </div>
+  );
+}
+
+function SkuResolutionAudit({ res }) {
+  const clean = res.unresolved.length === 0;
+  return (
+    <div
+      style={{
+        background: clean ? "rgba(63,114,80,0.06)" : "rgba(176,122,31,0.07)",
+        border: `1px solid ${clean ? "rgba(63,114,80,0.20)" : "rgba(176,122,31,0.28)"}`,
+        borderRadius: 6, padding: "8px 10px",
+      }}
+    >
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.03em", marginBottom: clean ? 0 : 5, color: clean ? "var(--success, #3F7250)" : "var(--warning, #B07A1F)" }}>
+        {clean ? "✓ SKU IDENTITY — ALL RESOLVE" : `⚠ SKU IDENTITY — ${res.unresolved.length} UNRESOLVED`}
+      </div>
+      {clean ? (
+        <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>
+          All {res.total} per-SKU code{res.total === 1 ? "" : "s"} in the fact store map to a canonical catalog/COGS SKU.
+          Re-run after any upload — a slightly-renamed marketplace code (e.g. <span className="mono">NSSBJ500</span> → <span className="mono">NSSB-J-500</span>)
+          surfaces here with its nearest match instead of silently dropping its margin.
+        </div>
+      ) : (
+        <>
+          <div className="muted" style={{ fontSize: 11, lineHeight: 1.5, marginBottom: 6 }}>
+            These fact-store codes don&apos;t match the canonical catalog/COGS set, so their CM is dropped.
+            If it&apos;s a <strong>rename</strong>, fix the export (or add an alias); if it&apos;s a <strong>new SKU</strong>, add it to the catalog + COGS.
+          </div>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+            {res.unresolved.slice(0, 12).map((u) => (
+              <li key={u.code} style={{ fontSize: 11.5, color: "var(--ink-2)" }}>
+                <span className="mono" style={{ fontWeight: 700, color: "var(--critical, #B73838)" }}>{u.code}</span>
+                <span className="muted" style={{ marginLeft: 6 }}>
+                  on {u.channels.map((c) => chLabel(c)).join(", ")}
+                </span>
+                {u.near ? (
+                  <span style={{ marginLeft: 6 }}>
+                    — likely a rename of <span className="mono" style={{ fontWeight: 700, color: "var(--success, #3F7250)" }}>{u.near.code}</span>
+                    <span className="muted"> (edit distance {u.near.dist})</span>
+                  </span>
+                ) : (
+                  <span className="muted" style={{ marginLeft: 6 }}>— no close canonical match; treat as a new SKU.</span>
+                )}
+              </li>
+            ))}
+            {res.unresolved.length > 12 && (
+              <li className="muted" style={{ fontSize: 10.5 }}>+ {res.unresolved.length - 12} more unresolved codes.</li>
+            )}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Inline tier legend pill used in the framing copy.
 function TierKey({ t }) {
   const tier = SALES_TIER[t] || SALES_TIER.none;
@@ -320,6 +453,61 @@ const NATIVE_REPORT_FOR = {
   blinkit: "Blinkit Sales Report",
   website: "Shopify Net Sales CSV",
 };
+
+// ── SKU identity resolution (rubric 7 + XI/84) ───────────────────────────────
+// The canonical SKU universe = the data.js catalog codes ∪ the COGS-card codes.
+// Any per-SKU code seen in the FACT STORE that is not in this set is "unresolved"
+// — either a genuinely-new SKU (add it to the catalog/COGS) or a SLIGHT RENAME of
+// an existing one (e.g. a marketplace export changed "NSSBJ500" → "NSSB-J-500").
+// A silent unresolved code falls to "COGS missing" and quietly drops its CM; this
+// audit makes that visible and proposes the nearest canonical match so a rename is
+// caught, not mistaken for a new product. Robust + tolerant per param 7.
+function canonicalSkuSet() {
+  const set = new Set();
+  for (const s of NSData?.skus || []) if (s && s.code) set.add(String(s.code).toUpperCase());
+  // COGS cards may carry codes not in the catalog (and vice-versa) — union both so
+  // a code that resolves to EITHER source is considered known.
+  for (const s of NSData?.skus || []) {
+    const card = safeCostCard(s.code);
+    if (card && Number.isFinite(card.cogs)) set.add(String(s.code).toUpperCase());
+  }
+  return set;
+}
+// Normalise a code for fuzzy comparison: uppercase, strip non-alphanumerics
+// (hyphens / underscores / spaces a renamed export might introduce).
+const normCode = (c) => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// Cheap bounded Levenshtein (early-exit at maxD) — enough to spot a slight rename
+// without pulling a dependency. Returns Infinity if distance exceeds maxD.
+function editDistance(a, b, maxD = 3) {
+  if (a === b) return 0;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > maxD) return Infinity;
+  let prev = Array.from({ length: lb + 1 }, (_, i) => i);
+  for (let i = 1; i <= la; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > maxD) return Infinity; // whole row already past tolerance → bail
+    prev = cur;
+  }
+  return prev[lb] <= maxD ? prev[lb] : Infinity;
+}
+// For an unresolved code, find the nearest canonical code (normalised) within a
+// small edit distance → a likely-rename suggestion. null if nothing close.
+function nearestCanonical(code, canon) {
+  const target = normCode(code);
+  let best = null, bestD = Infinity;
+  for (const c of canon) {
+    const d = editDistance(target, normCode(c), 3);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  return best && bestD <= 3 ? { code: best, dist: bestD } : null;
+}
 
 function buildModel(facts) {
   if (!facts || !facts.monthly || Object.keys(facts.monthly).length === 0) return null;
@@ -386,13 +574,20 @@ function buildModel(facts) {
   // SKU×channel presence + COGS coverage (native per-SKU cells only — agency is
   // channel grain with no SKU split).
   const skuMap = {};
+  // SKU × MONTH × channel coverage (rubric 34 — the tri-axis gap map). For each
+  // SKU we record, per month, which channels carry native per-SKU revenue, so the
+  // founder sees at a glance which SKU×channel×month cells are covered vs blank.
+  const skuMonth = {};   // code → { "YYYY-MM": Set(channels) }
   for (const [key, cell] of Object.entries(facts.monthly)) {
-    const [, ch, code] = key.split("|");
-    if (!ch || !code || code === "__ch__") continue;
+    if (isChannelGrainKey(key)) continue; // skip the channel-grain sentinel (store contract)
+    const [m, ch, code] = key.split("|");
+    if (!ch || !code) continue;
     const hasRev = Number(cell.units) > 0 || Number(cell.netRev) > 0 || Number(cell.grossRev) > 0;
     if (!hasRev) continue;
     skuMap[code] = skuMap[code] || { channels: new Set() };
     skuMap[code].channels.add(ch);
+    (skuMonth[code] = skuMonth[code] || {});
+    (skuMonth[code][m] = skuMonth[code][m] || new Set()).add(ch);
   }
   const cogsMisses = [];
   const skuRows = Object.keys(skuMap).sort().map((code) => {
@@ -401,6 +596,21 @@ function buildModel(facts) {
     if (!hasCogs) cogsMisses.push(code);
     return { code, channels: skuMap[code].channels, hasCogs, pkgPlaceholder: !!card?.pkgPlaceholder };
   });
+
+  // SKU identity resolution audit (param 7 + XI/84). For every per-SKU code in
+  // the fact store, decide: resolved (in the canonical catalog/COGS set) vs
+  // unresolved → propose a nearest canonical match (likely rename) or mark it a
+  // genuinely-new SKU. Clean state (every code resolves) renders as a quiet "all
+  // N codes resolve" line — never a scary empty panel.
+  const canon = canonicalSkuSet();
+  const allFactCodes = Object.keys(skuMap).sort();
+  const unresolved = [];
+  for (const code of allFactCodes) {
+    if (canon.has(String(code).toUpperCase())) continue;
+    const near = nearestCanonical(code, canon);
+    unresolved.push({ code, channels: [...skuMap[code].channels], near });
+  }
+  const skuResolution = { total: allFactCodes.length, resolved: allFactCodes.length - unresolved.length, unresolved };
 
   // Ad-coverage caveats — channels whose latest native month carries no ad
   // source (CM3 would be ad-free / overstated there).
@@ -414,7 +624,7 @@ function buildModel(facts) {
     }
   }
 
-  return { months, channels, grid, upgrades, recon, skuRows, cogsMisses, adCaveats, counts };
+  return { months, channels, grid, upgrades, recon, skuRows, skuMonth, cogsMisses, adCaveats, counts, skuResolution };
 }
 
 // Native per-SKU net revenue summed for a month×channel (excludes the agency

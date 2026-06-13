@@ -21,7 +21,14 @@ const PAGES = [
 
 // V2.4 raw-float guard. The spec greps the rendered DOM for \d{4,}\.\d{3,}
 // (>=4 integer digits followed by >=3 decimals — an un-fmtINR raw float leak).
+// We scan VISIBLE text only (strip tags) so inline CSS bar widths like
+// style="width:37.185097%" — never seen by the founder — aren't false positives.
 const RAW_FLOAT = /\d{4,}\.\d{3,}/g;
+const stripTags = (html) => html.replace(/<[^>]*>/g, " ");
+
+// PageSales is tabbed (rubric IX); render each tab via the `initialTab` hook so
+// markers in non-default tabs (retention/sku) are reachable in the union markup.
+const SALES_TABS = ["daily", "movers", "forecast", "retention", "sku", "cross", "geo", "reconcile"];
 
 // Spot-check markers: each upside view / minor must leave a fingerprint in HTML.
 const MARKERS = {
@@ -34,6 +41,8 @@ const MARKERS = {
     "SEO keyword",           // View B
     "Google vs Meta",        // View C
     "itemize",               // M2 itemization
+    "March 2025",            // I-2 · Monarch supplementary tab (website 0→1 ramp)
+    "Weekly Compar",         // I-2 · Monarch supplementary tab (Google-vs-Meta blocks)
   ],
   // Finance default tab = waterfall; M5 (low base) + M4 (alloc by rev) markers
   // are checked on their own tabs by gateFinanceTabs(), not the default render.
@@ -75,7 +84,7 @@ async function gateFinanceTabs() {
     let html;
     try { html = renderToStaticMarkup(React.createElement(t.Comp, t.props)); }
     catch (e) { failures++; report.push(`RENDER-ERROR ${t.id}: ${e.message}\n${(e.stack||"").split("\n").slice(0,6).join("\n")}`); continue; }
-    const hits = [...new Set(html.match(RAW_FLOAT) || [])];
+    const hits = [...new Set(stripTags(html).match(RAW_FLOAT) || [])];
     if (hits.length) { failures++; report.push(`RAW-FLOAT ${t.id}: ${hits.length} unique: ${hits.slice(0,15).join(", ")}`); }
     // markers are "any-of" here (annotation only shows when a low-base month exists)
     const hasMarker = t.markers.length === 0 || t.markers.some((m) => html.includes(m));
@@ -92,15 +101,20 @@ for (const p of PAGES) {
     if (typeof Comp !== "function") throw new Error("default export is not a component");
     let html;
     try {
-      html = renderToStaticMarkup(React.createElement(Comp));
+      if (p.id === "sales") {
+        // Union of all Sales tabs (rubric IX — tabbed, not one scroll).
+        html = SALES_TABS.map((t) => renderToStaticMarkup(React.createElement(Comp, { initialTab: t }))).join(" ");
+      } else {
+        html = renderToStaticMarkup(React.createElement(Comp));
+      }
     } catch (e) {
       failures++;
       report.push(`RENDER-ERROR ${p.id}: ${e.message}\n${(e.stack || "").split("\n").slice(0, 6).join("\n")}`);
       continue;
     }
     const len = html.length;
-    // 1. raw-float regex hits
-    const hits = html.match(RAW_FLOAT) || [];
+    // 1. raw-float regex hits (visible text only)
+    const hits = stripTags(html).match(RAW_FLOAT) || [];
     // De-dup + show context for any hits.
     const uniqHits = [...new Set(hits)];
     if (uniqHits.length) {

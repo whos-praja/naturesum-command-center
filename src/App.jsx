@@ -59,17 +59,27 @@ const App = () => {
 
   // M6 — the sidebar footer no longer reads "Last sync · 21 May" (which looked
   // like stale data). Instead it shows "Data through <latest fact date>" derived
-  // from the live fact store (meta.latestDataDate, baked by the build = max date
-  // across all monthly/daily facts), plus the app build date as separate context.
-  // This is real provenance, not a fabricated sync clock. Computed once — the
-  // bundled baseline is static within a session unless a report is uploaded.
+  // from the live fact store, plus the app build date as separate context. This
+  // is real provenance, not a fabricated sync clock.
+  //
+  // X "Data through" consistency: the bundle bakes meta.latestDataDate at BUILD
+  // time. After a user uploads a NEWER export, that baked value would go stale, so
+  // we DERIVE the latest date live as the max of (baked value, newest DAILY fact
+  // date) on the merged facts. Daily is the only day-precision grain, so this can
+  // never overstate freshness (we deliberately do NOT roll a partial/MTD month up
+  // to its month-end). Result: "Data through" always reflects the freshest fact
+  // actually loaded — on the bundled baseline AND after any upload — and is never
+  // a date older than, nor a day beyond, the data the module is reading.
   const dataProvenance = useMemo(() => {
     try {
-      const meta = mergedFacts()?.meta || {};
-      return {
-        latestDataDate: meta.latestDataDate || null,
-        appBuildDate: meta.appBuildDate || null,
-      };
+      const facts = mergedFacts() || {};
+      const meta = facts.meta || {};
+      let latest = meta.latestDataDate || null;
+      for (const k of Object.keys(facts.daily || {})) {
+        const iso = String(k).split("|")[0];
+        if (iso && (!latest || iso > latest)) latest = iso;
+      }
+      return { latestDataDate: latest, appBuildDate: meta.appBuildDate || null };
     } catch {
       return { latestDataDate: null, appBuildDate: null };
     }

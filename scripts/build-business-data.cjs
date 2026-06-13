@@ -166,8 +166,22 @@ function buildAmazon() {
   if (!p) { console.error("MISSING amazonmaysales.txt"); return; }
   const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter((l) => l.length);
   const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
-  const C = { date: col("purchase-date"), status: col("order-status"), itemStatus: col("item-status"), salesCh: col("sales-channel"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price") };
+  const C = { date: col("purchase-date"), status: col("order-status"), itemStatus: col("item-status"), salesCh: col("sales-channel"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price"), state: col("ship-state"), postal: col("ship-postal-code") };
   const mcf = {}; let mcfTotal = 0, retU = 0, retV = 0, units = 0, gross = 0;
+  // (g) GEO: monthly per-state Amazon demand/returns concentration. Key = "YYYY-MM|STATE"
+  // → { units, netRev, returns }. State strings are normalised (trim, upper) so
+  // "Delhi"/"DELHI"/" delhi " collapse; blank/unknown state → "UNKNOWN" (honest,
+  // never dropped). netRev = ÷1.05 (Amazon gross-incl-GST rule). Returns netted in
+  // units/netRev (a return row carries negative qty/rev) AND tallied as `returns`.
+  const geo = {};
+  const bumpGeo = (m, st, q, rev, isReturn) => {
+    const state = String(st || "").trim().toUpperCase() || "UNKNOWN";
+    const k = `${m}|${state}`;
+    const cur = geo[k] || { units: 0, netRev: 0, returns: 0 };
+    if (isReturn) { cur.units -= q; cur.netRev = r2(cur.netRev - rev / 1.05); cur.returns += q; }
+    else { cur.units += q; cur.netRev = r2(cur.netRev + rev / 1.05); }
+    geo[k] = cur;
+  };
   for (let i = 1; i < lines.length; i++) {
     const c = lines[i].split("\t");
     const salesCh = (c[C.salesCh] || "").trim(), itemStatus = (c[C.itemStatus] || "").trim(), status = (c[C.status] || "").trim();
@@ -176,11 +190,76 @@ function buildAmazon() {
     if (salesCh !== "Amazon.in" || itemStatus !== "Shipped" || !code) continue;
     const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
     const q = num(c[C.qty]), rev = num(c[C.price]);
-    if (/Returned to Seller/i.test(status)) { bumpM(m, "amazon", code, "amazon-orders", { units: -q, grossRev: -rev, netRev: -rev / 1.05, returnsUnits: q, returnsValue: rev }); retU += q; retV += rev; units -= q; gross -= rev; }
-    else { bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: rev, netRev: rev / 1.05 }); units += q; gross += rev; }
+    const st = C.state === -1 ? "" : c[C.state];
+    if (/Returned to Seller/i.test(status)) { bumpM(m, "amazon", code, "amazon-orders", { units: -q, grossRev: -rev, netRev: -rev / 1.05, returnsUnits: q, returnsValue: rev }); retU += q; retV += rev; units -= q; gross -= rev; bumpGeo(m, st, q, rev, true); }
+    else { bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: rev, netRev: rev / 1.05 }); units += q; gross += rev; bumpGeo(m, st, q, rev, false); }
   }
-  facts.meta.bySource["amazon-orders"] = { mcf: { byCode: mcf, totalUnits: mcfTotal }, amazonReturns: { units: retU, value: r2(retV) } };
-  report.amazon = { units, gross: r2(gross), net: r2(gross / 1.05), returnsUnits: retU, returnsValue: r2(retV), mcfUnits: mcfTotal };
+  // Finalise geo cells (round netRev) + a per-month state count for the report.
+  const geoMonths = new Set();
+  for (const k of Object.keys(geo)) { geo[k].netRev = r2(geo[k].netRev); geoMonths.add(k.split("|")[0]); }
+  facts.meta.bySource["amazon-orders"] = {
+    mcf: { byCode: mcf, totalUnits: mcfTotal },
+    amazonReturns: { units: retU, value: r2(retV) },
+    geo: { source: "amazon-all-orders ship-state", asOf: facts.meta.latestDataDate || null, byMonthState: geo },
+  };
+  report.amazon = { units, gross: r2(gross), net: r2(gross / 1.05), returnsUnits: retU, returnsValue: r2(retV), mcfUnits: mcfTotal, geoCells: Object.keys(geo).length, geoMonths: geoMonths.size };
+}
+
+// ═══ 1b · Amazon ORDER-COMPOSITION cuts (VI-b + left-on-table #2) ════════════
+// The All-Orders TSV carries amazon-order-id, quantity, fulfillment-channel
+// (Amazon=FBA / Merchant=MFN) and is-business-order (B2B vs B2C). None of these
+// were surfaced. We derive, by month and overall, from SHIPPED Amazon.in rows:
+//   • basket composition — single-unit vs multi-unit ORDERS (group by order-id,
+//     sum quantity; 1 → single, ≥2 → multi) + units-per-order.
+//   • fulfillment split — FBA vs MFN orders + units.
+//   • B2B vs B2C — business vs consumer orders + units.
+// Honest: keyed on the real order-id, shipped-only, GST-net revenue (÷1.05).
+function buildAmazonOrderComposition() {
+  const p = resolve("amazonmaysales", "txt"); if (!p) return;
+  const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter((l) => l.length);
+  const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
+  const C = { oid: col("amazon-order-id"), date: col("purchase-date"), salesCh: col("sales-channel"), itemStatus: col("item-status"), qty: col("quantity"), price: col("item-price"), fc: col("fulfillment-channel"), biz: col("is-business-order") };
+  if (C.oid === -1) return;
+  // group lines by order-id (within month) → { units, rev, fba, b2b }.
+  const orders = new Map();   // `${m}|${oid}` → { m, units, rev, fba, b2b }
+  for (let i = 1; i < lines.length; i++) {
+    const c = lines[i].split("\t");
+    if ((c[C.salesCh] || "").trim() !== "Amazon.in") continue;
+    if ((c[C.itemStatus] || "").trim() !== "Shipped") continue;
+    const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
+    const oid = (c[C.oid] || "").trim(); if (!oid) continue;
+    const k = `${m}|${oid}`;
+    const cur = orders.get(k) || { m, units: 0, rev: 0, fba: (c[C.fc] || "").trim() === "Amazon", b2b: String(c[C.biz] || "").trim().toLowerCase() === "true" };
+    cur.units += num(c[C.qty]); cur.rev += num(c[C.price]);
+    orders.set(k, cur);
+  }
+  // roll up by month.
+  const byMonth = {};
+  const blank = () => ({ orders: 0, units: 0, singleOrders: 0, multiOrders: 0, multiUnits: 0, fbaOrders: 0, mfnOrders: 0, fbaUnits: 0, mfnUnits: 0, b2bOrders: 0, b2cOrders: 0, b2bUnits: 0, b2cUnits: 0, netRev: 0 });
+  for (const o of orders.values()) {
+    const b = (byMonth[o.m] = byMonth[o.m] || blank());
+    b.orders++; b.units += o.units; b.netRev += o.rev / 1.05;
+    if (o.units >= 2) { b.multiOrders++; b.multiUnits += o.units; } else b.singleOrders++;
+    if (o.fba) { b.fbaOrders++; b.fbaUnits += o.units; } else { b.mfnOrders++; b.mfnUnits += o.units; }
+    if (o.b2b) { b.b2bOrders++; b.b2bUnits += o.units; } else { b.b2cOrders++; b.b2cUnits += o.units; }
+  }
+  // finalise: round + derived ratios per month, ascending.
+  const months = Object.keys(byMonth).sort();
+  const series = months.map((m) => {
+    const b = byMonth[m]; const o = b.orders || 0;
+    return {
+      month: m, orders: o, units: Math.round(b.units), netRev: r2(b.netRev),
+      singleOrders: b.singleOrders, multiOrders: b.multiOrders, multiUnits: b.multiUnits,
+      upo: o > 0 ? r2(b.units / o) : null,
+      multiPct: o > 0 ? r2(b.multiOrders / o) : null,
+      fbaOrders: b.fbaOrders, mfnOrders: b.mfnOrders, fbaUnits: b.fbaUnits, mfnUnits: b.mfnUnits,
+      fbaPct: o > 0 ? r2(b.fbaOrders / o) : null,
+      b2bOrders: b.b2bOrders, b2cOrders: b.b2cOrders, b2bUnits: b.b2bUnits, b2cUnits: b.b2cUnits,
+      b2bPct: o > 0 ? r2(b.b2bOrders / o) : null,
+    };
+  });
+  facts.meta.bySource["amazon-order-composition"] = { source: "amazon-all-orders order-id grouping", tier: "native", byMonth: series };
+  report.amazonOrderComposition = { months: series.length, latest: series[series.length - 1] || null };
 }
 
 // ═══ 2 · Flipkart Sales Report ═══════════════════════════════════════════════
@@ -209,12 +288,25 @@ function buildFlipkart() {
     const ds = excelToISODate(r[C.orderDate]) || iso; if (ds && !isRet) bumpD(ds, "flipkart", hit.code, "fk-sales", { units: qty, netRev: bia });
     units += isRet ? -Math.abs(qty) : qty; biaSum += bia;
   }
-  // Cashback (excluded from CM)
-  let cb = 0, cn = 0;
+  // Cashback (excluded from CM) — (d) trended BY MONTH (settlement-drag signal).
+  // The cashback sheet carries "Invoice Date" so we can attribute each credit-note
+  // amount to a month and surface the trend, not just one lump total.
+  let cb = 0, cn = 0; const cbByMonth = {};
   const cbName = wb.SheetNames.find((n) => /cash\s*back/i.test(n));
-  if (cbName) { const cg = grid(wb.Sheets[cbName]); const ia = (cg[0] || []).indexOf("Invoice Amount"); if (ia !== -1) for (let i = 1; i < cg.length; i++) if (cg[i] && cg[i][ia] !== "") { cb += num(cg[i][ia]); cn++; } }
-  facts.meta.bySource["fk-sales"] = { flipkartCashback: { value: r2(cb), rows: cn } };
-  report.flipkart = { units, grossBIA: r2(biaSum), net: r2(biaSum), returnRows: retRows, cashback: r2(cb) };
+  if (cbName) {
+    const cg = grid(wb.Sheets[cbName]); const H0 = cg[0] || [];
+    const ia = H0.indexOf("Invoice Amount"); const id = H0.indexOf("Invoice Date");
+    if (ia !== -1) for (let i = 1; i < cg.length; i++) {
+      if (!cg[i] || cg[i][ia] === "") continue;
+      const v = num(cg[i][ia]); cb += v; cn++;
+      const ym = id !== -1 ? monthOf(excelToISODate(cg[i][id])) : null;
+      const key = ym || "unknown";
+      const m = cbByMonth[key] || { value: 0, rows: 0 };
+      m.value = r2(m.value + v); m.rows++; cbByMonth[key] = m;
+    }
+  }
+  facts.meta.bySource["fk-sales"] = { flipkartCashback: { value: r2(cb), rows: cn, byMonth: cbByMonth } };
+  report.flipkart = { units, grossBIA: r2(biaSum), net: r2(biaSum), returnRows: retRows, cashback: r2(cb), cashbackMonths: Object.keys(cbByMonth).length };
 }
 
 // ═══ 3 · Blinkit Sales Report ════════════════════════════════════════════════
@@ -317,7 +409,17 @@ const GOOGLE_KEYS = [
 function googleTitleToCode(title) {
   const t = String(title || "").toLowerCase(); const ns = GOOGLE_NUM(t).split(",");
   const cand = GOOGLE_KEYS.filter((k) => ns.includes(k.grams) && k.needles.some((n) => t.includes(n)));
-  if (cand.length >= 1) return cand[0].code;
+  // I (rubric 7) — the Google title→code match is the ONLY non-exact (fuzzy) SKU
+  // resolver in the business module. Every other channel keys on an exact map
+  // (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU). Record the match TYPE so the UI can
+  // badge a SKU "matched by similarity" only when its resolution was non-exact:
+  //   exact-needle  — a single grams+needle candidate (high-confidence map-like)
+  //   multi-needle  — >1 candidate, disambiguated by the most specific needle (FUZZY)
+  if (cand.length === 1) return { code: cand[0].code, match: "exact-needle" };
+  if (cand.length > 1) {
+    const best = cand.find((k) => k.needles.some((n) => n.includes(k.grams) && t.includes(n))) || cand[0];
+    return { code: best.code, match: "multi-needle" };
+  }
   return null;
 }
 function buildGoogle() {
@@ -326,13 +428,16 @@ function buildGoogle() {
   const hi = lines.findIndex((l) => /^product title,/i.test(l)); if (hi === -1) return;
   const H = parseCsvLine(lines[hi]); const costCol = H.indexOf("Cost") === -1 ? H.length - 1 : H.indexOf("Cost");
   let total = 0, attr = 0;
+  const matchByCode = {};   // code → "exact-needle" | "multi-needle" (worst seen)
   for (let i = hi + 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue; const c = parseCsvLine(lines[i]); const cost = num(c[costCol]); total += cost;
-    if (cost === 0) continue; const code = googleTitleToCode(c[0]); if (!code) continue;
-    attr += cost; bumpM(MONTH, "website", code, "ads-google", { adSpendDirect: cost });
+    if (cost === 0) continue; const hit = googleTitleToCode(c[0]); if (!hit) continue;
+    attr += cost; bumpM(MONTH, "website", hit.code, "ads-google", { adSpendDirect: cost });
+    // keep the LEAST-certain match seen for this code (multi-needle wins over exact).
+    if (matchByCode[hit.code] !== "multi-needle") matchByCode[hit.code] = hit.match;
   }
-  facts.meta.bySource["ads-google"] = { googleProductTotal: r2(total), googleAttributed: r2(attr), googleUnattributed: r2(total - attr) };
-  report.adsGoogleProduct = { total: r2(total), attributed: r2(attr), unattributed: r2(total - attr) };
+  facts.meta.bySource["ads-google"] = { googleProductTotal: r2(total), googleAttributed: r2(attr), googleUnattributed: r2(total - attr), matchByCode };
+  report.adsGoogleProduct = { total: r2(total), attributed: r2(attr), unattributed: r2(total - attr), fuzzyCodes: Object.entries(matchByCode).filter(([, m]) => m !== "exact-needle").map(([c]) => c) };
 }
 
 // ═══ 9 · Snell "Sale" tab — channel spend totals ═════════════════════════════
@@ -479,6 +584,16 @@ function buildSnellSkuUnits() {
     for (let c = 1; c < header.length; c++) { const hit = snellCatHeaderToCode(header[c]); if (hit) { colMap[c] = hit; mapped++; } }
     if (mapped === 0) continue;
     let dayRows = 0, units = 0; const span = { first: null, last: null };
+    // (I/b) Capture the tab's own "Total" row (the sheet's headline per-SKU total,
+    // *N folded) so every Categorywise field is surfaced AND the daily-series sum
+    // can be reconciled against the sheet's own total. Found by a non-numeric col0
+    // === "total" within the first few rows.
+    const tabTotal = {}; let tabTotalUnits = 0;
+    for (let i = 1; i < Math.min(g.length, 6); i++) {
+      if (String(g[i][0] || "").trim().toLowerCase() !== "total") continue;
+      for (const c of Object.keys(colMap)) { const { code, mult } = colMap[c]; const u = num(g[i][c]) * mult; if (!u) continue; tabTotal[code] = r2((tabTotal[code] || 0) + u); tabTotalUnits += u; }
+      break;
+    }
     for (let i = 1; i < g.length; i++) {
       const r = g[i]; const d = r[0];
       if (typeof d !== "number" || d < 30000 || d > 80000) continue;
@@ -490,10 +605,179 @@ function buildSnellSkuUnits() {
         addU(skuMonthly, `${m}|${td.channel}|${code}`, u); units += u;
       }
     }
-    perChannel[td.channel] = { tab: name, mappedCols: mapped, dayRows, units, span };
+    perChannel[td.channel] = { tab: name, mappedCols: mapped, dayRows, units, span, tabTotal, tabTotalUnits, dailySeriesUnits: units };
   }
   facts.meta.bySource["snell-sku-units"] = { tier: "agency", source: "snell-cat", perChannel, monthly: skuMonthly, daily: skuDaily };
-  report.snellSkuUnits = perChannel;
+  report.snellSkuUnits = Object.fromEntries(Object.entries(perChannel).map(([ch, v]) => [ch, { units: v.units, tabTotalUnits: v.tabTotalUnits }]));
+}
+
+// ═══ a/b · Snell Sale-tab ORDER-MIX + Total-row reconciliation (agency) ═══════
+// (a) ORDER-MIX: the Amazon block carries a daily Non-Advt / Review / Organic
+//     decomposition — order UNITS (c12 Non Advt order Units, c13 Review Oder
+//     Units, c14 Organic Order Units) plus the Review/Organic AMOUNT columns
+//     (c18 Review Oder AMT, c19 Organic Order AMT). We roll these to monthly
+//     {nonAdvtUnits, reviewUnits, organicUnits, reviewAmt, organicAmt} on the
+//     amazon channel (this split exists ONLY for amazon in the sheet). Honest:
+//     a month with no order-mix coverage is omitted, never fabricated.
+// (b) RECONCILIATION: the sheet has its OWN "Total" row (r4) whose figures DO NOT
+//     equal the sum of the daily rows — the Total row is a narrower founder-curated
+//     window. We capture BOTH the Total-row figures (shipped units c7, gross c20)
+//     AND the full daily-series sums so the UI can show the discrepancy in-tool
+//     (founder audit item b: ₹77.07L/8,793u Total-row vs the daily-series sum).
+//     SHAPE: meta.bySource["snell-ordermix"] = {
+//       source, tier, byMonth: { "YYYY-MM": { channel:"amazon", nonAdvtUnits,
+//         reviewUnits, organicUnits, reviewAmt, organicAmt } },
+//       reconciliation: { totalRow: { shippedUnits, grossValue, nonAdvtUnits,
+//         reviewUnits, organicUnits }, dailySeries: { shippedUnits, grossValue,
+//         nonAdvtUnits, reviewUnits, organicUnits, dayRows }, note } }.
+const SNELL_MIX_COLS = { amzShipUnits: 7, amzGross: 20, nonAdvt: 12, review: 13, organic: 14, reviewAmt: 18, organicAmt: 19 };
+function buildSnellOrderMix() {
+  const p = resolve("SnellSales&AdsSheet", "xlsx"); if (!p) { console.error("MISSING Snell (order-mix)"); return; }
+  const wb = XLSX.readFile(p);
+  const saleName = wb.SheetNames.find((n) => /^sale$/i.test(n.trim())); if (!saleName) { console.error("Snell order-mix: no Sale tab"); return; }
+  const g = grid(wb.Sheets[saleName]);
+  // Resolve order-mix cols by header band/leaf (never positional) so a layout
+  // shift fails loud rather than reading the wrong column.
+  const b2 = ffRow(g[2] || []), r3 = g[3] || [];
+  const C = {
+    amzShipUnits: findSnellCol(b2, r3, /^total$/i, /shipped units/i),       // c7
+    amzGross: findSnellCol(b2, r3, /total gross value/i, null),             // c20
+    nonAdvt: findSnellCol(b2, r3, /sales value/i, /non advt order units/i), // c12
+    review: findSnellCol(b2, r3, /sales value/i, /review oder units/i),     // c13
+    organic: findSnellCol(b2, r3, /sales value/i, /organic order units/i),  // c14
+    reviewAmt: findSnellCol(b2, r3, /sales value/i, /review oder amt/i),    // c18
+    organicAmt: findSnellCol(b2, r3, /sales value/i, /organic order amt/i), // c19
+  };
+  // Fall back to the pinned positions if a band/leaf lookup misses (the sheet's
+  // band text is sparse on these inner columns); record any fallback in report.
+  const fellBack = [];
+  for (const k of Object.keys(SNELL_MIX_COLS)) { if (C[k] === -1) { C[k] = SNELL_MIX_COLS[k]; fellBack.push(k); } }
+  const byMonth = {};
+  const daily = { shippedUnits: 0, grossValue: 0, nonAdvtUnits: 0, reviewUnits: 0, organicUnits: 0, reviewAmt: 0, organicAmt: 0, dayRows: 0 };
+  for (let i = 5; i < g.length; i++) {
+    const r = g[i]; const d = r[0];
+    if (typeof d !== "number" || d < 30000 || d > 80000) continue;
+    const ym = monthOf(excelToISODate(d)); if (!ym) continue;
+    const na = num(r[C.nonAdvt]), rv = num(r[C.review]), og = num(r[C.organic]);
+    const rvA = num(r[C.reviewAmt]), ogA = num(r[C.organicAmt]);
+    daily.shippedUnits += num(r[C.amzShipUnits]); daily.grossValue += num(r[C.amzGross]);
+    daily.nonAdvtUnits += na; daily.reviewUnits += rv; daily.organicUnits += og;
+    daily.reviewAmt += rvA; daily.organicAmt += ogA; daily.dayRows++;
+    if (!na && !rv && !og && !rvA && !ogA) continue;     // no order-mix coverage this day → skip month accumulation
+    const b = byMonth[ym] || { channel: "amazon", nonAdvtUnits: 0, reviewUnits: 0, organicUnits: 0, reviewAmt: 0, organicAmt: 0 };
+    b.nonAdvtUnits += na; b.reviewUnits += rv; b.organicUnits += og; b.reviewAmt += rvA; b.organicAmt += ogA;
+    byMonth[ym] = b;
+  }
+  // Round monthly cells.
+  for (const ym of Object.keys(byMonth)) { const b = byMonth[ym]; b.reviewAmt = r2(b.reviewAmt); b.organicAmt = r2(b.organicAmt); }
+  // Total-row (r4) figures — the founder's own curated total.
+  const tr = g[4] || [];
+  const totalRow = {
+    shippedUnits: num(tr[C.amzShipUnits]), grossValue: r2(num(tr[C.amzGross])),
+    nonAdvtUnits: num(tr[C.nonAdvt]), reviewUnits: num(tr[C.review]), organicUnits: num(tr[C.organic]),
+  };
+  const dailySeries = {
+    shippedUnits: daily.shippedUnits, grossValue: r2(daily.grossValue),
+    nonAdvtUnits: daily.nonAdvtUnits, reviewUnits: daily.reviewUnits, organicUnits: daily.organicUnits,
+    reviewAmt: r2(daily.reviewAmt), organicAmt: r2(daily.organicAmt), dayRows: daily.dayRows,
+  };
+  facts.meta.bySource["snell-ordermix"] = {
+    source: "snell-ordermix", tier: "agency",
+    byMonth,
+    reconciliation: {
+      totalRow, dailySeries,
+      deltaUnits: dailySeries.shippedUnits - totalRow.shippedUnits,
+      deltaGross: r2(dailySeries.grossValue - totalRow.grossValue),
+      note: "Snell's own 'Total' row (r4) is a founder-curated narrower window and does NOT equal the sum of the daily rows. Both are surfaced so the gap (daily-series − Total-row) is an explicit reconciliation, not a hidden inconsistency. The full daily series is authoritative for trend/history; the Total row is the founder's headline snapshot.",
+    },
+    columns: C, columnFallbacks: fellBack,
+  };
+  report.snellOrderMix = { months: Object.keys(byMonth).length, totalRow, dailySeries: { shippedUnits: dailySeries.shippedUnits, grossValue: dailySeries.grossValue }, columnFallbacks: fellBack };
+}
+
+// ═══ I · Monarch supplementary tabs (March 2025 + Weekly Comparison) ═════════
+// Founder audit item I: surface EVERY field of every Monarch tab somewhere.
+// Two tabs are not yet exposed:
+//  • "March 2025" — the earliest daily website log (the 0→1 ramp month, Mar-2025),
+//    labelled Total/Google/website/Meta order+sales+cancel columns. We emit a
+//    monthly rollup of the Total block + the per-row labelled daily table.
+//  • "Weekly Comparsion" — founder-built 7-day / 3-day / vs-last-month Google-vs-
+//    Meta comparison blocks (Cost/Sales/SalesValue/ROAS/CPA). We emit each block
+//    as { title, rows:[{ platform, date, cost, sales, salesValue, roas, cpa }] }.
+// SHAPE: meta.bySource["monarch-extra"] = { march2025:{ monthly, daily }, weekly:[blocks] }.
+function buildMonarchExtraTabs() {
+  const p = resolve("MonarchWebsiteSales&AdsSheet", "xlsx"); if (!p) return;
+  const wb = XLSX.readFile(p);
+  const findTab = (re) => Object.keys(wb.Sheets).find((k) => re.test(k.trim()));
+  const out = {};
+
+  // ── March 2025 daily log ──
+  const m25Name = findTab(/^march 2025$/i);
+  if (m25Name) {
+    const g = grid(wb.Sheets[m25Name]);
+    const lbl = (g[2] || []).map((h) => String(h || "").trim());
+    // Column map by the row2 labels (Total block first 6 cols after Date).
+    const ci = (re) => lbl.findIndex((h) => re.test(h));
+    const cols = {
+      totalOrders: ci(/^total oders$/i), cancelOrders: ci(/cancel oders total/i),
+      netOrders: ci(/after removing cancel orders/i), salesValue: ci(/^total sales value$/i),
+      cancelValue: ci(/^cancel order value$/i), netSalesValue: ci(/after removing cancel order - sales value/i),
+    };
+    let mOrders = 0, mCancels = 0, mSalesValue = 0, mNetSalesValue = 0, dayRows = 0;
+    const daily = [];
+    for (let i = 3; i < g.length; i++) {
+      const r = g[i]; if (!r) continue;
+      // Date in col0 is a "1 -3- 25" style string OR an Excel serial; skip blank rows.
+      const d0 = r[0]; if (d0 === "" || d0 == null) continue;
+      const ord = cols.totalOrders === -1 ? 0 : num(r[cols.totalOrders]);
+      const sv = cols.salesValue === -1 ? 0 : num(r[cols.salesValue]);
+      if (!ord && !sv) continue;
+      dayRows++;
+      mOrders += ord; mCancels += cols.cancelOrders === -1 ? 0 : num(r[cols.cancelOrders]);
+      mSalesValue += sv; mNetSalesValue += cols.netSalesValue === -1 ? 0 : num(r[cols.netSalesValue]);
+      daily.push({
+        date: String(d0).trim(),
+        totalOrders: ord, cancelOrders: cols.cancelOrders === -1 ? 0 : num(r[cols.cancelOrders]),
+        netOrders: cols.netOrders === -1 ? 0 : num(r[cols.netOrders]),
+        salesValue: r2(sv), cancelValue: cols.cancelValue === -1 ? 0 : r2(num(r[cols.cancelValue])),
+        netSalesValue: cols.netSalesValue === -1 ? 0 : r2(num(r[cols.netSalesValue])),
+      });
+    }
+    out.march2025 = {
+      tab: m25Name.trim(), labels: lbl.filter(Boolean),
+      monthly: { month: "2025-03", totalOrders: mOrders, cancelOrders: mCancels, salesValue: r2(mSalesValue), netSalesValue: r2(mNetSalesValue), dayRows },
+      daily,
+    };
+  }
+
+  // ── Weekly Comparison blocks ──
+  const wcName = findTab(/^weekly compar/i);
+  if (wcName) {
+    const g = grid(wb.Sheets[wcName]);
+    const blocks = [];
+    for (let i = 0; i < g.length; i++) {
+      const title = String((g[i] || [])[1] || "").trim();
+      if (!/compar/i.test(title)) continue;
+      // The header row is +2 (Date/Cost/Sales/Sales Value/ROAS/CPA for Google then Meta);
+      // data rows follow until a blank or the next block title.
+      const rows = [];
+      for (let j = i + 2; j < g.length; j++) {
+        const r = g[j] || [];
+        const gDate = String(r[1] || "").trim(); const mDate = String(r[8] || "").trim();
+        const nextTitle = String(r[1] || "").trim();
+        if (/compar/i.test(nextTitle)) break;          // next block
+        if (/^date$/i.test(gDate)) continue;            // header row
+        if (!gDate && !mDate) { if (rows.length) break; else continue; }
+        if (gDate && !/^date$/i.test(gDate)) rows.push({ platform: "google", date: gDate, cost: r2(num(r[2])), sales: num(r[3]), salesValue: r2(num(r[4])), roas: r2(num(r[5])), cpa: r2(num(r[6])) });
+        if (mDate && !/^date$/i.test(mDate)) rows.push({ platform: "meta", date: mDate, cost: r2(num(r[9])), sales: num(r[10]), salesValue: r2(num(r[11])), roas: r2(num(r[12])), cpa: r2(num(r[13])) });
+      }
+      if (rows.length) blocks.push({ title, rows });
+    }
+    out.weekly = { tab: wcName.trim(), blocks };
+  }
+
+  facts.meta.bySource["monarch-extra"] = { source: "monarch-extra-tabs", tier: "monarch", ...out };
+  report.monarchExtra = { march2025Days: out.march2025?.daily?.length || 0, weeklyBlocks: out.weekly?.blocks?.length || 0 };
 }
 
 // ═══ 10b · Monarch FULL DAILY website history (V2, tier monarch) ═════════════
@@ -634,12 +918,15 @@ function buildMonarchSeo() {
       movementAll: earliest != null ? r2(earliest - latest) : null,
     });
   }
-  // Keep TOP-N by best current rank (lower=better); tie-break by larger all-window improvement.
+  // Sort by best current rank (lower=better); tie-break by larger all-window improvement.
+  // I/VI fix (2026-06-13): keep ALL ranked keywords (every row with a current rank),
+  // not a top-30 slice — the founder audit flagged 14 keywords silently dropped.
+  // The full set is 44 rows (rows.length); it is small enough to bundle in full.
   rows.sort((a, b) => (a.latest - b.latest) || ((b.movementAll || 0) - (a.movementAll || 0)));
-  const TOP_N = 30;
-  const keywords = rows.slice(0, TOP_N);
-  facts.meta.bySource["monarch-seo"] = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, keywords, totalKeywords: rows.length };
-  report.monarchSeo = { dates: isoList, totalKeywords: rows.length, kept: keywords.length, prev30Date: prev30.iso };
+  const keywords = rows;                       // ALL ranked keywords (no top-N slice)
+  const staleness = latestCol.iso;             // latest snapshot date — SEO is stale past this
+  facts.meta.bySource["monarch-seo"] = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, latestDate: staleness, staleAsOf: staleness, keywords, totalKeywords: rows.length };
+  report.monarchSeo = { dates: isoList, totalKeywords: rows.length, kept: keywords.length, prev30Date: prev30.iso, staleAsOf: staleness };
 }
 
 // ═══ C · Monarch Google-vs-Meta monthly efficiency (V2 upside view C) ═════════
@@ -748,8 +1035,20 @@ function buildBmRepeatsReturns() {
       const aq = String(r[7] || "").trim();
       if (aq && amzByQ[aq]) { amzByQ[aq].salesFromRepeatShare = r2(num(r[9]) * 100); }
     }
+    // (e) new-vs-returning AOV per Shopify quarter (returning ₹ ÷ returning custs,
+    // new ₹ ÷ new custs) + the gap — the leading D2C-health signal the founder asked
+    // for. Guarded against /0 (a quarter with 0 of either type → null AOV, never
+    // NaN/Infinity). aovGapPct = (returningAOV − newAOV) / newAOV × 100.
+    for (const s of shopify) {
+      const newAOV = s.newCustomers > 0 && s.newCustomerSales != null ? r2(s.newCustomerSales / s.newCustomers) : null;
+      const returningAOV = s.returningCustomers > 0 && s.returningCustomerSales != null ? r2(s.returningCustomerSales / s.returningCustomers) : null;
+      s.newAOV = newAOV;
+      s.returningAOV = returningAOV;
+      s.aovGap = (newAOV != null && returningAOV != null) ? r2(returningAOV - newAOV) : null;
+      s.aovGapPct = (newAOV && returningAOV != null) ? r2((returningAOV - newAOV) / newAOV * 100) : null;
+    }
     facts.meta.bySource["bm-repeats"] = { source: "bm-repeats", tier: "businessmodel", sourceLabel: SRC_LABEL, shopify, amazon };
-    report.bmRepeats = { shopifyQuarters: shopify.length, amazonQuarters: amazon.length };
+    report.bmRepeats = { shopifyQuarters: shopify.length, amazonQuarters: amazon.length, latestAovGap: shopify.length ? { newAOV: shopify[shopify.length - 1].newAOV, returningAOV: shopify[shopify.length - 1].returningAOV } : null };
   } else { console.error("BusinessModel: no Repeats tab"); }
   // ── Returns ──
   const retName = wb.SheetNames.find((n) => /returns\(shopify\)/i.test(n) || /^returns/i.test(n.trim()));
@@ -765,6 +1064,66 @@ function buildBmRepeatsReturns() {
     facts.meta.bySource["bm-returns"] = { source: "bm-returns", tier: "businessmodel", sourceLabel: SRC_LABEL, monthly };
     report.bmReturns = { months: monthly.length, span: monthly.length ? { first: monthly[0].month, last: monthly[monthly.length - 1].month } : null };
   } else { console.error("BusinessModel: no Returns tab"); }
+}
+
+// ═══ f · Unit_COGS Notes-column cost-change history (per SKU) ════════════════
+// The Unit_COGS sheet's "Source / Notes" column records the PRIOR raw-material
+// value for SKUs whose cost changed ("RM: Rs1,115/kg landed … was Rs1,050"). We
+// parse that "was Rs X" prior value into a per-SKU cost-change history so the tool
+// can show "history of what changed" (founder audit item f / rubric param 38).
+// SKU resolution: the sheet's "Total COGS/Unit" (col5) is UNIQUE per SKU and equals
+// the engine's DEFAULT_COGS, so we key on that (tolerance ₹0.5) — robust to the
+// free-text product name. SHAPE: meta.bySource["cogs-history"] = {
+//   source, asOf, byCode: { CODE: { current:{rmPerKg?, totalCogs, asOf}, prior:[
+//     { rmPerKg, note }], changed:bool, productName } } }.
+const COGS_TOTAL_TO_CODE = {
+  150: "NSACDT30", 375: "NSJO100", 133: "NSSB100", 305.25: "NSSB250", 582.5: "NSSB500",
+  136.5: "NSSBDB100", 314: "NSSBDB250", 600: "NSSBDB500", 39.5: "NSMP100", 71.5: "NSMP250",
+  180.5: "NSSBBO15", 353: "NSSBBO30", 232.7: "NSSBJ300", 342.3: "NSSBJ500",
+};
+function resolveCogsCode(totalCogs) {
+  // exact key first, else nearest within ₹0.5 (float-rounding tolerant).
+  if (COGS_TOTAL_TO_CODE[totalCogs]) return COGS_TOTAL_TO_CODE[totalCogs];
+  let best = null, bestD = 0.5;
+  for (const [t, code] of Object.entries(COGS_TOTAL_TO_CODE)) { const d = Math.abs(Number(t) - totalCogs); if (d <= bestD) { bestD = d; best = code; } }
+  return best;
+}
+function buildCogsHistory() {
+  const names = fs.readdirSync(RAW_DIR).filter((n) => /^Naturesum_Unit_COGS(?:_\d+)?(?: \(\d+\))?\.xlsx$/i.test(n));
+  if (!names.length) { console.error("MISSING Naturesum_Unit_COGS*.xlsx (cogs-history)"); return; }
+  names.sort();
+  const wb = XLSX.readFile(path.join(RAW_DIR, names[0]));
+  const sn = wb.SheetNames.find((n) => /unit\s*cogs/i.test(n)) || wb.SheetNames[0];
+  const g = grid(wb.Sheets[sn]);
+  const H = (g[0] || []).map((h) => String(h || "").trim());
+  const cName = H.findIndex((h) => /^sku$/i.test(h));
+  const cRm = H.findIndex((h) => /rm landed cost/i.test(h));
+  const cTotal = H.findIndex((h) => /total cogs\/?unit/i.test(h));
+  const cNotes = H.findIndex((h) => /source\s*\/?\s*notes/i.test(h));
+  if (cTotal === -1 || cNotes === -1) { console.error("Unit_COGS: schema drift (no Total COGS/Notes col)"); return; }
+  const byCode = {}; let changed = 0;
+  for (let i = 1; i < g.length; i++) {
+    const r = g[i]; if (!r) continue;
+    const name = String(r[cName === -1 ? 0 : cName] || "").trim(); if (!name) continue;
+    const total = num(r[cTotal]); if (!total) continue;
+    const code = resolveCogsCode(r2(total)); if (!code) continue;
+    const notes = String(r[cNotes] || "");
+    const rmNow = cRm !== -1 ? num(r[cRm]) : null;
+    // Prior RM value: "was Rs 1,050" / "was Rs1,050" anywhere in the note.
+    const m = notes.match(/was\s*Rs[\s,]*([\d,]+(?:\.\d+)?)/i);
+    const rmWas = m ? num(m[1]) : null;
+    const prior = rmWas != null ? [{ rmPerKg: rmWas, note: `RM was Rs${rmWas} → Rs${rmNow} (per Unit_COGS Notes, 11-Jun-26)` }] : [];
+    if (prior.length) changed++;
+    byCode[code] = {
+      productName: name,
+      current: { rmPerKg: rmNow, totalCogs: r2(total), asOf: "2026-06-11" },
+      prior,
+      changed: prior.length > 0,
+      noteRaw: notes,
+    };
+  }
+  facts.meta.bySource["cogs-history"] = { source: "Naturesum_Unit_COGS Notes column", asOf: "2026-06-11", byCode };
+  report.cogsHistory = { skus: Object.keys(byCode).length, changedSkus: changed };
 }
 
 // ═══ 11 · Website mcfShare (blended-fee input, spec §5) ══════════════════════
@@ -853,17 +1212,63 @@ function thinDailyHistory(monthsKept = 13, keepFullSpan = ["amazon"]) {
 }
 
 // ─── Run all ─────────────────────────────────────────────────────────────────
-buildAmazon(); buildFlipkart(); buildBlinkit(); buildShopifyNet(); buildShopifyDaily();
+buildAmazon(); buildAmazonOrderComposition(); buildFlipkart(); buildBlinkit(); buildShopifyNet(); buildShopifyDaily();
 buildAmazonSp(); buildFkPla(); buildGoogle(); buildSnell(); buildMonarch();
 buildSnellHistory(); buildSnellSkuUnits(); buildMonarchHistory();  // V2 full history
 buildSnellCancel();      // E · cancel-rate per channel per month
-buildMonarchSeo();       // B · SEO keyword rank-over-time (top-N)
+buildMonarchSeo();       // B · SEO keyword rank-over-time (ALL ranked keywords)
 buildMonarchPlatform();  // C · Google vs Meta monthly ROAS/CPA
 buildBmRepeatsReturns(); // A · BusinessModel Repeats + Returns (historical actuals)
+buildSnellOrderMix();    // a/b · Snell order-mix decomposition + Total-row reconciliation
+buildMonarchExtraTabs(); // I · Monarch March-2025 + Weekly-Comparison tabs
+buildCogsHistory();      // f · Unit_COGS Notes-column cost-change history per SKU
 // D · per-SKU × channel monthly units mix is already baked in
 // meta.bySource["snell-sku-units"].monthly ("YYYY-MM|channel|CODE" → units) — no
 // new extraction needed; the channel-split bars view reads that map directly.
+// c · Monarch monthly Total Conversion Value is already baked in
+// meta.bySource["monarch-history"].byMonth[ym].grossConvValue (and the May
+// agencyShadow.website.grossRev) — the conv-value-gap insight reads those vs
+// Shopify-net (website netRev) at the engine layer; no new extraction needed.
 buildMcfShare(); // depends on amazon (mcf units) + shopify-net (per-unit price)
+
+// I (rubric 7) — SKU IDENTITY RESOLUTION MAP. For every canonical SKU the store
+// carries, record HOW it was resolved per source. Exact-map channels (Amazon
+// ASIN/MSKU, Flipkart SKU, Blinkit Item-Id, Shopify SKU, Snell column, COGS name)
+// resolve EXACT; the Google product-wise ad title is the one fuzzy resolver. A SKU
+// is flagged `fuzzy` only when at least one of its source resolutions was
+// non-exact — so the UI badge appears precisely (and rarely) where it should.
+function buildSkuIdentity() {
+  const gMatch = facts.meta.bySource?.["ads-google"]?.matchByCode || {};
+  const identity = {};                       // code → { fuzzy:bool, via:[…], note }
+  // collect every canonical code present in monthly cells (skip channel-grain).
+  const codes = new Set();
+  for (const k of Object.keys(facts.monthly)) {
+    const code = k.split("|")[2];
+    if (code && code !== "__ch__") codes.add(code);
+  }
+  for (const code of [...codes].sort()) {
+    const fuzzyVia = [];
+    // The Google product-wise ad source resolves a canonical SKU from a FREE-TEXT
+    // product title (prose), not an identifier — so ANY Google resolution is a
+    // similarity match, distinct from the exact identifier maps every other source
+    // uses (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name). `method`
+    // records how tight that similarity was (exact-needle = single candidate after
+    // pinning the numeric size token; multi-needle = needed needle disambiguation).
+    const m = gMatch[code];
+    if (m) fuzzyVia.push({ source: "ads-google", method: m, basis: "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)" });
+    identity[code] = {
+      fuzzy: fuzzyVia.length > 0,
+      fuzzyVia,
+      note: fuzzyVia.length
+        ? "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        : "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name).",
+    };
+  }
+  facts.meta.skuIdentity = identity;
+  report.skuIdentity = { total: Object.keys(identity).length, fuzzy: Object.values(identity).filter((x) => x.fuzzy).length };
+}
+buildSkuIdentity();
+
 thinDailyHistory(13); // V2 bundle-budget guard (older daily dropped; monthly rollup survives)
 
 facts.meta.uploads = [
@@ -871,6 +1276,7 @@ facts.meta.uploads = [
   "ads-amazon-sp", "ads-fk-pla", "ads-google", "snell-agency", "monarch-web",
   "snell-history", "snell-sku-units", "monarch-history",   // V2 full-history sources
   "snell-cancel", "monarch-seo", "monarch-platform", "bm-repeats", "bm-returns", // upside views A/B/C/E
+  "snell-ordermix", "monarch-extra", "cogs-history",       // R3 left-on-table a/b/f/I
 ].map((sourceTag) => ({ sourceTag, at: new Date().toISOString(), baked: true }));
 
 // ─── M6 · latest-data-date (replaces the hard-coded "Last sync · 21 May" footer) ─

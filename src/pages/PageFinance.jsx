@@ -10,9 +10,37 @@ import {
   AD_BASIS,
 } from "../lib/cmEngine.js";
 import * as CostInputs from "../lib/costInputs.js";
+import {
+  autoNarrative,
+  projectMonthEnd,
+  concentrationRisk,
+  revenueBridge,
+  cm3Bridge,
+  driverSensitivity,
+  computeWhatIf,
+  attributionConfidence,
+  attributionBand,
+  nativeAgencyBias,
+  correctedAgencyNet,
+  forecast,
+  actionQueue,
+  crossModuleVelocity,
+  proseWeeklyNarrative,
+  conversionValueGap,
+  costChangeHistory,
+} from "../lib/bizAnalytics.js";
 import { runVerification, runFormattingSanity, ANCHOR_MONTH } from "../lib/businessVerification.js";
 import BizCoveragePanel from "../components/BizCoveragePanel.jsx";
 import { UploadModal } from "../components/UploadModal.jsx";
+import { AutoNarrative } from "../components/biz/AutoNarrative.jsx";
+import { BridgeChart } from "../components/biz/BridgeChart.jsx";
+import { WhatIfPanel } from "../components/biz/WhatIfPanel.jsx";
+import { DerivationPopover } from "../components/biz/DerivationPopover.jsx";
+import BizStateGuard from "../components/biz/BizStateGuard.jsx";
+import { ForecastChart } from "../components/biz/ForecastChart.jsx";
+import { ActionQueue } from "../components/biz/ActionQueue.jsx";
+import { ProseNarrative } from "../components/biz/ProseNarrative.jsx";
+import { ConversionGapView, CostChangeView } from "../components/biz/InsightViews.jsx";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module 8 — Finance & Unit Economics  (spec §9 PageFinance + V2 ADDENDUM)
@@ -119,6 +147,15 @@ const dayLabel = (lastDay) => {
   return `${names[Number(mo) - 1] || mo} ${Number(d)}`;
 };
 
+// Freshness-badge day format — day-month order ("10 Jun") to match PageSales /
+// PageMarketing / the inventory floor exactly (rubric 72/83, sibling consistency).
+const freshDay = (iso) => {
+  if (!iso) return "";
+  const [, mo, d] = String(iso).split("-");
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(d)} ${names[Number(mo) - 1] || mo}`;
+};
+
 const cmColor = (v) =>
   v == null ? "var(--ink-4)" : v < 0 ? "var(--critical)" : "var(--ink)";
 
@@ -175,9 +212,39 @@ function AdBasisChip({ basis, channel }) {
   );
 }
 
+// CM3 ATTRIBUTION-CONFIDENCE CHIP (rubric 23) — pins the % of the ad leg behind
+// THIS channel's CM3 that is per-product measured, right next to the CM3 number a
+// founder would act on. 0%-measured (agency month) reads amber "hint"; high reads
+// green. The tooltip carries the measured/allocated split so the depth is a hover
+// away (rubric 36), keeping the cell clean.
+function Cm3ConfidenceChip({ measured, attrib }) {
+  const band = attributionBand(measured);
+  const pal = {
+    measured: { bg: "rgba(34,160,90,0.14)", fg: "#1B7A45" },
+    mixed:    { bg: "rgba(99,102,241,0.14)", fg: "#4F46E5" },
+    allocated:{ bg: "rgba(201,162,39,0.16)", fg: "#9A7B16" },
+    na:       { bg: "var(--bg-sunken)", fg: "var(--ink-3)" },
+  }[band.key] || { bg: "var(--bg-sunken)", fg: "var(--ink-3)" };
+  const pctTxt = measured == null ? "n/a" : `${Math.round(measured * 100)}%`;
+  const tip = measured == null
+    ? "No ad spend on this channel — CM3 carries no attribution risk."
+    : attrib
+      ? `${pctTxt} of this channel's ad spend is per-product MEASURED; the rest is allocated by revenue. So this CM3's ad leg (${fmtINR(attrib.total)}) is ${band.label}. Measured ${fmtINR(attrib.direct)} · allocated ${fmtINR(attrib.alloc)}. ${measured < 0.4 ? "Read this CM3 as a hint, not a measured fact." : ""}`
+      : `${pctTxt} measured`;
+  return (
+    <span title={tip} style={{
+      marginLeft: 6, fontSize: 8.5, padding: "1px 4px", borderRadius: 3,
+      background: pal.bg, color: pal.fg, fontWeight: 700, whiteSpace: "nowrap", verticalAlign: "middle",
+    }}>{pctTxt} meas</span>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-const PageFinance = () => {
-  const [tab, setTab] = useState("waterfall");
+const PageFinance = ({ initialTab } = {}) => {
+  // Default tab is "waterfall". `initialTab` is an optional verification hook so
+  // SSR harnesses can render any tab's panels; the production UI never passes it.
+  const FIN_TAB_KEYS = ["waterfall", "matrix", "bridge", "forecast", "levers", "actions", "sku", "trend", "cost", "coverage", "verify"];
+  const [tab, setTab] = useState(FIN_TAB_KEYS.includes(initialTab) ? initialTab : "waterfall");
   const [uploadOpen, setUploadOpen] = useState(false);
   // costVersion bumps whenever the Cost Inputs panel writes an override, forcing
   // every consumer below (which reads cost data through the live registry) to
@@ -193,6 +260,12 @@ const PageFinance = () => {
     const ms = monthModels.map((m) => m.month);
     return ms.length ? ms : [ANCHOR_MONTH];
   }, [monthModels]);
+
+  // Freshness label — same field + fallbacks as Marketing/Inventory (rubric 83):
+  // newest data day across all loaded sources, else the latest month's last day.
+  const dataThrough = facts?.meta?.latestDataDate
+    || monthModels[monthModels.length - 1]?.lastDay
+    || null;
 
   // selectedMonth holds the user's pick; the EFFECTIVE month is derived during
   // render so a stale pick safely falls back to the latest available.
@@ -219,7 +292,27 @@ const PageFinance = () => {
   // Is the selected month native (has at least one native channel → SKU grain)?
   const isNativeMonth = view.cmV1 != null;
 
+  // ── 100× layer (bizAnalytics) — the diagnostic/predictive/prescriptive band.
+  // Cost inputs are passed so every figure reflects live overrides; costVersion
+  // is an intentional dep (an edit must re-run the narrative + projection).
+  const narrative = useMemo(
+    () => autoNarrative(facts, { month, costs: CostInputs }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facts, month, costVersion]
+  );
+  const projection = useMemo(
+    () => projectMonthEnd(facts, { month }),
+    [facts, month]
+  );
+  const concentration = useMemo(
+    () => concentrationRisk(facts, { month, costs: CostInputs }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [facts, month, costVersion]
+  );
+
   return (
+    <>
+    <BizStateGuard facts={facts} module="Finance & Unit Econ" onUpload={() => setUploadOpen(true)}>
     <div>
       <div className="page-head">
         <div>
@@ -231,6 +324,11 @@ const PageFinance = () => {
           </div>
         </div>
         <div className="actions" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {dataThrough && (
+            <span className="cov-badge cov-agency sm" title="The latest data day reflected anywhere on this page (newest of all loaded sources). Consistent with the inventory module's freshness label.">
+              Data through {freshDay(dataThrough)}
+            </span>
+          )}
           <button className="btn ghost sm" onClick={() => setUploadOpen(true)} title="Upload native / agency reports — they upsert into the fact store and override by month×channel">
             <Icon name="download" size={13}/> Upload reports
           </button>
@@ -242,9 +340,21 @@ const PageFinance = () => {
       {/* Selected-month coverage strip — instant orientation for a cold reader. */}
       <MonthCoverageStrip model={monthModel} view={view}/>
 
+      {/* 100× MOST-USEFUL-FIRST BAND (rubric 59/66): the tool's first pass of
+          analysis — what changed this month, what needs the founder today. */}
+      <AutoNarrative narrative={narrative} title="This month's CM read-out"/>
+
+      {/* Headline strip: company CM3 + projected month-end + concentration. The
+          single most decision-relevant numbers, above the fold (rubric 66/63). */}
+      <FinanceHeadline view={view} month={month} projection={projection} concentration={concentration}/>
+
       <div className="tabs">
         <button className={tab === "waterfall" ? "active" : ""} onClick={() => setTab("waterfall")}>CM waterfall</button>
         <button className={tab === "matrix" ? "active" : ""} onClick={() => setTab("matrix")}>CM3 matrix</button>
+        <button className={tab === "bridge" ? "active" : ""} onClick={() => setTab("bridge")}>Why CM moved</button>
+        <button className={tab === "forecast" ? "active" : ""} onClick={() => setTab("forecast")}>Forecast</button>
+        <button className={tab === "levers" ? "active" : ""} onClick={() => setTab("levers")}>Drivers &amp; what-if</button>
+        <button className={tab === "actions" ? "active" : ""} onClick={() => setTab("actions")}>Action queue</button>
         <button className={tab === "sku" ? "active" : ""} onClick={() => setTab("sku")}>SKU economics</button>
         <button className={tab === "trend" ? "active" : ""} onClick={() => setTab("trend")}>CM trend</button>
         <button className={tab === "cost" ? "active" : ""} onClick={() => setTab("cost")}>Cost inputs</button>
@@ -262,24 +372,690 @@ const PageFinance = () => {
         </div>
       )}
 
-      {tab === "waterfall" && <WaterfallView view={view} month={month}/>}
+      {tab === "waterfall" && <WaterfallView view={view} month={month} facts={facts}/>}
       {tab === "matrix" && <MatrixView view={view} month={month}/>}
+      {tab === "bridge" && <BridgeView facts={facts} month={month} months={months}/>}
+      {tab === "forecast" && <ForecastView facts={facts} month={month} view={view}/>}
+      {tab === "levers" && <LeversView facts={facts} month={month}/>}
+      {tab === "actions" && <ActionsView facts={facts} month={month} view={view}/>}
       {tab === "sku" && <SkuEconomicsView view={view} month={month}/>}
       {tab === "trend" && <CMTrendView facts={facts}/>}
-      {tab === "cost" && <CostInputsView month={month} onChange={onCostChange}/>}
+      {tab === "cost" && <CostInputsView month={month} onChange={onCostChange} facts={facts}/>}
       {tab === "coverage" && (
-        <BizCoveragePanel
-          facts={facts}
-          month={month}
-          coverage={{
-            hasFixedCost: view.fixedAmount != null,
-            fixedAmount: view.fixedAmount ?? null,
-          }}
-        />
+        <>
+          <NativeAgencyBiasPanel facts={facts} month={month} view={view} />
+          <BizCoveragePanel
+            facts={facts}
+            month={month}
+            coverage={{
+              hasFixedCost: view.fixedAmount != null,
+              fixedAmount: view.fixedAmount ?? null,
+            }}
+          />
+        </>
       )}
       {tab === "verify" && <VerificationView facts={facts}/>}
+    </div>
+    </BizStateGuard>
+    {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} defaultTab="business"/>}
+    </>
+  );
+};
 
-      {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} defaultTab="business"/>}
+// ═════════════════════════════════════════════════════════════════════════════
+// FINANCE HEADLINE — the single most decision-relevant band, above the fold:
+//   company CM3 (the decision layer) · projected month-end (partial months) ·
+//   concentration / dependency risk. Rubric 15 (projection), 57 (concentration),
+//   63/66 (most-useful-first, time-to-insight). Every figure NaN-safe + derived.
+// ═════════════════════════════════════════════════════════════════════════════
+const CONF_META = {
+  actual: { label: "actual", color: "var(--success)" },
+  high:   { label: "high confidence", color: "var(--success)" },
+  medium: { label: "medium confidence", color: "var(--warning)" },
+  low:    { label: "low confidence", color: "var(--critical)" },
+};
+const FinanceHeadline = ({ view, month, projection, concentration }) => {
+  const co = view.company;
+  const cm3 = co?.cm3;
+  const cm3Pct = co?.pcts?.cm3;
+  const proj = projection || {};
+  const conf = CONF_META[proj.confidence] || CONF_META.medium;
+  const concCh = concentration?.byChannel?.revenue;
+  return (
+    <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
+      {/* Company CM3 — the decision layer */}
+      <Card title="Company CM3 · the decision layer">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <div className="stat-num lg" style={{ color: cmColor(cm3) }}>{cm3 == null ? "—" : fmtSignedINR(cm3)}</div>
+          <DerivationPopover
+            title={`Company CM3 · ${monthLabel(month)}`}
+            formula="Σ channels (netRev − COGS − platform fees − ads)"
+            plain="CM3 is contribution after the ad spend that produced the sale — the layer you delist or cut a budget on. Fixed cost (CM4) is a reporting view layered after."
+            inputs={[
+              { label: "Net revenue", value: fmtINR(co?.netRev) },
+              { label: "− COGS", value: co?.cogs == null ? "—" : "−" + fmtINR(co.cogs) },
+              { label: "− Platform fees", value: "−" + fmtINR(co?.fees) },
+              { label: "− Ad spend", value: "−" + fmtINR(co?.adSpend) },
+            ]}
+            value={cm3 == null ? "—" : fmtSignedINR(cm3)}
+            source="cmEngine · coverage-aware CM"
+            asOf={proj.lastDay || month}
+            note={view.cmV1 == null ? "Agency-tier month — channel-grain CM (no per-SKU). CM4 native-only." : undefined}
+          />
+        </div>
+        <div className="muted" style={{ fontSize: 11.5 }}>
+          <span style={{ color: pctTone(cm3Pct) }}>{fmtPct(cm3Pct)}</span> of net rev · {fmtINR(co?.netRev)} rev{view.partial ? " · MTD" : ""}
+        </div>
+      </Card>
+
+      {/* Projected month-end (rubric 15) — only meaningful for the partial month */}
+      <Card title={proj.partial ? "Projected month-end revenue" : "Net revenue (complete)"}>
+        {proj.partial ? (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div className="stat-num lg">{fmtINR(proj.projected)}</div>
+              <DerivationPopover
+                title={`Projected ${monthLabel(month)} net revenue`}
+                formula="MTD × (priorFull ÷ priorToDate)"
+                plain="We extrapolate this month at the same within-month pace last month ran to the same day-of-month — so you're never comparing a half-month to a full one."
+                inputs={[
+                  { label: "MTD (through day " + proj.dom + ")", value: fmtINR(proj.mtd) },
+                  { label: proj.priorMonth + " to same day", value: fmtINR(proj.priorToDate) },
+                  { label: proj.priorMonth + " full month", value: fmtINR(proj.priorFull) },
+                  { label: "Uncertainty band", value: fmtINR(proj.low) + " – " + fmtINR(proj.high) },
+                ]}
+                value={fmtINR(proj.projected)}
+                source={proj.method}
+                asOf={proj.lastDay || month}
+              />
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              <span style={{ color: conf.color, fontWeight: 600 }}>{conf.label}</span> · band {fmtINR(proj.low)}–{fmtINR(proj.high)}
+              {proj.paceVsPrior != null && (
+                <> · <span style={{ color: proj.paceVsPrior >= 0 ? "var(--success)" : "var(--critical)" }}>
+                  {proj.paceVsPrior >= 0 ? "+" : "−"}{fmtPct(Math.abs(proj.paceVsPrior))} vs {proj.priorMonth} to-date
+                </span></>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="stat-num lg">{fmtINR(proj.projected ?? co?.netRev)}</div>
+            <div className="muted" style={{ fontSize: 11.5 }}>{monthLabel(month)} complete · {fmtN(co?.units)} units</div>
+          </>
+        )}
+      </Card>
+
+      {/* Concentration / dependency risk (rubric 57) */}
+      <Card title="Revenue concentration risk">
+        {concCh && concCh.top ? (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div className="stat-num lg" style={{ color: concCh.concentrated ? "var(--warning)" : "var(--ink)" }}>
+                {fmtPct(concCh.topShare)}
+              </div>
+              <span className="muted" style={{ fontSize: 12 }}>on {chMeta(concCh.top.key).label}</span>
+              <DerivationPopover
+                title={`Channel concentration · ${monthLabel(month)}`}
+                formula="topShare = topChannelRev ÷ Σ channel rev · HHI = Σ(share²)"
+                plain="How much of the month's revenue rides on the single biggest channel, and the Herfindahl index across all channels. HHI > 0.25 reads as concentrated — fragile to one channel."
+                inputs={[
+                  { label: "Top channel", value: chMeta(concCh.top.key).label },
+                  { label: "Top channel rev", value: fmtINR(concCh.top.value) },
+                  { label: "Top share", value: fmtPct(concCh.topShare) },
+                  { label: "HHI", value: Number.isFinite(concCh.hhi) ? concCh.hhi.toFixed(2) : "—" },
+                ]}
+                value={fmtPct(concCh.topShare) + " on " + chMeta(concCh.top.key).label}
+                source="bizAnalytics · concentrationRisk"
+                asOf={month}
+              />
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>
+              HHI {Number.isFinite(concCh.hhi) ? concCh.hhi.toFixed(2) : "—"} ·{" "}
+              <span style={{ color: concCh.concentrated ? "var(--warning)" : "var(--success)", fontWeight: 600 }}>
+                {concCh.concentrated ? "concentrated — watch dependency" : "diversified"}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="stat-num lg" style={{ color: "var(--ink-4)" }}>—</div>
+            <div className="muted" style={{ fontSize: 11.5 }}>No positive-revenue channels this month.</div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// BRIDGE VIEW — why CM moved month-over-month (rubric 50). A CM3 bridge (the four
+// ladder rungs that moved it) AND a revenue bridge (per-channel price × volume).
+// Both VISIBLY reconcile (Σ steps == Δ). From-month defaults to the prior month.
+// ═════════════════════════════════════════════════════════════════════════════
+const BridgeView = ({ facts, month, months }) => {
+  // Candidate "from" months = every month before the selected one, newest first.
+  const priorMonths = useMemo(
+    () => months.filter((m) => m < month),
+    [months, month]
+  );
+  const [fromMonth, setFromMonth] = useState(null);
+  const effFrom = fromMonth && priorMonths.includes(fromMonth) ? fromMonth : priorMonths[priorMonths.length - 1];
+
+  const cmB = useMemo(
+    () => (effFrom ? cm3Bridge(facts, { fromMonth: effFrom, toMonth: month, costs: CostInputs }) : null),
+    [facts, effFrom, month]
+  );
+  const revB = useMemo(
+    () => (effFrom ? revenueBridge(facts, { fromMonth: effFrom, toMonth: month, costs: CostInputs }) : null),
+    [facts, effFrom, month]
+  );
+
+  if (!effFrom) {
+    return (
+      <Card title="Why CM moved" sub="Month-over-month decomposition — needs a prior month to compare">
+        <div className="muted" style={{ fontSize: 12 }}>
+          {monthLabel(month)} is the earliest month in the store — there's no prior month to bridge from.
+          Pick a later month to see what moved its CM3 and revenue.
+        </div>
+      </Card>
+    );
+  }
+
+  const RUNG_LABEL = {
+    revenue: "More/less revenue lifted CM3",
+    cogs: "COGS change",
+    fees: "Platform-fee change",
+    ads: "Ad-spend change",
+  };
+
+  // LIKE-FOR-LIKE caveat (rubric 14/29/50/65): if the to-month is still in
+  // progress, the engine clips BOTH months to the same day; surface that here so
+  // the founder never reads a "volume −Nu" leg as a real decline when it is only
+  // fewer elapsed days. Window metadata comes from the bridge result.
+  const bw = (cmB && cmB.window) || (revB && revB.window) || { partial: false };
+  const lflBanner = bw.partial ? (
+    <div style={{ marginBottom: 12, fontSize: 11.5, border: "1px solid var(--warning)", borderRadius: 8, padding: "8px 12px", background: "var(--warning-soft)" }}>
+      <strong>Like-for-like (MTD-vs-MTD):</strong> {monthLabel(month)} is still in progress, so both months are
+      compared <strong>through day {bw.cutoff}</strong>. Every leg below is the change over the SAME calendar window —
+      a "volume" loss here is real units, not just fewer elapsed days. To compare two full closed months, pick an
+      earlier "from" and a closed "to".
+    </div>
+  ) : null;
+
+  return (
+    <>
+      <Card
+        title="Why CM3 moved"
+        sub={bw.partial
+          ? `The four ladder rungs that moved company CM3 — ${monthLabel(month)} is partial, so both months are clipped to day ${bw.cutoff} (MTD-vs-MTD) · each leg same-window · Σ legs reconciles to ΔCM3`
+          : "The four ladder rungs that moved company CM3 month-over-month · each leg is same-window · Σ legs reconciles to ΔCM3"}
+        action={
+          <label className="muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 6 }}>
+            <span>from</span>
+            <select value={effFrom} onChange={(e) => setFromMonth(e.target.value)}
+              style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--ink)" }}>
+              {[...priorMonths].reverse().map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+            <span>→ {monthLabel(month)}</span>
+          </label>
+        }
+      >
+        {cmB && (
+          <>
+            {lflBanner}
+            <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: 12 }}>
+              <Stat label={`CM3 · ${monthShort(effFrom)}${bw.partial ? ` (d${bw.cutoff})` : ""}`} value={fmtSignedINR(cmB.from)} color={cmColor(cmB.from)}/>
+              <Stat label={`CM3 · ${monthShort(month)}${bw.partial ? ` (d${bw.cutoff})` : ""}`} value={fmtSignedINR(cmB.to)} color={cmColor(cmB.to)}/>
+              <Stat label="Δ CM3" value={(cmB.delta >= 0 ? "+" : "−") + fmtINR(Math.abs(cmB.delta))} color={cmB.delta >= 0 ? "var(--success)" : "var(--critical)"}/>
+            </div>
+            <BridgeChart bridge={cmB} D={D} height={250}/>
+            <hr className="hr"/>
+            <table className="table">
+              <thead><tr><th>Rung</th><th>What it means</th><th className="num">Effect on CM3</th></tr></thead>
+              <tbody>
+                {cmB.steps.map((s) => (
+                  <tr key={s.label}>
+                    <td><strong>{s.label}</strong></td>
+                    <td className="muted" style={{ fontSize: 11.5 }}>{RUNG_LABEL[s.kind] || s.kind}</td>
+                    <td className="num" style={{ color: s.value >= 0 ? "var(--success)" : "var(--critical)", fontWeight: 600 }}>
+                      {s.value >= 0 ? "+" : "−"}{fmtINR(Math.abs(s.value))}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ background: "var(--brand-soft)", fontWeight: 600 }}>
+                  <td colSpan={2}>Σ rungs = Δ CM3 {cmB.reconciles ? "✓ reconciles" : "⚠ does not reconcile"}</td>
+                  <td className="num" style={{ color: cmB.delta >= 0 ? "var(--success)" : "var(--critical)" }}>
+                    {cmB.delta >= 0 ? "+" : "−"}{fmtINR(Math.abs(cmB.delta))}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ padding: "8px 2px 0", fontSize: 10.5, color: "var(--ink-3)" }}>
+              Each rung is the change in that ladder line between the two months, signed by its effect on CM3 (more revenue +, more cost −).
+              Only COGS-covered channels enter the bridge so every leg reconciles — an unpriced cell would break the identity and is excluded.
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card
+        title="Why revenue moved · per channel"
+        sub={bw.partial
+          ? `Δ company net revenue split into each channel's volume + price/mix effect — clipped to day ${bw.cutoff} of both months (MTD-vs-MTD, ${monthLabel(month)} in progress) · Σ reconciles to Δ revenue`
+          : "Δ company net revenue split into each channel's volume effect (units × old price) and price/mix effect — Σ reconciles to Δ revenue"}
+        style={{ marginTop: 14 }}
+      >
+        {revB && (
+          <>
+            {lflBanner}
+            <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginBottom: 12 }}>
+              <Stat label={`Net rev · ${monthShort(effFrom)}${bw.partial ? ` (d${bw.cutoff})` : ""}`} value={fmtINR(revB.from)}/>
+              <Stat label={`Net rev · ${monthShort(month)}${bw.partial ? ` (d${bw.cutoff})` : ""}`} value={fmtINR(revB.to)}/>
+              <Stat label="Δ revenue" value={(revB.delta >= 0 ? "+" : "−") + fmtINR(Math.abs(revB.delta))} color={revB.delta >= 0 ? "var(--success)" : "var(--critical)"}/>
+            </div>
+            {revB.steps.length > 0 ? (
+              <>
+                <BridgeChart bridge={revB} D={D} height={250}/>
+                <hr className="hr"/>
+                <table className="table">
+                  <thead><tr><th>Driver</th><th>Type</th><th className="num">Effect on revenue</th></tr></thead>
+                  <tbody>
+                    {revB.steps.map((s, i) => {
+                      const meta = chMeta(s.channel);
+                      return (
+                        <tr key={i}>
+                          <td>
+                            <span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.label}</span>
+                            <span style={{ marginLeft: 6 }}>{s.label.replace(new RegExp("^" + s.channel + " ?"), "")}</span>
+                          </td>
+                          <td className="muted" style={{ fontSize: 11.5, textTransform: "capitalize" }}>{s.kind}</td>
+                          <td className="num" style={{ color: s.value >= 0 ? "var(--success)" : "var(--critical)", fontWeight: 600 }}>
+                            {s.value >= 0 ? "+" : "−"}{fmtINR(Math.abs(s.value))}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ background: "var(--brand-soft)", fontWeight: 600 }}>
+                      <td colSpan={2}>Σ drivers = Δ revenue {revB.reconciles ? "✓ reconciles" : "⚠ residual"}</td>
+                      <td className="num" style={{ color: revB.delta >= 0 ? "var(--success)" : "var(--critical)" }}>
+                        {revB.delta >= 0 ? "+" : "−"}{fmtINR(Math.abs(revB.delta))}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </>
+            ) : (
+              <div className="muted" style={{ fontSize: 12 }}>Revenue was flat between these months — no driver above the rounding floor.</div>
+            )}
+            <div style={{ padding: "8px 2px 0", fontSize: 10.5, color: "var(--ink-3)" }}>
+              Volume effect = (Δ units) × old price; price/mix effect = new units × (Δ price). A channel present in only one month reads as started/stopped.
+            </div>
+          </>
+        )}
+      </Card>
+    </>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// FORECAST VIEW — forward net revenue / units / CONTRIBUTION (CM3) at company,
+// channel, AND SKU grain, with the STATED method and an uncertainty BAND (rubric
+// 52). This is the page's forward-looking layer: not a single month-end revenue
+// pace number but a grain-selectable forecast where the founder picks the metric
+// they manage to (CM3 is the decision layer) and the grain they manage at.
+//
+// The forecast() engine fits a trailing-3-complete-month linear trend ⊕ run-rate
+// (50/50), holds the realized ₹/unit forward for units and the recent CM3 margin
+// forward for contribution, and bands every point by ±residualσ·√h. A partial
+// current month is completed via month-end pace (flagged). NaN-safe throughout;
+// confidence + method ride under the chart so it is never a black-box number.
+// ═════════════════════════════════════════════════════════════════════════════
+const FC_METRIC_META = {
+  cm3:    { label: "Contribution (CM3)", unit: "₹", hint: "the decision layer — forward CM3 at the held recent margin" },
+  netRev: { label: "Net revenue",        unit: "₹", hint: "forward net revenue from the trend + run-rate blend" },
+  units:  { label: "Units",              unit: "u", hint: "forward units at the held realized ₹/unit" },
+};
+const ForecastView = ({ facts, month, view }) => {
+  const [grain, setGrain] = useState("company"); // company | channel | sku
+  const [channel, setChannel] = useState(null);
+  const [sku, setSku] = useState(null);
+  const [metric, setMetric] = useState("cm3");
+  const [horizon, setHorizon] = useState(3);
+
+  // Grain option lists — channels from this month's coverage; SKUs from the
+  // latest native month's per-SKU chain (only native months carry SKU grain).
+  const channels = view.channels || [];
+  const skuCodes = useMemo(
+    () => (view.cmV1 ? Object.keys(view.cmV1.bySku).sort((a, b) => safe(view.cmV1.bySku[b].netRev) - safe(view.cmV1.bySku[a].netRev)) : []),
+    [view.cmV1]
+  );
+  // Effective selections — fall back safely if a stale pick leaves scope.
+  const effChannel = grain === "channel" ? (channel && channels.includes(channel) ? channel : channels[0]) : null;
+  const effSku = grain === "sku" ? (sku && skuCodes.includes(sku) ? sku : skuCodes[0]) : null;
+
+  const fc = useMemo(
+    () => forecast(facts, {
+      channel: grain === "channel" ? effChannel : grain === "sku" ? undefined : undefined,
+      sku: grain === "sku" ? effSku : undefined,
+      horizonMonths: horizon,
+      asOfMonth: month,
+      costs: CostInputs,
+    }),
+    // facts/month/grain/scope/horizon drive the fit; CostInputs is a live module read.
+    [facts, month, grain, effChannel, effSku, horizon]
+  );
+
+  const mm = FC_METRIC_META[metric] || FC_METRIC_META.cm3;
+  const skuGrainAvailable = skuCodes.length > 0;
+  const grainLabel = grain === "company" ? "Company (all channels)"
+    : grain === "channel" ? `${chMeta(effChannel).label} channel`
+    : `${skuLabel(effSku)}`;
+
+  // The forecast() result has no SKU grain when this month is agency-tier — guard.
+  const noScope = grain === "sku" && !skuGrainAvailable;
+  const fcEmpty = !fc || (!fc.history?.length && !fc.forecast?.length);
+
+  return (
+    <>
+      <Card
+        title="Forward forecast · revenue · units · contribution"
+        sub="Pick the grain you manage at and the metric you manage to. CM3 is the decision layer. Method + uncertainty band are stated — this is a model, not a promise."
+        action={
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <label className="muted" style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              <span>grain</span>
+              <select value={grain} onChange={(e) => setGrain(e.target.value)}
+                style={selStyle}>
+                <option value="company">Company</option>
+                <option value="channel">Per channel</option>
+                <option value="sku" disabled={!skuGrainAvailable}>Per SKU{skuGrainAvailable ? "" : " (native only)"}</option>
+              </select>
+            </label>
+            {grain === "channel" && (
+              <select value={effChannel || ""} onChange={(e) => setChannel(e.target.value)} style={selStyle} aria-label="Forecast channel">
+                {channels.map((ch) => <option key={ch} value={ch}>{chMeta(ch).label}</option>)}
+              </select>
+            )}
+            {grain === "sku" && skuGrainAvailable && (
+              <select value={effSku || ""} onChange={(e) => setSku(e.target.value)} style={selStyle} aria-label="Forecast SKU">
+                {skuCodes.map((c) => <option key={c} value={c}>{skuLabel(c)}</option>)}
+              </select>
+            )}
+            <select value={metric} onChange={(e) => setMetric(e.target.value)} style={selStyle} aria-label="Forecast metric">
+              {Object.entries(FC_METRIC_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <select value={horizon} onChange={(e) => setHorizon(Number(e.target.value))} style={selStyle} aria-label="Forecast horizon">
+              {[1, 2, 3, 4, 6].map((h) => <option key={h} value={h}>{h} mo</option>)}
+            </select>
+          </div>
+        }
+      >
+        {noScope ? (
+          <div className="note" style={{ background: "rgba(99,102,241,0.06)", borderColor: "rgba(99,102,241,0.25)" }}>
+            <strong style={{ color: "#6366f1" }}>{monthLabel(month)} is an agency-tier month.</strong>&nbsp;
+            SKU-grain forecasting needs a native per-SKU base. Company and per-channel forecasts are available;
+            upload a native report to unlock per-SKU forecasts.
+          </div>
+        ) : fcEmpty ? (
+          <div className="muted" style={{ fontSize: 12 }}>
+            Not enough history at this grain to fit a forecast. {grainLabel} has no usable trailing series in the store yet.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+              <strong style={{ fontSize: 13 }}>{grainLabel}</strong>
+              <span className="muted" style={{ fontSize: 11 }}>{mm.label} · {mm.hint}</span>
+            </div>
+            <ForecastChart fc={fc} D={D} metric={metric} height={260}/>
+            <hr className="hr"/>
+            <ForecastTable fc={fc} metric={metric}/>
+            <div style={{ padding: "8px 2px 0", fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              <strong>Method:</strong> {fc.method}. The trailing window uses <strong>complete months only</strong> (a partial
+              month would bias the slope down). Units ride the held realized ₹/unit; contribution rides the recent CM3 margin
+              ({fc.cm3MarginPct != null ? fmtPct(fc.cm3MarginPct) : "—"}). The shaded band is ±residual σ·√h — it <strong>widens with
+              horizon</strong> because uncertainty compounds. Confidence is{" "}
+              <strong>{fc.confidence}</strong>{fc.note ? `; ${fc.note}` : ""}.
+            </div>
+          </>
+        )}
+      </Card>
+    </>
+  );
+};
+
+// Forecast numbers behind the chart — month rows with the central estimate and the
+// low–high band, partial-month flagged. Every figure NaN-safe + formatted.
+const ForecastTable = ({ fc, metric }) => {
+  const isUnits = metric === "units";
+  const lowK = metric === "cm3" ? "cm3Low" : "netRevLow";
+  const highK = metric === "cm3" ? "cm3High" : "netRevHigh";
+  const fmtV = (n) => (isUnits ? (Number.isFinite(n) ? fmtN(Math.round(n)) : "—") : metric === "cm3" ? fmtSignedINR(n) : fmtINR(n));
+  const rows = (fc.forecast || []);
+  if (!rows.length) return null;
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table className="table" style={{ minWidth: 420 }}>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th className="num">{FC_METRIC_META[metric]?.label || "Value"}</th>
+            {!isUnits && <th className="num">Low</th>}
+            {!isUnits && <th className="num">High</th>}
+            <th>Window</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr key={p.month}>
+              <td><strong>{monthShort(p.month)}</strong></td>
+              <td className="num strong" style={{ color: metric === "cm3" ? cmColor(p[metric]) : "var(--ink)" }}>{fmtV(p[metric])}</td>
+              {!isUnits && <td className="num muted">{metric === "cm3" ? fmtSignedINR(p[lowK]) : fmtINR(p[lowK])}</td>}
+              {!isUnits && <td className="num muted">{metric === "cm3" ? fmtSignedINR(p[highK]) : fmtINR(p[highK])}</td>}
+              <td className="muted" style={{ fontSize: 11 }}>
+                {p.partial
+                  ? <span style={{ color: "var(--warning)", fontWeight: 600 }}>partial · pace-completed</span>
+                  : "full month (modeled)"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// Shared compact select styling for the forecast controls.
+const selStyle = {
+  fontSize: 11.5, padding: "4px 8px", borderRadius: 6,
+  border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--ink)",
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// LEVERS VIEW — driver/sensitivity (which lever moves company CM3 most, rubric
+// 55) + the what-if scenario simulator (price/fee/ad/COGS → CM, rubric 54). The
+// two answer the founder's "where's my leverage" and "what if I pull it".
+// ═════════════════════════════════════════════════════════════════════════════
+const DRIVER_META = {
+  price: { label: "Raise price", color: "var(--success)" },
+  cogs:  { label: "Cut COGS", color: "var(--success)" },
+  fees:  { label: "Cut platform fee", color: "var(--success)" },
+  ads:   { label: "Cut ad spend", color: "var(--success)" },
+};
+const LeversView = ({ facts, month }) => {
+  const drv = useMemo(() => driverSensitivity(facts, { month, costs: CostInputs, step: 0.05 }), [facts, month]);
+  // The what-if compute closure — bound to facts/month/live costs (rubric 54).
+  const compute = useMemo(
+    () => (levers) => computeWhatIf(facts, { month, levers, costs: CostInputs }),
+    [facts, month]
+  );
+
+  const drivers = drv?.drivers || [];
+  const maxAbs = drivers.length ? Math.max(...drivers.map((d) => Math.abs(d.deltaCm3)), 1) : 1;
+  const anyDriver = drivers.some((d) => Math.abs(d.deltaCm3) > 0.5);
+
+  return (
+    <>
+      <Card
+        title="Driver sensitivity · where's the leverage"
+        sub={`A uniform ±5% shock on each lever, ranked by how much it moves company ${monthLabel(month)} CM3 · same-window`}
+      >
+        {anyDriver ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            {drivers.map((d) => {
+              const w = Math.min(100, (Math.abs(d.deltaCm3) / maxAbs) * 100);
+              const meta = DRIVER_META[d.lever] || { label: d.label, color: "var(--brand)" };
+              return (
+                <div key={d.lever} style={{ display: "grid", gridTemplateColumns: "150px 1fr 120px", gap: 12, alignItems: "center" }}>
+                  <div style={{ fontSize: 12 }}>
+                    <span style={{ fontWeight: d.rank === 1 ? 600 : 400 }}>{meta.label}</span>
+                    <span className="muted" style={{ fontSize: 10, marginLeft: 5 }}>{d.label}</span>
+                  </div>
+                  <div style={{ position: "relative", height: 16, background: "var(--bg-sunken)", borderRadius: 3 }}>
+                    <div style={{ position: "absolute", left: 0, width: w + "%", height: "100%", background: d.deltaCm3 >= 0 ? "var(--success)" : "var(--critical)", opacity: d.rank === 1 ? 0.9 : 0.55, borderRadius: 3 }}/>
+                  </div>
+                  <div className="mono" style={{ fontSize: 12, textAlign: "right", fontWeight: d.rank === 1 ? 600 : 400, color: d.deltaCm3 >= 0 ? "var(--success)" : "var(--critical)" }}>
+                    {d.deltaCm3 >= 0 ? "+" : "−"}{fmtINR(Math.abs(d.deltaCm3))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 12 }}>
+            No leverage to rank for {monthLabel(month)} — there is no COGS-priced channel to simulate (agency-tier or no native COGS coverage).
+            Sensitivity needs a priced CM chain.
+          </div>
+        )}
+        {anyDriver && (
+          <div style={{ padding: "10px 2px 0", fontSize: 10.5, color: "var(--ink-3)" }}>
+            Each bar is the ΔCM3 from a 5% favourable move in that lever (price +5%, COGS −5%, fee −5pts, ads −5%), holding volume constant.
+            The longest bar is the highest-leverage knob this month. Demand elasticity is not modelled — this is margin mechanics.
+          </div>
+        )}
+      </Card>
+
+      <Card
+        title="What-if · scenario simulator"
+        sub="Move a lever and see the contribution-margin impact across the month · CM3-covered channels only · pure margin mechanics"
+        style={{ marginTop: 14 }}
+      >
+        <WhatIfPanel compute={compute} channelLabel={(ch) => chMeta(ch).label} D={D} month={monthLabel(month)}/>
+      </Card>
+    </>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ACTIONS VIEW — the unified cross-lever "what to do Monday" queue (rubric VIII /
+// 53/60/61). ONE ranked list spanning reorder · delist · reprice · ad-cut ·
+// reallocate · de-risk, each ending in a decision with a per-month ₹ impact —
+// not an ad-budget-only list. Fronted by the written PROSE weekly read-out
+// (VII-59) and followed by the ad-reporting-inflation insight (rubric c).
+// ═════════════════════════════════════════════════════════════════════════════
+const LEVER_LABEL = {
+  "ad-cut": "Ad cut", delist: "Delist", reprice: "Reprice",
+  reallocate: "Reallocate", reorder: "Reorder", "de-risk": "De-risk",
+};
+const ActionsView = ({ facts, month, view }) => {
+  // VIII — ONE "what to do Monday" queue spanning ALL levers (reorder / delist /
+  // reprice / ad-cut / reallocate / de-risk), each ranked by ₹ impact. Cross-module
+  // velocity is joined in (rubric 58) so reorder/stockout-risk rows sit alongside
+  // the ad/margin levers — not an ad-budget-only list. NaN-safe.
+  const velocity = useMemo(() => crossModuleVelocity(facts, { month }), [facts, month]);
+  const queue = useMemo(
+    () => actionQueue(facts, { month, costs: CostInputs, velocity }),
+    [facts, month, velocity]
+  );
+  // VII-59 — the written PROSE weekly read-out ("what changed & what it means"),
+  // the prescriptive prose that frames the queue.
+  const narrative = useMemo(
+    () => proseWeeklyNarrative(facts, { month, costs: CostInputs }),
+    [facts, month]
+  );
+  const isNative = view.cmV1 != null;
+
+  // Recoverable-contribution headline = Σ |₹/mo CM3| of the margin levers (ad-cut /
+  // delist / reprice / reallocate); reorder rows are "₹ at risk", not recoverable,
+  // so they're summed separately to avoid double-reading.
+  const recoverable = queue.filter((r) => r.impactKind && r.impactKind.includes("CM3"))
+    .reduce((a, r) => a + Math.abs(safe(r.impactPerMonth)), 0);
+  const atRisk = queue.filter((r) => r.lever === "reorder")
+    .reduce((a, r) => a + Math.abs(safe(r.impactPerMonth)), 0);
+  // Lever spread — proves the queue isn't ad-budget-only (VIII).
+  const spread = queue.reduce((a, r) => ((a[r.lever] = (a[r.lever] || 0) + 1), a), {});
+
+  return (
+    <>
+      {/* The prescriptive prose first — the first-pass written analysis (VII-59). */}
+      <div style={{ marginBottom: 14 }}>
+        <ProseNarrative narrative={narrative} title="What changed this week — and what it means"/>
+      </div>
+
+      <Card
+        title="What to do Monday · one queue, every lever"
+        sub={`A single ranked action list across reorder · delist · reprice · ad-cut · reallocate · de-risk — not an ad-budget-only list. Ranked by ₹ impact · ${monthLabel(month)}`}
+      >
+        {!isNative && (
+          <div className="note" style={{ marginBottom: 12, background: "rgba(99,102,241,0.06)", borderColor: "rgba(99,102,241,0.25)" }}>
+            <strong style={{ color: "#6366f1" }}>{monthLabel(month)} is an agency-tier month.</strong>&nbsp;
+            SKU×channel ad/delist/reprice actions need per-SKU margin (native reports). Channel-level guidance (concentration)
+            and the prose read-out still apply; upload native reports to unlock per-SKU actions.
+          </div>
+        )}
+
+        {queue.length === 0 ? (
+          <div className="muted" style={{ fontSize: 12 }}>
+            No loss-making ad cells, structural losses, reprice candidates, reorder risks, or concentration flags for {monthLabel(month)} — nothing on fire. Hold course.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 18, marginBottom: 12, fontSize: 12.5 }}>
+              {recoverable > 0 && (
+                <span>Acting on the margin levers recovers up to{" "}
+                  <strong style={{ color: "var(--success)" }}>{fmtINR(recoverable)}/mo</strong> of contribution
+                  <span className="muted" style={{ fontSize: 10.5 }}> (upper bound — some overlap)</span>
+                </span>
+              )}
+              {atRisk > 0 && (
+                <span><strong style={{ color: "var(--warning)" }}>{fmtINR(atRisk)}/mo</strong> of revenue at stockout risk
+                  <span className="muted" style={{ fontSize: 10.5 }}> (reorder, not recoverable)</span>
+                </span>
+              )}
+            </div>
+            <ActionQueue queue={queue} D={D} title="Ranked action queue" max={14}/>
+            <div style={{ padding: "12px 2px 0", fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
+              <strong>Levers in this queue:</strong>{" "}
+              {Object.entries(spread).map(([lev, c], i) => (
+                <span key={lev}>{i > 0 ? " · " : ""}{LEVER_LABEL[lev] || lev} ×{c}</span>
+              ))}.{" "}
+              Each row's <strong>basis</strong> says where the number comes from — <em>actual-attributed</em> (per-product ad),
+              <em> derived-velocity</em> (cross-module reorder), or channel-grain. CM3 levers (ad-cut / delist / reprice /
+              reallocate) are contribution recovered <strong>per month</strong>; reorder rows are revenue <strong>at risk</strong> if
+              the fast-mover stocks out (the inventory↔sales join, rubric 58); de-risk (concentration) is a watch flag with no direct ₹.
+            </div>
+          </>
+        )}
+      </Card>
+
+      {/* Ad-reporting inflation insight (rubric c) — directly decision-relevant to
+          the action queue: it tells the founder to read CM3 off the banked Shopify
+          net, never the Monarch conversion value the ad platform reports. */}
+      <ConversionGapPanel facts={facts} month={month}/>
+    </>
+  );
+};
+
+// (c) Conversion-value-gap insight — Monarch reported conversion value vs the
+// Shopify net that actually banked. The gap is ad-reporting inflation (last-click
+// double-counting + pre-GST/returns gross), NOT real lost revenue. Only meaningful
+// where a website Monarch conversion figure exists for the month. NaN-safe.
+const ConversionGapPanel = ({ facts, month }) => {
+  const gap = useMemo(() => conversionValueGap(facts, { month }), [facts, month]);
+  if (!gap || !(gap.monarchConvValue > 0) || !(gap.shopifyNet > 0)) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <ConversionGapView data={gap} D={D} title={`Ad-reporting inflation · ${monthLabel(month)} (website)`}/>
     </div>
   );
 };
@@ -425,12 +1201,19 @@ function MonthPicker({ months, value, onChange }) {
     return `${tier}${m.partial ? " · MTD" : ""}`;
   };
   return (
+    // X-80 · accessible labelled control: the <select> carries an explicit
+    // aria-label (the calendar icon alone is decorative, aria-hidden), so a
+    // screen reader announces "Month — select the month to view" rather than an
+    // unlabelled combobox. The icon stays for sighted wayfinding.
     <label className="muted" style={{ fontSize: 11.5, display: "flex", alignItems: "center", gap: 6 }}>
-      <Icon name="calendar" size={13}/>
+      <Icon name="calendar" size={13} aria-hidden="true"/>
+      <span className="sr-only">Month</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="fin-month-select"
+        aria-label="Month — select the month to view"
+        title="Select the month to view"
         style={{
           fontSize: 12, padding: "4px 8px", borderRadius: 6,
           border: "1px solid var(--border)", background: "var(--bg-card)", color: "var(--ink)",
@@ -478,11 +1261,17 @@ function MonthCoverageStrip({ model, view }) {
 // CM WATERFALL — company + per-channel, coverage-aware.
 // netRev → −COGS → CM1 → −fees → CM2 → −ads → CM3 → −fixed → CM4 (native only)
 // ═════════════════════════════════════════════════════════════════════════════
-const WaterfallView = ({ view, month }) => {
+const WaterfallView = ({ view, month, facts }) => {
   const co = view.company;
   const hasFixed = view.cmV1 != null && view.fixedAmount != null && view.cmV1.coverage.hasFixedCost;
   const channels = view.channels;
   const isAgency = view.cmV1 == null;
+  // ATTRIBUTION CONFIDENCE pinned to each channel's CM3 (rubric 23): how much of
+  // the ad leg that produced THIS CM3 is per-product measured vs allocated. For an
+  // agency-tier month (e.g. June) where ads are 0%-measured, the founder sees IN
+  // PLACE that the CM3 ad rung is a hint, not a measured fact — same honesty the
+  // Marketing panel carries, now next to the number they'd act on.
+  const attrib = useMemo(() => attributionConfidence(facts, { month, costs: CostInputs }), [facts, month]);
   // When some channels' net is excluded from the CM% basis (agency month with a
   // COGS-less channel, e.g. website), the blended CM% is over the cogs-covered
   // net only — say so instead of "of net rev" (which would imply the full total).
@@ -499,6 +1288,16 @@ const WaterfallView = ({ view, month }) => {
           <div className="muted" style={{ fontSize: 11.5 }}>
             {fmtN(co.units)} units · {monthLabel(month)}{view.partial ? " · MTD" : ""}
           </div>
+          {/* IX — make the two coexisting nets ONE figure with a sub-line, not two
+              equal-weight numbers. The complete net is the headline; the cogs-priced
+              net (the CM%-ladder basis below) is an explicit, smaller sub-line so the
+              eye never has to reconcile two "net revenue" totals. */}
+          {cmExcluded > 0 && (
+            <div className="muted" style={{ fontSize: 10.5, marginTop: 3, lineHeight: 1.4 }}
+              title={`The CM%-ladder below is computed over the ${fmtINR(cmBasisNet)} of this net that has a COGS card; ${fmtINR(cmExcluded)} (channels with COGS "—") is real revenue but unpriced, so it sits outside the margin %. Same total — one figure, two slices.`}>
+              of which <strong style={{ color: "var(--ink-2)" }}>{fmtINR(cmBasisNet)}</strong> is cogs-priced (CM% basis); {fmtINR(cmExcluded)} unpriced
+            </div>
+          )}
         </Card>
         <Card title="CM1 · after COGS">
           <div className="stat-num lg" style={{ color: cmColor(co.cm1) }}>{co.cm1 == null ? "—" : fmtINR(co.cm1)}</div>
@@ -606,7 +1405,10 @@ const WaterfallView = ({ view, month }) => {
                   <td className="num" style={{ color: cmColor(c.cm2) }}>{c.cm2 == null ? "—" : fmtINR(c.cm2)}</td>
                   <td className="num muted">{c.adSpend > 0 ? "−" + fmtINR(c.adSpend) : <span className="muted">—</span>}</td>
                   <td><AdBasisChip basis={c.adBasis} channel={ch}/></td>
-                  <td className="num strong" style={{ color: cmColor(c.cm3) }}>{c.cm3 == null ? "—" : fmtINR(c.cm3)}</td>
+                  <td className="num strong" style={{ color: cmColor(c.cm3) }}>
+                    {c.cm3 == null ? "—" : fmtINR(c.cm3)}
+                    {c.cm3 != null && c.adSpend > 0 && <Cm3ConfidenceChip measured={attrib.byChannel[ch]?.measured} channel={ch} attrib={attrib.byChannel[ch]}/>}
+                  </td>
                   <td className="num"><span style={{ color: pctTone(c.pcts.cm3) }}>{fmtPct(c.pcts.cm3)}</span></td>
                   {hasFixed && <td className="num muted">{view.cmV1?.byChannel[ch]?.cm4 == null ? "—" : fmtINR(view.cmV1.byChannel[ch].cm4)}</td>}
                 </tr>
@@ -636,6 +1438,14 @@ const WaterfallView = ({ view, month }) => {
           <span><AdBasisChip basis={AD_BASIS.ALLOC}/> channel total split by net rev</span>
           <span><AdBasisChip basis={AD_BASIS.AGENCY}/> Snell/Monarch channel total</span>
           <span style={{ color: "var(--warning)" }}>≈ COGS approximated</span>
+        </div>
+        <div style={{ padding: "0 14px 10px", fontSize: 10.5, color: "var(--ink-3)" }}>
+          <strong>“NN% meas”</strong> next to each CM3 = how much of the ad spend behind that CM3 is <strong>per-product measured</strong>
+          {" "}vs allocated by revenue (rubric 23). A CM3 with a high measured% is a number to bet on; a low/0% one (an
+          agency-tier month, where ads are a channel total with no per-SKU split) is a directional hint —{" "}
+          {attrib.overall != null
+            ? <>this month is <strong>{Math.round(attrib.overall * 100)}%</strong> measured overall ({fmtINR(attrib.directTotal)} measured + {fmtINR(attrib.allocTotal)} allocated = {fmtINR(attrib.spendTotal)}).</>
+            : "no ad spend allocated this month."} Hover any chip for its split.
         </div>
         {cmExcluded > 0 && (
           <div style={{ padding: "0 14px 10px", fontSize: 10.5, color: "var(--ink-3)" }}>
@@ -787,6 +1597,110 @@ const CMWaterfall = ({ cell, hasFixed, excludedNet = 0 }) => {
   );
 };
 const safe = (n) => (Number.isFinite(n) ? n : 0);
+
+// NATIVE-vs-AGENCY BIAS CORRECTION BAND (rubric 4/89). The tool measures the
+// systematic agency over/under-statement on the one month both tiers exist, then
+// applies it as a CORRECTION BAND to the CURRENT month's agency-tier channels —
+// instead of taking agency figures at face value with only a global caveat. The
+// face value stays primary (it's what the agency reported); the band shows where a
+// native report would likely land.
+const NativeAgencyBiasPanel = ({ facts, month, view }) => {
+  const bias = useMemo(() => nativeAgencyBias(facts), [facts]);
+  if (!bias.channels.length) return null;
+  // current-month agency-tier channels that have a measured, comparable bias.
+  const agencyChannels = (view.channels || []).filter((ch) => view.byChannel[ch]?.coverage === "agency");
+  const corrections = agencyChannels
+    .map((ch) => {
+      const b = bias.byChannel[ch];
+      if (!b || !b.comparable) return null;
+      const faceNet = Number(view.byChannel[ch]?.netRev) || 0;
+      if (faceNet <= 0) return null;
+      const c = correctedAgencyNet(faceNet, b.biasPct);
+      return { ch, biasPct: b.biasPct, ...c };
+    })
+    .filter(Boolean);
+
+  return (
+    <Card
+      title="Native-vs-agency bias · correction band"
+      sub={`Measured on ${monthLabel(bias.anchorMonth)} — the one month where both a native marketplace export and the agency estimate exist. The per-channel bias is applied as a correction BAND to ${monthLabel(month)}'s agency-tier channels, so they aren't read at face value. Marketplace channels only (website's two sources measure different bases).`}
+      style={{ marginTop: 14 }}
+      padded={false}
+    >
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Channel</th>
+            <th className="num">Native net ({monthShort(bias.anchorMonth)})</th>
+            <th className="num">Agency net ({monthShort(bias.anchorMonth)})</th>
+            <th className="num">Measured bias</th>
+            <th>Read</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bias.channels.map((ch) => {
+            const b = bias.byChannel[ch];
+            const meta = chMeta(ch);
+            return (
+              <tr key={ch}>
+                <td><span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.label}</span></td>
+                <td className="num">{fmtINR(b.nativeNet)}</td>
+                <td className="num muted">{fmtINR(b.agencyNet)}</td>
+                <td className="num" style={{ color: Math.abs(b.biasPct) < 0.01 ? "var(--ink-3)" : b.biasPct > 0 ? "var(--warning)" : "var(--info)" }}>
+                  {b.biasPct >= 0 ? "+" : "−"}{Math.abs(b.biasPct * 100).toFixed(2)}%
+                </td>
+                <td className="muted" style={{ fontSize: 11.5 }}>
+                  {!b.comparable ? <span title={b.note}>basis mismatch — reference only</span>
+                    : b.direction === "matches" ? "agency ≈ native (no correction needed)"
+                    : `agency ${b.direction} net by ${Math.abs(b.biasPct * 100).toFixed(1)}%`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {corrections.length > 0 ? (
+        <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border-soft)" }}>
+          <div className="stat-label" style={{ marginBottom: 8 }}>Applied to {monthLabel(month)} (agency-tier channels)</div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th className="num">Agency face value</th>
+                <th className="num">Bias-corrected est.</th>
+                <th className="num">Likely band</th>
+              </tr>
+            </thead>
+            <tbody>
+              {corrections.map((c) => {
+                const meta = chMeta(c.ch);
+                return (
+                  <tr key={c.ch}>
+                    <td><span className="badge" style={{ background: meta.color + "22", color: meta.color, borderColor: meta.color + "55" }}>{meta.label}</span></td>
+                    <td className="num">{fmtINR(c.face)}</td>
+                    <td className="num strong">{fmtINR(c.corrected)}</td>
+                    <td className="num muted">{fmtINR(c.band[0])} – {fmtINR(c.band[1])}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="muted" style={{ fontSize: 10.5, marginTop: 8 }}>
+            The <strong>face value</strong> is what the agency reported and remains the primary figure across the tool.
+            The <strong>corrected estimate</strong> = face ÷ (1 + measured bias) — what a native report would likely show.
+            The band is ±half the bias magnitude (a single-month bias is an estimate, not a guarantee). Read it as a
+            confidence range, not a restatement.
+          </div>
+        </div>
+      ) : (
+        <div className="muted" style={{ fontSize: 10.5, padding: "8px 14px" }}>
+          {monthLabel(month)} has no agency-tier marketplace channel with a measured comparable bias, so no correction
+          band applies — the figures stand at face value.
+        </div>
+      )}
+    </Card>
+  );
+};
 
 // Agency↔native reconciliation note — surfaces the Snell/Monarch-vs-native delta
 // for any native channel that also has an agency shadow (V2.1, never silent).
@@ -1553,12 +2467,17 @@ const TrendChart = ({ months, channels, rows, companyByMonth, metric, showChanne
 // COST INPUTS — editable COGS / fee% / mcfShare / fixed cost (unchanged model;
 // every figure shows as-of + source; the two ₹0-packaging flags surfaced).
 // ═════════════════════════════════════════════════════════════════════════════
-const CostInputsView = ({ month, onChange }) => {
+const CostInputsView = ({ month, onChange, facts }) => {
   const [, setVersion] = useState(0);
   const refresh = () => { setVersion((v) => v + 1); onChange(); };
   const inputs = CostInputs.listCostInputs();
   const fixed = CostInputs.getFixedCost(month);
   const today = new Date().toISOString().slice(0, 10);
+  // (f) COGS cost-change history — the "history of what changed" reconstructed
+  // from the Unit_COGS Notes column (₹1,050→₹1,115 etc.). This is the provenance
+  // of every COGS the editable table above runs on (rubric 38 — editable inputs
+  // carry a history of what changed). NaN-safe, deferred to a calc.
+  const costHistory = useMemo(() => costChangeHistory(facts), [facts]);
 
   const onReset = () => {
     if (typeof window !== "undefined" && !window.confirm("Reset ALL cost inputs to the baked defaults? Your overrides are discarded.")) return;
@@ -1604,6 +2523,16 @@ const CostInputsView = ({ month, onChange }) => {
           </tbody>
         </table>
       </Card>
+
+      {/* (f) COGS cost-change history — the "history of what changed" (rubric 38).
+          Sits right under the editable COGS so the founder sees the provenance of
+          a margin shift: which SKU's raw-material/landed cost moved, from what, with
+          the founder's own note. Self-states empty/partial via the component. */}
+      {costHistory && costHistory.changedCount > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <CostChangeView data={costHistory} D={D} title="COGS cost-change history · what moved & why"/>
+        </div>
+      )}
 
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         <Card title="Platform fee %" sub="Variable platform cost · of channel net revenue · BusinessModel Apr-26" padded={false}>
@@ -1781,6 +2710,102 @@ const STATUS_META = {
   "NO-DATA": { color: "var(--warning)",  label: "NO-DATA" },
 };
 
+// Source-tag → human registry for the provenance/upload trail (rubric 39/82). Maps
+// every fact-store source the bundle/uploads can carry to what it feeds + its tier.
+const SOURCE_REGISTRY = {
+  "amazon-orders":  { label: "Amazon All-Orders (native per-SKU sales)", tier: "native", feeds: "Amazon SKU revenue/units" },
+  "fk-sales":       { label: "Flipkart Sales (native per-SKU)", tier: "native", feeds: "Flipkart SKU revenue/units + cashback" },
+  "blinkit-sales":  { label: "Blinkit Sales (native per-SKU)", tier: "native", feeds: "Blinkit SKU revenue/units" },
+  "shopify-net":    { label: "Shopify Net Sales (native per-SKU)", tier: "native", feeds: "Website SKU net revenue/units" },
+  "shopify-daily":  { label: "Shopify daily revenue (native)", tier: "native", feeds: "Website daily revenue shape (trend only)" },
+  "ads-amazon-sp":  { label: "Amazon Sponsored Products (per-ASIN)", tier: "native", feeds: "Amazon measured ad attribution" },
+  "ads-fk-pla":     { label: "Flipkart PLA (per-SKU)", tier: "native", feeds: "Flipkart measured ad attribution" },
+  "ads-google":     { label: "Google Ads product-wise (Monarch)", tier: "monarch", feeds: "Website measured ad attribution" },
+  "snell-agency":   { label: "Snell Sales & Ads (agency daily channel)", tier: "agency", feeds: "Agency channel totals + daily series" },
+  "monarch-web":    { label: "Monarch Website Sales & Ads", tier: "monarch", feeds: "Website daily net + ad spend" },
+  "snell-history":  { label: "Snell history (multi-month channel totals)", tier: "agency", feeds: "22-month channel revenue history" },
+  "snell-sku-units":{ label: "Snell Categorywise (per-SKU units)", tier: "agency", feeds: "SKU units history (velocity)" },
+  "monarch-history":{ label: "Monarch history (Google/Meta monthly)", tier: "monarch", feeds: "Website platform spend history" },
+  "snell-cancel":   { label: "Snell shipped-vs-cancel", tier: "agency", feeds: "Channel cancel rates" },
+  "monarch-seo":    { label: "Monarch SEO keyword ranks", tier: "monarch", feeds: "Organic keyword rank snapshots" },
+  "monarch-platform":{ label: "Monarch daily Google/Meta", tier: "monarch", feeds: "Platform ROAS/CPA (Google vs Meta)" },
+  "bm-repeats":     { label: "BusinessModel Repeats (Shopify/Amazon)", tier: "businessmodel", feeds: "Quarterly repeat rate" },
+  "bm-returns":     { label: "BusinessModel Returns (Shopify)", tier: "businessmodel", feeds: "Website returns trend" },
+  "snell-ordermix": { label: "Snell Sale tab (Amazon order-mix + reconciliation)", tier: "agency", feeds: "Amazon organic-vs-review order mix + agency↔native reconciliation" },
+  "monarch-extra":  { label: "Monarch March-2025 + Weekly-Comparison tabs", tier: "monarch", feeds: "Website order-count history + week-over-week comparison" },
+  "cogs-history":   { label: "Unit_COGS Notes (per-SKU cost-change history)", tier: "businessmodel", feeds: "Per-SKU COGS change log (cost-card provenance)" },
+};
+const TIER_PILL = {
+  native:       { bg: "rgba(34,160,90,0.14)", fg: "#1B7A45", label: "native" },
+  monarch:      { bg: "rgba(99,102,241,0.14)", fg: "#4F46E5", label: "monarch" },
+  agency:       { bg: "rgba(201,162,39,0.16)", fg: "#9A7B16", label: "agency" },
+  businessmodel:{ bg: "var(--bg-sunken)", fg: "var(--ink-2)", label: "founder sheet" },
+};
+
+// DATA PROVENANCE & UPLOAD TRAIL (rubric 39/82) — a browsable list of exactly which
+// sources produced the current state, their tier, recency, and (when uploaded in-
+// session) the upload timestamp. The build-pinned baseline shows its build date;
+// any in-tool upload overlays with its own "uploaded <when>" stamp.
+const DataProvenancePanel = ({ facts }) => {
+  const meta = facts?.meta || {};
+  const bySource = meta.bySource || {};
+  const uploads = meta.uploads || [];
+  const uploadByTag = {}; for (const u of uploads) uploadByTag[u.sourceTag] = u;
+  // present every source the store actually carries, registry-ordered.
+  const tags = Object.keys(SOURCE_REGISTRY).filter((t) => bySource[t] || uploadByTag[t]);
+  // include any unregistered source so nothing is hidden.
+  for (const t of Object.keys(bySource)) if (!SOURCE_REGISTRY[t] && !tags.includes(t)) tags.push(t);
+  return (
+    <Card
+      title="Data provenance &amp; upload trail"
+      sub={`What produced the current state. Bundled baseline pinned ${meta.appBuildDate || "—"}; any in-tool upload overlays it (native overrides agency, re-upload replaces — never double-counts). Data through ${meta.latestDataDate || "—"}.`}
+      style={{ marginBottom: 14 }}
+      padded={false}
+    >
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Feeds</th>
+            <th>Tier</th>
+            <th>State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {tags.map((t) => {
+            const reg = SOURCE_REGISTRY[t] || { label: t, tier: (bySource[t]?.tier) || "agency", feeds: "—" };
+            const up = uploadByTag[t];
+            const pill = TIER_PILL[reg.tier] || TIER_PILL.agency;
+            return (
+              <tr key={t}>
+                <td>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>{reg.label}</span>
+                    <span className="muted" style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{t}</span>
+                  </div>
+                </td>
+                <td className="muted" style={{ fontSize: 11.5 }}>{reg.feeds}</td>
+                <td><span className="badge" style={{ background: pill.bg, color: pill.fg, fontSize: 9.5, fontWeight: 700 }}>{pill.label}</span></td>
+                <td className="muted" style={{ fontSize: 11.5 }}>
+                  {up && !up.baked
+                    ? <span title={`Uploaded in-tool ${up.at}`} style={{ color: "var(--success)" }}>uploaded {new Date(up.at).toLocaleDateString("en-IN")}</span>
+                    : <span title={`Part of the build-pinned baseline (${meta.appBuildDate || "—"})`}>bundled baseline</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="muted" style={{ fontSize: 10.5, padding: "8px 14px" }}>
+        Every figure on every page traces to one of these sources. A row reading <strong>uploaded</strong> means you
+        replaced the bundled baseline for that source this session; <strong>bundled baseline</strong> is the build-pinned
+        export reconciled by the {ANCHOR_MONTH} anchors below. Re-uploading the same source replaces its window
+        (idempotent — parse-twice equals parse-once); native marketplace exports always override agency estimates.
+      </div>
+    </Card>
+  );
+};
+
 const VerificationView = ({ facts }) => {
   const results = useMemo(() => runVerification(facts), [facts]);
   const sanity = useMemo(() => runFormattingSanity(facts), [facts]);
@@ -1793,6 +2818,9 @@ const VerificationView = ({ facts }) => {
 
   return (
     <>
+      {/* Browsable data provenance / upload trail (rubric 39/82). */}
+      <DataProvenancePanel facts={facts} />
+
       {/* Formatting / sanity guard (V2.4) — the engine's own output is walked. */}
       <Card
         title="Formatting &amp; sanity guard"
@@ -1929,4 +2957,4 @@ export default PageFinance;
 // Inert in production: ESM named exports of internal components have no runtime
 // effect unless imported, and the app imports only the default.
 // eslint-disable-next-line react-refresh/only-export-components -- testability exports for the SSR gate harness; buildMonthView travels with its views. Inert in production (app imports only the default).
-export { CMTrendView, MatrixView, SkuEconomicsView, WaterfallView, buildMonthView };
+export { CMTrendView, MatrixView, SkuEconomicsView, WaterfallView, buildMonthView, BridgeView, LeversView, ActionsView, ForecastView, FinanceHeadline };

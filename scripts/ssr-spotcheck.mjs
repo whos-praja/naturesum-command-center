@@ -15,12 +15,20 @@ const out = [];
 const expect = (label, cond, detail = "") => { out.push(`${cond ? "PASS" : "FAIL"}  ${label}${detail ? " · " + detail : ""}`); };
 
 // ── SALES: View A retention (7.9%→15.1%), View E cancel, View D sku-mix ──
-const sales = await render("/src/pages/PageSales.jsx");
+// PageSales is TABBED (rubric IX) — render each tab via the `initialTab` hook and
+// union the markup so panels in non-default tabs (retention, sku) are reachable.
+const SALES_TABS = ["daily", "movers", "forecast", "retention", "sku", "cross", "geo", "reconcile"];
+const salesParts = [];
+for (const t of SALES_TABS) salesParts.push(await render("/src/pages/PageSales.jsx", null, { initialTab: t }));
+const sales = salesParts.join(" ");
 expect("A retention: Shopify repeat 7.9%→15.1% band present", /7\.9%/.test(sales) && /15\.1%/.test(sales));
 expect("A returns trend panel present", sales.includes("Returns are volatile") || sales.includes("returns"));
 expect("E cancel-rate panel present", /Cancel/i.test(sales));
 expect("D SKU×channel mix panel present", sales.includes("channel") && sales.includes("SKU"));
-expect("Sales: no 16276%-class ACOS leak", !/\b1\d{3,}%/.test(sales));
+// Scan VISIBLE text only (strip tags) so inline `style="width:NN.NN%"` bar widths
+// aren't mistaken for an absurd ACOS figure reaching the screen.
+const salesText = sales.replace(/<[^>]*>/g, " ");
+expect("Sales: no 16276%-class ACOS leak", !/\b1\d{3,}%/.test(salesText));
 
 // ── MARKETING: View B SEO, View C G-vs-M, M2 itemize, M4 losing count ──
 const mkt = await render("/src/pages/PageMarketing.jsx");

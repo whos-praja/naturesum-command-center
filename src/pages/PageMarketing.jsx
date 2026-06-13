@@ -10,6 +10,32 @@ import {
   guardRatio,
   AD_BASIS,
 } from "../lib/cmEngine.js";
+import * as COSTS from "../lib/costInputs.js";
+import {
+  autoNarrative,
+  adPrescriptions,
+  detectAnomalies,
+  computeWhatIf,
+  driverSensitivity,
+  dailyChannelSeries,
+  attributionConfidence,
+  channelDailyEfficiency,
+  blinkitAdProxy,
+  cashbackTrend,
+  conversionValueGap,
+  forecast,
+  actionQueue,
+  monarchSourceTabs,
+} from "../lib/bizAnalytics.js";
+import { DerivationPopover } from "../components/biz/DerivationPopover.jsx";
+import { AutoNarrative } from "../components/biz/AutoNarrative.jsx";
+import { AnomalyBadge } from "../components/biz/AnomalyBadge.jsx";
+import { WhatIfPanel } from "../components/biz/WhatIfPanel.jsx";
+import BizStateGuard from "../components/biz/BizStateGuard.jsx";
+import { BlinkitAdProxy } from "../components/biz/BlinkitAdProxy.jsx";
+import { ForecastChart } from "../components/biz/ForecastChart.jsx";
+import { ActionQueue } from "../components/biz/ActionQueue.jsx";
+import { CashbackTrendView, ConversionGapView, MonarchSourceTabsView } from "../components/biz/InsightViews.jsx";
 
 /**
  * PageMarketing — Business Performance module, V2 ADDENDUM (2026-06-12).
@@ -159,21 +185,111 @@ const PageMarketing = () => {
   const snellMeta = facts?.meta?.bySource?.["snell-history"] || {};
   const recon = snellMeta.mayReconciliation || null;
 
+  // ── Freshness — true to the latest data day (rubric 83), consistent with the
+  // inventory module's "Data through <date>" label. Latest amongst all sources.
+  const dataThrough = facts?.meta?.latestDataDate || mtd?.lastDay || lastComplete?.lastDay || null;
+
+  // ── 59/66 · Auto-narrative — the founder's morning read, most-useful-first.
+  // Built for the CURRENT (MTD) month so the headline answers "how are ads doing
+  // and what needs me today"; falls back to the last complete month if no MTD.
+  const narrativeMonth = mtd?.month || lastComplete?.month || skuMonth;
+  const narrative = useMemo(
+    () => safeCall(() => autoNarrative(facts, { month: narrativeMonth, costs: COSTS })),
+    [facts, narrativeMonth]
+  );
+
+  // ── 53 · Ranked ad prescriptions (₹ impact) — the deep-dive month is the only
+  // per-SKU window, so SKU-level ad cut/optimise actions are computed there; the
+  // Google↔Meta reallocation hint reads platform efficiency (any month).
+  const adRx = useMemo(
+    () => safeCall(() => adPrescriptions(facts, { month: skuMonth, costs: COSTS })) || [],
+    [facts, skuMonth]
+  );
+
+  // ── 23 · Attribution-confidence per channel — what fraction of THIS month's ad
+  // spend (and thus its CM3) is real per-product attribution vs allocated-by-rev.
+  // Read straight from the verified cmEngine adAllocation surface (direct/total).
+  const attrConfidence = useMemo(
+    () => safeCall(() => buildAttributionConfidence(facts, skuMonth)) || { channels: [], total: null },
+    [facts, skuMonth]
+  );
+
+  // ── III-99 · MODELED Blinkit per-SKU ad proxy (band, labelled modeled). Blinkit
+  // gives no per-SKU ad data — a SOURCE GAP. Rather than omit (silent) or fabricate,
+  // the engine models each SKU's ad = its Blinkit net × Amazon's measured TCOS, ±50%
+  // band, rescaled to the real Blinkit channel ad total. Native deep-dive month.
+  const blkProxy = useMemo(
+    () => safeCall(() => blinkitAdProxy(facts, { month: skuMonth, costs: COSTS, refChannel: "amazon" })) || null,
+    [facts, skuMonth]
+  );
+
+  // ── (d) · Flipkart cashback as a settlement-drag trend (a deduction on net
+  // realization). Honest to source: one populated month in the current export → a
+  // single-point baseline, flagged as such by the engine note.
+  const cashback = useMemo(() => safeCall(() => cashbackTrend(facts)) || null, [facts]);
+  // I-2 · the two parsed-but-unsurfaced Monarch tabs (March-2025 daily ramp +
+  // Weekly-Comparison Google-vs-Meta blocks). Stored by the parser but never
+  // reached a view — wired here so ingestion completeness has no silent omission.
+  const monarchTabs = useMemo(() => safeCall(() => monarchSourceTabs(facts)) || null, [facts]);
+
+  // ── (c) · Ad-reporting inflation — Monarch Total Conversion Value (ad-reported
+  // gross) vs Shopify-net (banked). The website ad rupee's "conversion value" is
+  // inflated vs what actually landed; reading CM3 off the conversion value would
+  // overstate ad efficiency. Same-window (one month). A marketing-honesty insight.
+  const convGap = useMemo(
+    () => safeCall(() => conversionValueGap(facts, { month: skuMonth, costs: COSTS })) || null,
+    [facts, skuMonth]
+  );
+
+  // ── VII-52 · Forward WEBSITE ad-channel revenue + CONTRIBUTION with a stated
+  // method and an uncertainty band (the marketing budgeting horizon — how much the
+  // website channel is pacing toward, so spend can be planned, not just reviewed).
+  // Channel-grain so the band is meaningful (Monarch website history is deep).
+  const webForecast = useMemo(
+    () => safeCall(() => forecast(facts, { channel: "website", costs: COSTS, horizonMonths: 2 })) || null,
+    [facts]
+  );
+
+  // ── VIII · The MARKETING SLICE of the ONE shared "what to do Monday" queue. The
+  // full queue spans every lever (reorder/delist/reprice/ad-cut/reallocate); here
+  // we surface the AD levers (ad-cut + reallocate) so the marketing page ends in
+  // the SAME ranked-by-₹ decision contract the other pages share — not a second
+  // bespoke list. Computed for the native deep-dive month (the per-SKU ad window).
+  // raw cross-lever queue (memoized like adRx — proven clean); the cheap ad-lever
+  // slice is derived at render (a small filter/sort, no memo needed).
+  const fullQueue = useMemo(
+    () => safeCall(() => actionQueue(facts, { month: skuMonth, costs: COSTS })) || [],
+    [facts, skuMonth]
+  );
+  const adQueue = marketingSliceOfQueue(fullQueue);
+
   return (
+    <>
+    <BizStateGuard facts={facts} module="Marketing & Ads" onUpload={() => setUploadOpen(true)}>
     <div>
       <div className="page-head">
         <div>
           <div className="page-title">Marketing &amp; Advertising</div>
           <div className="page-sub">
-            Monthly spend vs net revenue &amp; TCOS across {history.length} months · channel spend mix ·
-            Google vs Meta ROAS/CPA · SEO keyword ranks · May per-SKU ROAS / ACOS · AMS daily spend
+            Attribution confidence per channel · ranked ad actions (₹ impact) in the shared Monday queue · spend vs net revenue &amp; TCOS across {history.length} months ·
+            channel spend forecast (banded) · Google vs Meta ROAS/CPA · all {seoCount(facts)} SEO keywords · modeled Blinkit per-SKU ad · per-SKU ROAS / ACOS ·
+            AMS daily spend + anomaly flags · ad-reporting inflation · Flipkart cashback drag · ad-budget what-if
           </div>
         </div>
         <div className="actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {dataThrough && (
+            <span className="cov-badge cov-agency sm" title="The latest data day reflected anywhere on this page (newest of all loaded ad/sales sources). Consistent with the inventory module's freshness label.">
+              Data through {fmtDay(dataThrough)}
+            </span>
+          )}
           <DataAsOfPill onClick={() => setUploadOpen(true)} />
           <button className="btn primary" onClick={() => setUploadOpen(true)}>Upload reports</button>
         </div>
       </div>
+
+      {/* ── 59/66 · Auto-narrative — most-useful-first: what changed in ads & what
+          needs the founder today. Headline + tone bullets + expandable read-out. */}
+      {narrative && <AutoNarrative narrative={narrative} title="Marketing read-out · what changed & what needs you" />}
 
       <div className="note" style={{ marginBottom: 14 }}>
         <span style={{ lineHeight: 1.55 }}>
@@ -204,7 +320,25 @@ const PageMarketing = () => {
           <div className="muted" style={{ fontSize: 11.5 }}>basis for blended TCOS</div>
         </Card>
         <Card title="Blended TCOS · period">
-          <div className="stat-num lg">{periodTcos.suppressed ? "—" : fmtPct1(periodTcos.value)}</div>
+          <div className="stat-num lg" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {periodTcos.suppressed ? "—" : fmtPct1(periodTcos.value)}
+            {!periodTcos.suppressed && (
+              <DerivationPopover
+                title="Blended TCOS · all complete months"
+                formula="Σ ad spend ÷ Σ net revenue (pooled, same-window)"
+                plain="Total Cost of Sale — every ad rupee as a share of every net-revenue rupee, pooled across all complete months so numerator and denominator share one window."
+                inputs={[
+                  { label: "Σ ad spend (complete mo)", value: D.fmtINR(periodTotals.spend) },
+                  { label: "Σ net revenue (complete mo)", value: D.fmtINR(periodTotals.rev) },
+                  { label: "Complete months", value: D.fmtN(periodTotals.months) },
+                ]}
+                value={fmtPct1(periodTcos.value)}
+                source="Snell Sale-tab ad spend + net columns; Monarch website Google/Meta spend"
+                asOf={dataThrough ? fmtDay(dataThrough) : undefined}
+                note="MTD (June) is excluded so the ratio never mixes a partial month into the pool."
+              />
+            )}
+          </div>
           <div className="muted" style={{ fontSize: 11.5 }}>ad spend ÷ net revenue (same-window)</div>
         </Card>
         <Card title={`Spend · ${fmtMonth(lastComplete?.month)}`}>
@@ -215,6 +349,21 @@ const PageMarketing = () => {
         </Card>
       </div>
 
+      {/* ── 23 · Attribution-confidence meter per channel + 53 · ranked ad
+          prescriptions. Most-useful-first after the KPI strip: how trustworthy
+          each channel's ad economics are, and the ranked ₹-impact actions. ───── */}
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        <AttributionConfidence conf={attrConfidence} month={skuMonth} D={D} />
+        <AdPrescriptions rx={adRx} month={skuMonth} D={D} skuName={skuName} />
+      </div>
+
+      {/* ── VIII · The MARKETING SLICE of the shared "what to do Monday" queue.
+          The ad levers (ad-cut + reallocate) from the ONE cross-lever action queue,
+          ranked by ₹ impact, in the same contract the Sales/Finance pages share —
+          so marketing actions live in the founder's single Monday list, not a
+          page-private one. The reorder/delist/reprice levers live on Sales. ─────── */}
+      <MarketingActionQueue queue={adQueue} month={skuMonth} D={D} />
+
       {/* ── 1. Monthly spend vs net revenue + TCOS line, per channel ──────── */}
       <SpendVsRevenue
         history={history}
@@ -223,6 +372,11 @@ const PageMarketing = () => {
         recon={recon}
         netColumnChoice={snellMeta.netColumnChoice}
       />
+
+      {/* ── VII-52 · Forward WEBSITE ad-channel revenue + contribution (banded).
+          Spend planning needs a forward view, not just rear-view spend. Stated
+          method + uncertainty band; the website channel (deepest Monarch history). */}
+      <SpendForecast fc={webForecast} D={D} />
 
       {/* ── 2. Spend mix by channel over time ─────────────────────────────── */}
       <SpendMix history={history} channels={channels} D={D} />
@@ -233,17 +387,71 @@ const PageMarketing = () => {
         <WebsiteSplit facts={facts} D={D} />
       </div>
 
+      {/* ── (c) · Ad-reporting inflation + (d) Flipkart cashback settlement drag.
+          Two marketing-honesty signals side by side: the gap between what the ad
+          platform REPORTS as conversion value and what Shopify actually banked
+          (read CM3 off the banked number, never the inflated conv value); and the
+          Flipkart cashback deduction that drags net realization. ─────────────────── */}
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+        {convGap ? <ConversionGapView data={convGap} D={D} /> : <div />}
+        {cashback ? <CashbackTrendView data={cashback} D={D} /> : <div />}
+      </div>
+
       {/* ── 4. (View C) Google vs Meta efficiency — the budgeting decision view ─ */}
       <PlatformEfficiency facts={facts} D={D} />
+
+      {/* ── 4b. Website DAILY ROAS + anomaly — the same daily treatment Amazon AMS
+          gets, for the website ad rupee (rubric 51/52). ───────────────────────── */}
+      <WebsiteDailyEfficiency facts={facts} D={D} />
 
       {/* ── 5. (View B) SEO keyword-rank panel ────────────────────────────── */}
       <SeoKeywordRanks facts={facts} />
 
+      {/* ── 5b. I-2 · Monarch SUPPLEMENTARY tabs — "March 2025" (the website 0→1
+          daily ramp) and "Weekly Comparison" (the founder's own Google-vs-Meta
+          7-/3-day ROAS/CPA blocks). These two tabs are parsed but were never
+          surfaced; mounted here so EVERY field of every Monarch tab reaches a
+          view (rubric I / param 2). The March aggregate is shown reconciled to
+          its day rows (the stored monthly was a 2× double-count) so it ties to
+          source. ──────────────────────────────────────────────────────────── */}
+      {monarchTabs && monarchTabs.available && (
+        <div style={{ marginBottom: 14 }}>
+          <MonarchSourceTabsView data={monarchTabs} D={D} />
+        </div>
+      )}
+
       {/* ── 6. May per-SKU deep-dive (native) ─────────────────────────────── */}
       <SkuDeepDive facts={facts} month={skuMonth} D={D} skuName={skuName} skuVariant={skuVariant} />
 
-      {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} defaultTab="business" />}
+      {/* ── III-99 · MODELED Blinkit per-SKU ad proxy. Blinkit gives NO per-SKU ad
+          attribution (a source gap the deep-dive above cannot fill — Blinkit ad is
+          0% measured). Rather than a silent omission OR a fabricated number, the
+          engine MODELS each SKU's ad (Blinkit net × Amazon's measured TCOS, ±50%
+          band, rescaled to Blinkit's real channel ad total) and labels it
+          MODELED-NOT-MEASURED with a striped banner. Honest to param 89 / Dim IV. */}
+      {blkProxy && (
+        <Card
+          title="Blinkit per-SKU ad · MODELED proxy"
+          sub="Blinkit reports no per-SKU ad spend (a source gap — Blinkit ad attribution is 0% measured). Instead of omitting it or inventing a number, each SKU's Blinkit ad is MODELED from its Blinkit net × Amazon's measured TCOS, banded ±50%, and rescaled so the per-SKU sum ties to Blinkit's real channel ad total. Clearly labelled modeled, never measured — would need Blinkit's own per-Item-Id ad report to measure."
+          action={<span className="badge amber" style={{ fontSize: 9 }}>modeled · NOT measured</span>}
+        >
+          <BlinkitAdProxy proxy={blkProxy} D={D} title={`Blinkit ad attribution · ${fmtMonth(skuMonth)}`} max={8} />
+          <div className="muted" style={{ fontSize: 10.5, marginTop: 10, lineHeight: 1.5 }}>
+            Why a proxy and not a blank: the founder still needs a per-SKU read on where the Blinkit ad budget likely
+            went. The band (±50%) and the striped MODELED banner make its lower confidence impossible to miss; this is a
+            hint to direct attention, never a figure to bet a budget on. The Amazon reference TCOS is the
+            measured intensity we have closest to Blinkit&apos;s quick-commerce dynamics.
+          </div>
+        </Card>
+      )}
+
+      {/* ── 7. (54/55) Ad-budget what-if + driver sensitivity — the reallocation
+          decision as a simulator: move the ad lever, see CM3 across channels. ─── */}
+      <AdScenario facts={facts} month={skuMonth} D={D} />
     </div>
+    </BizStateGuard>
+    {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} defaultTab="business" />}
+    </>
   );
 };
 
@@ -480,6 +688,20 @@ const AmsDailySpend = ({ facts, D, skuMonth }) => {
     return out;
   }, [facts, skuMonth]);
 
+  // 51 · spend anomaly flags — z-score of each day's Amazon ad spend vs its own
+  // trailing window. The detector runs on the FULL amazon daily-spend history (so
+  // the trailing baseline is real), then we keep only the deep-dive-month points
+  // → a spend spike/collapse is flagged, never invented (sd=0 days are skipped).
+  const anomByDate = useMemo(() => {
+    const adSeries = safeCall(() => dailyChannelSeries(facts))?.adByChannel?.amazon || {};
+    const pts = Object.keys(adSeries).sort().map((iso) => ({ label: iso, value: num(adSeries[iso]) }));
+    const anoms = safeCall(() => detectAnomalies(pts, { window: 14, z: 2 })) || [];
+    const map = {};
+    for (const a of anoms) map[a.label] = a;
+    return map;
+  }, [facts]);
+  const monthAnoms = series.map((s) => anomByDate[s.date]).filter(Boolean);
+
   const total = series.reduce((a, s) => a + s.spend, 0);
   const spTotal = num(facts?.meta?.bySource?.["ads-amazon-sp"]?.amazonSpTotal);
   const maxV = Math.max(1, ...series.map((s) => s.spend));
@@ -516,24 +738,136 @@ const AmsDailySpend = ({ facts, D, skuMonth }) => {
               </div>
             </div>
           </div>
-          {/* daily bars */}
+          {/* daily bars — anomaly days (≥2σ vs trailing) tinted red/info + dotted */}
           <svg viewBox="0 0 100 30" preserveAspectRatio="none" style={{ width: "100%", height: 64, display: "block" }}>
             {series.map((s, i) => {
               const bw = 100 / series.length;
               const h = (s.spend / maxV) * 28;
-              return <rect key={i} x={i * bw + bw * 0.12} y={30 - h} width={bw * 0.76} height={h} fill="#E47911" opacity="0.8" />;
+              const an = anomByDate[s.date];
+              const fill = an ? (an.direction === "high" ? "var(--critical)" : "var(--info)") : "#E47911";
+              return <rect key={i} x={i * bw + bw * 0.12} y={30 - h} width={bw * 0.76} height={Math.max(0.4, h)} fill={fill} opacity={an ? 0.95 : 0.8}>
+                {an && <title>{`${fmtDay(s.date)} · ${D.fmtINR(s.spend)} · ${Math.abs(an.z).toFixed(1)}σ ${an.direction === "high" ? "spike" : "collapse"} vs trailing`}</title>}
+              </rect>;
             })}
           </svg>
           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
             <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(series[0].date)}</span>
             <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(series[series.length - 1].date)}</span>
           </div>
+          {/* 51 · spend anomaly callout — names the days that broke pattern. */}
+          {monthAnoms.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+              <span className="muted" style={{ fontSize: 10.5 }}>Spend anomalies:</span>
+              {monthAnoms.slice(0, 4).map((a) => (
+                <span key={a.label} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  <span className="muted" style={{ fontSize: 10, fontFamily: "var(--mono)" }}>{fmtDay(a.label)}</span>
+                  <AnomalyBadge anomaly={a} text={a.direction === "high" ? "spike" : "collapse"} />
+                </span>
+              ))}
+              {monthAnoms.length > 4 && <span className="muted" style={{ fontSize: 10 }}>+{monthAnoms.length - 4} more</span>}
+            </div>
+          )}
           <div className="muted" style={{ fontSize: 10.5, marginTop: 8 }}>
             The channel daily total (Snell) and the SP per-ASIN file (₹{D.fmtN(spTotal)}) cover the SAME May window — the
             remainder ({attrib.suppressed ? "—" : D.fmtINR(Math.max(0, total - spTotal))}) is unattributed AMS spend allocated by revenue in the deep-dive below.
           </div>
         </>
       )}
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * SECTION 4b — Website DAILY ROAS + anomaly (rubric 51/52).
+ * The website ad view was monthly; this gives the website ad rupee the SAME
+ * daily ROAS + anomaly treatment the Amazon AMS daily series gets. ROAS is
+ * same-day net ÷ same-day ad (window-integral — no cross-window artifact). Days
+ * that broke pattern (≥2σ on the ROAS series vs its trailing window) are named.
+ * ════════════════════════════════════════════════════════════════════════ */
+const WINDOW_PRESETS = [30, 60, 90];
+const WebsiteDailyEfficiency = ({ facts, D }) => {
+  const [span, setSpan] = useState(60);
+  const eff = useMemo(() => safeCall(() => channelDailyEfficiency(facts, { channel: "website", window: 14, lastN: span })) || { days: [], roasAnomalies: [], summary: {} }, [facts, span]);
+  const days = eff.days || [];
+  if (days.length === 0) {
+    return (
+      <Card title="Website daily ad efficiency · ROAS & anomalies" sub="Daily website ROAS (net ÷ ad, same day) with ≥2σ anomaly flags — the same daily treatment Amazon AMS gets." style={{ marginBottom: 14 }}>
+        <div className="muted" style={{ fontSize: 12.5 }}>No daily website ad-spend rows in the fact store.</div>
+      </Card>
+    );
+  }
+  const maxRoas = Math.max(1, ...days.map((d) => num(d.roas)));
+  const anomDays = days.filter((d) => d.anomaly || d.flag === "zero-sale");
+  const sum = eff.summary || {};
+  // breakeven ROAS ≈ 1 / CM2% is channel-specific; here we anchor the visual on a
+  // ROAS=1 (revenue == spend) reference line — below it, the day's ad lost money
+  // on a pure-revenue basis (margin makes the true breakeven higher; shown in ⓘ).
+  const refY = (1 / maxRoas) * 28;
+  return (
+    <Card
+      title="Website daily ad efficiency · ROAS & anomalies"
+      sub={`Daily website ROAS (same-day net ÷ same-day ad — window-safe) across the last ${span} ad-days, with ≥2σ ROAS anomalies named. Parity with the Amazon AMS daily view.`}
+      style={{ marginBottom: 14 }}
+      action={
+        <div className="seg">
+          {WINDOW_PRESETS.map((p) => <button key={p} className={span === p ? "active" : ""} onClick={() => setSpan(p)}>{p}d</button>)}
+        </div>
+      }
+    >
+      <div style={{ display: "flex", gap: 18, marginBottom: 10, flexWrap: "wrap" }}>
+        <div>
+          <div className="stat-num">{sum.roas != null ? sum.roas.toFixed(2) + "×" : "—"}</div>
+          <div className="muted" style={{ fontSize: 10.5 }}>blended ROAS · {sum.days} ad-days</div>
+        </div>
+        <div>
+          <div className="stat-num">{D.fmtINR(sum.ad)}</div>
+          <div className="muted" style={{ fontSize: 10.5 }}>total ad spend</div>
+        </div>
+        <div>
+          <div className="stat-num">{D.fmtINR(sum.net)}</div>
+          <div className="muted" style={{ fontSize: 10.5 }}>net rev on ad-days</div>
+        </div>
+      </div>
+      {/* daily ROAS bars — anomaly days tinted; a ROAS=1 reference line. */}
+      <svg viewBox="0 0 100 30" preserveAspectRatio="none" style={{ width: "100%", height: 70, display: "block" }}>
+        <line x1="0" y1={30 - refY} x2="100" y2={30 - refY} stroke="var(--border)" strokeWidth="0.2" strokeDasharray="0.8 0.8" />
+        {days.map((d, i) => {
+          const bw = 100 / days.length;
+          const h = (num(d.roas) / maxRoas) * 28;
+          const fill = d.flag === "zero-sale" ? "var(--critical)"
+            : d.flag === "roas-drop" ? "var(--info)"
+            : d.flag === "roas-spike" ? "var(--success)"
+            : num(d.roas) < 1 ? "#C9A227" : "#4F46E5";
+          return <rect key={i} x={i * bw + bw * 0.12} y={30 - h} width={bw * 0.76} height={Math.max(0.4, h)} fill={fill} opacity={d.anomaly ? 0.98 : 0.78}>
+            <title>{`${fmtDay(d.iso)} · ROAS ${num(d.roas).toFixed(2)}× · net ${D.fmtINR(d.net)} / ad ${D.fmtINR(d.ad)}${d.anomaly ? ` · ${Math.abs(num(d.z)).toFixed(1)}σ ${d.flag === "roas-drop" ? "ROAS drop" : "ROAS spike"}` : ""}${d.flag === "zero-sale" ? " · ZERO-SALE ad day" : ""}`}</title>
+          </rect>;
+        })}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+        <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(days[0].iso)}</span>
+        <span className="muted" style={{ fontSize: 9.5, fontFamily: "var(--mono)" }}>{fmtDay(days[days.length - 1].iso)}</span>
+      </div>
+      {anomDays.length > 0 && (
+        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          <span className="muted" style={{ fontSize: 10.5 }}>ROAS anomalies:</span>
+          {anomDays.slice(0, 5).map((d) => (
+            <span key={d.iso} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span className="muted" style={{ fontSize: 10, fontFamily: "var(--mono)" }}>{fmtDay(d.iso)}</span>
+              {d.flag === "zero-sale"
+                ? <span className="badge" style={{ fontSize: 8.5, background: "rgba(214,69,69,0.14)", color: "var(--critical)" }}>0× zero-sale</span>
+                : <AnomalyBadge anomaly={{ z: num(d.z), direction: d.flag === "roas-spike" ? "high" : "low" }} text={d.flag === "roas-spike" ? "ROAS spike" : "ROAS drop"} />}
+            </span>
+          ))}
+          {anomDays.length > 5 && <span className="muted" style={{ fontSize: 10 }}>+{anomDays.length - 5} more</span>}
+        </div>
+      )}
+      <div className="muted" style={{ fontSize: 10.5, marginTop: 8 }}>
+        Each bar is one ad-day's <strong>ROAS = same-day net ÷ same-day ad spend</strong> (both sides one day → no
+        cross-window artifact). The dashed line is ROAS = 1 (revenue == spend); below it the day lost money on a
+        pure-revenue basis (the true margin breakeven is higher — see the per-SKU breakeven-ACOS below).
+        Anomalies are ≥2σ moves on the ROAS series vs its trailing-14d window. Source: Monarch daily (net) + website
+        daily ad spend, both already in the fact store.
+      </div>
     </Card>
   );
 };
@@ -818,8 +1152,12 @@ const SeoKeywordRanks = ({ facts }) => {
   }
 
   const shown = showAll ? kws : kws.slice(0, 12);
-  const latestDate = seo.dates?.[seo.dates.length - 1];
+  const latestDate = seo.staleAsOf || seo.latestDate || seo.dates?.[seo.dates.length - 1];
   const firstDate = seo.dates?.[0];
+  // VI-96 · staleness — how many days since the last SEO snapshot, vs the live
+  // data-through date. The SEO tab is a separate cadence from sales/ad data and
+  // tends to lag; the founder must read these ranks knowing how old they are.
+  const stale = staleness(latestDate, facts?.meta?.latestDataDate);
   // counts for the headline: top-3 / top-10 at the latest snapshot + net movers.
   const top3 = kws.filter((k) => num(k.latest) > 0 && num(k.latest) <= 3).length;
   const top10 = kws.filter((k) => num(k.latest) > 0 && num(k.latest) <= 10).length;
@@ -831,12 +1169,43 @@ const SeoKeywordRanks = ({ facts }) => {
       title="SEO keyword ranks"
       sub={`Where Naturesum ranks on its tracked keywords, latest vs 30 days ago (Monarch SEO tab). Lower rank = better — rank 1 is the #1 result. An ↑ arrow means the position improved (the rank number dropped). ${seo.totalKeywords} keywords tracked across ${seo.dates?.length || 0} snapshots (${fmtSeoDate(firstDate)} → ${fmtSeoDate(latestDate)}).`}
       padded={false}
-      action={kws.length > 12 ? (
-        <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setShowAll((s) => !s)}>
-          {showAll ? "Show top 12" : `Show all ${kws.length}`}
-        </button>
-      ) : null}
+      action={
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {stale && (
+            <span
+              className="cov-badge sm"
+              style={{ background: stale.severe ? "var(--critical)" : "var(--warning)", color: stale.severe ? "#fff" : "#1a1206", borderColor: "transparent", fontWeight: 600, fontSize: 10 }}
+              title={`The SEO tab's latest snapshot is ${fmtSeoDate(latestDate)} — ${stale.days} days before the page's live data-through date. SEO ranks are on a slower cadence than sales/ad data; re-upload the Monarch SEO tab to refresh.`}
+            >
+              ⚠ SEO stale · {fmtSeoDate(latestDate)} ({stale.days}d old)
+            </span>
+          )}
+          {kws.length > 12 ? (
+            <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setShowAll((s) => !s)}>
+              {showAll ? "Show top 12" : `Show all ${kws.length}`}
+            </button>
+          ) : null}
+        </div>
+      }
     >
+      {/* VI-96 · prominent staleness banner — the ranks below are a stale snapshot;
+          say so loudly so the founder never reads them as current. */}
+      {stale && (
+        <div className="card-body" style={{ paddingTop: 10, paddingBottom: 10 }}>
+          <div className="note" style={{ borderLeft: `3px solid ${stale.severe ? "var(--critical)" : "var(--warning)"}`, paddingLeft: 10 }}>
+            <span style={{ lineHeight: 1.55, fontSize: 11.5 }}>
+              <strong style={{ color: stale.severe ? "var(--critical)" : "var(--warning)" }}>
+                Stale snapshot — ranks as of {fmtSeoDate(latestDate)}, {stale.days} days old.
+              </strong>{" "}
+              The Monarch SEO tab updates on a slower cadence than the sales and ad feeds; this page&apos;s live data
+              runs through {fmtDay(facts?.meta?.latestDataDate)}, but the latest keyword-rank snapshot is{" "}
+              {fmtSeoDate(latestDate)}. Read these positions as a point-in-time reference, not today&apos;s ranks —
+              re-upload the Monarch SEO tab to refresh.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* headline counts */}
       <div className="card-body" style={{ display: "flex", gap: 24, flexWrap: "wrap", paddingTop: 10, paddingBottom: 10, borderBottom: "1px solid var(--border-soft)" }}>
         <div>
@@ -1207,9 +1576,371 @@ const PeriodSpendItemization = ({ byCh, total, months, D }) => {
   );
 };
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * NEW · 23 — ATTRIBUTION-CONFIDENCE METER (per channel).
+ * The keystone marketing-honesty gap: for the native month, what FRACTION of
+ * each channel's ad spend (and therefore its CM3) is REAL per-product
+ * attribution (Amazon SP / Flipkart PLA / Google product-wise) vs ALLOCATED by
+ * revenue share. A CM3 that's 97%-measured is trustworthy; one that's 3%-measured
+ * is a hint — and the founder must see which. Reads cmEngine.adAllocation
+ * (direct / total / unattributed) — the SAME surface the verified engine uses,
+ * so the equation `attributed + allocated = channel total` ties to the rupee.
+ * ════════════════════════════════════════════════════════════════════════ */
+const AttributionConfidence = ({ conf, month, D }) => {
+  const rows = conf?.channels || [];
+  return (
+    <Card
+      title="Ad attribution confidence"
+      sub={`How much of each channel's ${fmtMonth(month)} ad spend is measured per-product vs allocated by revenue. A CM3 built on mostly-measured spend is trustworthy; one built on allocated spend is a hint. attributed + allocated = the channel's source total (shown).`}
+      action={<span className="badge" style={basisPill("native")}>native · per-SKU</span>}
+    >
+      {rows.length === 0 ? (
+        <div className="muted" style={{ fontSize: 12.5 }}>No ad allocation available for {fmtMonth(month)}.</div>
+      ) : (
+        <>
+          {conf.total != null && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span className="stat-num lg">{fmtPct0(conf.total)}</span>
+                <span className="muted" style={{ fontSize: 11.5 }}>of all ad spend is per-product measured</span>
+              </div>
+              <div className="muted" style={{ fontSize: 10.5 }}>
+                {D.fmtINR(conf.directTotal)} measured + {D.fmtINR(conf.allocTotal)} allocated = {D.fmtINR(conf.spendTotal)} total
+              </div>
+            </div>
+          )}
+          {rows.map((r) => {
+            const measuredPct = r.measured == null ? 0 : r.measured * 100;
+            return (
+              <div key={r.ch} style={{ marginBottom: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span className="badge" style={pillStyle(r.ch)}>{chMeta(r.ch).label}</span>
+                    <span className="muted" style={{ fontSize: 10.5 }}>{D.fmtINR(r.total)} spend</span>
+                  </span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "var(--mono)", color: confColor(r.measured) }}>
+                      {r.measured == null ? "—" : fmtPct0(r.measured)} measured
+                    </span>
+                    <DerivationPopover
+                      title={`Attribution · ${chMeta(r.ch).label} · ${fmtMonth(month)}`}
+                      formula="measured% = direct-attributed spend ÷ channel total spend"
+                      plain={`${ATTR_SOURCE[r.ch] || "Per-product ad attribution"} gives the measured share; the remainder is the channel total spread across SKUs by net-revenue share (allocated, not measured per SKU).`}
+                      inputs={[
+                        { label: "Per-product measured", value: D.fmtINR(r.direct) },
+                        { label: "Allocated by revenue", value: D.fmtINR(r.alloc) },
+                        { label: "Channel total (source)", value: D.fmtINR(r.total) },
+                        { label: "attributed + allocated", value: D.fmtINR(r.direct + r.alloc) },
+                      ]}
+                      value={r.measured == null ? "—" : fmtPct0(r.measured) + " measured"}
+                      source={ATTR_SOURCE[r.ch] || "channel total"}
+                      asOf={fmtMonth(month)}
+                      note={r.reconciles ? undefined : "⚠ attributed + allocated does not exactly equal the source total — see the inputs."}
+                    />
+                  </span>
+                </div>
+                {/* the meter: measured (green) vs allocated (amber) */}
+                <div style={{ display: "flex", height: 9, borderRadius: 3, overflow: "hidden", background: "var(--border-soft)" }} title={`${fmtPct0(r.measured)} measured · ${fmtPct0(r.alloc / (r.total || 1))} allocated`}>
+                  <div style={{ width: Math.max(0, Math.min(100, measuredPct)) + "%", background: "var(--success)" }} />
+                  <div style={{ flex: 1, background: "#B7791F" }} />
+                </div>
+              </div>
+            );
+          })}
+          <div className="muted" style={{ fontSize: 10.5, marginTop: 4, display: "flex", gap: 14, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: "var(--success)", display: "inline-block" }} /> measured (per-product)
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 2, background: "#B7791F", display: "inline-block" }} /> allocated by revenue
+            </span>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * NEW · 53 — RANKED AD PRESCRIPTIONS (₹ impact).
+ * Each ad-spend problem ends in a decision with a rupee/month estimate: stop
+ * zero-sale ads (full spend recovered), cut/optimise CM3-negative ad cells
+ * (the loss recovered toward breakeven), and a Google↔Meta reallocation hint.
+ * Straight from bizAnalytics.adPrescriptions — sorted by |impact| desc, every
+ * ratio gated, every claim sourced. "Losing per ad rupee" made actionable.
+ * ════════════════════════════════════════════════════════════════════════ */
+const SEV_META = {
+  critical: { label: "Stop now", color: "var(--critical)" },
+  warn: { label: "Optimise", color: "var(--warning)" },
+  opportunity: { label: "Reallocate", color: "var(--info)" },
+};
+const AdPrescriptions = ({ rx, month, D, skuName }) => {
+  const [showAll, setShowAll] = useState(false);
+  const list = showAll ? rx : rx.slice(0, 6);
+  const totalRecoverable = rx.filter((r) => r.impactPerMonth > 0).reduce((a, r) => a + r.impactPerMonth, 0);
+  return (
+    <Card
+      title="Ad actions · ranked by ₹ impact"
+      sub={`What to do about the ad budget this ${fmtMonth(month)}, highest rupee impact first: stop zero-sale spend, cut/optimise loss-making ad cells (ACOS above breakeven), reallocate between platforms. Each line is a decision, not a number.`}
+      action={
+        totalRecoverable > 0 ? (
+          <span className="badge" style={{ ...basisPill(AD_BASIS.ACTUAL), fontSize: 10 }}
+            title="Recoverable ₹ holds demand constant. Cutting ads usually loses some sales, so the realised CM3 gain is lower than this figure if demand falls — treat it as an upper bound.">
+            ~{D.fmtINR(totalRecoverable)}/mo recoverable*
+          </span>
+        ) : null
+      }
+      padded={false}
+    >
+      {rx.length === 0 ? (
+        <div className="card-body"><div className="muted" style={{ fontSize: 12.5 }}>No ad-spend problems flagged for {fmtMonth(month)} — every ad cell is at or above breakeven and converting.</div></div>
+      ) : (
+        <>
+          <div className="card-body" style={{ paddingTop: 6, paddingBottom: 4 }}>
+            {list.map((r) => {
+              const sev = SEV_META[r.severity] || SEV_META.warn;
+              return (
+                <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid var(--border-soft)" }}>
+                  <span style={{ width: 3, alignSelf: "stretch", borderRadius: 2, background: sev.color, flex: "0 0 auto", minHeight: 28 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+                      <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--ink)" }}>
+                        {r.sku ? <>{actionVerb(r)} <span style={{ color: sev.color }}>{skuName(r.sku)}</span> · {chMeta(r.channel).label}</> : r.action}
+                      </span>
+                      <span className="badge" style={{ background: sev.color + "1c", color: sev.color, borderColor: sev.color + "55", fontSize: 9, flex: "0 0 auto" }}>{sev.label}</span>
+                    </div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2, lineHeight: 1.45 }}>{r.rationale}</div>
+                  </div>
+                  {r.impactPerMonth > 0 && (
+                    <div style={{ textAlign: "right", flex: "0 0 auto" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "var(--mono)", color: "var(--success)" }}>+{D.fmtINR(r.impactPerMonth)}</div>
+                      <div className="muted" style={{ fontSize: 9 }}>/mo</div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {rx.length > 6 && (
+            <div className="card-body" style={{ paddingTop: 6 }}>
+              <button className="btn ghost" style={{ fontSize: 11 }} onClick={() => setShowAll((s) => !s)}>
+                {showAll ? "Show top 6" : `Show all ${rx.length} actions`}
+              </button>
+            </div>
+          )}
+          <div className="card-body" style={{ paddingTop: 8, borderTop: "1px solid var(--border-soft)" }}>
+            <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.5 }}>
+              Impact = the CM3 recovered if the action is taken (zero-sale: the full wasted spend; loss cell: the loss erased toward breakeven). Reallocation hints carry no ₹ because the gain depends on headroom. All per-SKU, native-window, same-tier — every ratio gated.
+              <br /><strong style={{ color: "#9A7B16" }}>* Assumes no demand loss.</strong> These figures hold volume constant; cutting an ad or raising price typically loses some sales, so the realised gain is lower (and could reverse) if demand falls. Read each ₹ as an upper bound, not a riskless saving.
+            </div>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * NEW · 54/55 — AD-BUDGET WHAT-IF + DRIVER SENSITIVITY.
+ * The reallocation decision as a simulator: move the ad-spend lever (and price/
+ * COGS/fee) and watch CM3 move across every channel. Beside it, the driver
+ * ranking — which lever moves company CM3 most for an equal shock — so the
+ * founder spends effort on the highest-leverage knob. Pure margin mechanics
+ * (no demand elasticity), stated. Same-window; COGS-uncovered channels excluded.
+ * ════════════════════════════════════════════════════════════════════════ */
+const AdScenario = ({ facts, month, D }) => {
+  const compute = useMemo(() => (levers) => computeWhatIf(facts, { month, levers, costs: COSTS }), [facts, month]);
+  const drivers = useMemo(() => safeCall(() => driverSensitivity(facts, { month, costs: COSTS, step: 0.05 }))?.drivers || [], [facts, month]);
+  const maxDrv = Math.max(1, ...drivers.map((d) => Math.abs(d.deltaCm3)));
+
+  return (
+    <Card
+      title="Ad-budget what-if · driver sensitivity"
+      sub={`Move the ad-spend (or price / COGS / fee) lever and see the contribution-margin impact across ${fmtMonth(month)}, per channel. The driver ranking shows which lever moves company CM3 most for an equal 5% shock — where the founder's effort pays off. Margin mechanics only; demand response is not modelled.`}
+      style={{ marginBottom: 14 }}
+    >
+      <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr", gap: 20 }}>
+        <div>
+          <WhatIfPanel compute={compute} channelLabel={(c) => chMeta(c).label} D={D} month={fmtMonth(month)} />
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 8 }}>
+            <strong style={{ color: "var(--ink-2)" }}>Highest-leverage lever first</strong> · ΔCM3 from a 5% shock
+          </div>
+          {drivers.length === 0 ? (
+            <div className="muted" style={{ fontSize: 12.5 }}>No driver data for {fmtMonth(month)}.</div>
+          ) : (
+            drivers.map((d) => {
+              const w = (Math.abs(d.deltaCm3) / maxDrv) * 100;
+              const pos = d.deltaCm3 >= 0;
+              return (
+                <div key={d.lever} style={{ marginBottom: 9 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, marginBottom: 2 }}>
+                    <span><span className="muted" style={{ fontFamily: "var(--mono)", marginRight: 5 }}>#{d.rank}</span>{d.label}</span>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 600, color: pos ? "var(--success)" : "var(--critical)" }}>
+                      {pos ? "+" : "−"}{D.fmtINR(Math.abs(d.deltaCm3))}
+                    </span>
+                  </div>
+                  <div style={{ height: 7, borderRadius: 3, background: "var(--border-soft)", overflow: "hidden" }}>
+                    <div style={{ width: w + "%", height: "100%", background: pos ? "var(--success)" : "var(--critical)", opacity: 0.85 }} />
+                  </div>
+                </div>
+              );
+            })
+          )}
+          <div className="muted" style={{ fontSize: 10, marginTop: 6, lineHeight: 1.5 }}>
+            Each bar = the company CM3 change from a uniform 5% shock to that lever (price +5%, COGS −5%, fees −5pts, ad spend −5%). The longest bar is the lever to pull first.
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * NEW · VIII — MARKETING SLICE OF THE SHARED "WHAT TO DO MONDAY" QUEUE.
+ * The cross-lever actionQueue() engine owns every lever (reorder/delist/reprice/
+ * ad-cut/reallocate). This page surfaces only its AD levers (ad-cut + reallocate)
+ * so the marketing decisions live in the SAME ranked-by-₹ contract the other pages
+ * share — the founder works one Monday list, not three. The mounted <ActionQueue>
+ * component is the shared presentation; the empty state is designed (rubric 79).
+ * ════════════════════════════════════════════════════════════════════════ */
+const MarketingActionQueue = ({ queue, month, D }) => {
+  const recoverable = queue.filter((r) => num(r.impactPerMonth) > 0).reduce((a, r) => a + num(r.impactPerMonth), 0);
+  return (
+    <Card
+      title="Ad levers in the Monday queue"
+      sub={`The marketing slice of the ONE shared "what to do Monday" action queue, ranked by rupee impact for ${fmtMonth(month)}. Ad-cut and reallocate rows only — the same queue (and the same contract) the Sales and Finance pages share, so the reorder / delist / reprice levers sit alongside these on Sales. One list, every lever, ranked by ₹.`}
+      action={recoverable > 0 ? <span className="badge" style={{ ...basisPill(AD_BASIS.ACTUAL), fontSize: 10 }}>~{D.fmtINR(recoverable)}/mo CM3 recoverable</span> : null}
+      style={{ marginBottom: 14 }}
+    >
+      <ActionQueue queue={queue} D={D} title="Ad actions · ranked by ₹/mo" max={10} />
+      <div className="muted" style={{ fontSize: 10.5, marginTop: 10, lineHeight: 1.5 }}>
+        These rows are the <strong>ad-cut</strong> and <strong>reallocate</strong> levers of the shared cross-lever
+        queue (the engine&apos;s <code style={{ fontFamily: "var(--mono)" }}>actionQueue()</code>). The full queue —
+        which also carries reorder, delist and reprice levers across all SKUs and channels — is the founder&apos;s
+        single Monday list; it lives in full on the Sales page so the levers are never split across views. Impact = the
+        CM3 recovered per month if the action is taken; every ratio behind it is same-window and gated.
+      </div>
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * NEW · VII-52 — FORWARD WEBSITE AD-CHANNEL REVENUE + CONTRIBUTION (banded).
+ * Spend planning is forward-looking; a rear-view-only marketing page leaves the
+ * founder guessing where the channel is pacing. The engine's forecast() gives
+ * channel-grain forward net revenue, units AND contribution with a stated method
+ * and an uncertainty band; the mounted <ForecastChart> draws history solid, the
+ * forecast dashed, the band shaded, and rides the method + confidence under it.
+ * Three metrics togglable (revenue / contribution / units). Designed empty state.
+ * ════════════════════════════════════════════════════════════════════════ */
+const FC_METRICS = [
+  { key: "netRev", label: "Net revenue" },
+  { key: "cm3", label: "Contribution (CM3)" },
+  { key: "units", label: "Units" },
+];
+const SpendForecast = ({ fc, D }) => {
+  const [metric, setMetric] = useState("netRev");
+  const has = fc && Array.isArray(fc.forecast) && (fc.history?.length || fc.forecast.length);
+  return (
+    <Card
+      title="Website channel · forward revenue, contribution & units"
+      sub="Where the website ad channel is pacing, so spend is planned not just reviewed. Trailing-3-complete-month linear trend ⊕ run-rate (50/50); units at held ₹/unit, CM3 at held margin; the shaded ribbon is the ±residual-σ uncertainty band that widens with horizon. The current month is completed via month-end pace (marked *). Method and confidence ride under the chart — never a black-box number."
+      action={
+        <div className="seg">
+          {FC_METRICS.map((m) => (
+            <button key={m.key} className={metric === m.key ? "active" : ""} onClick={() => setMetric(m.key)}>{m.label}</button>
+          ))}
+        </div>
+      }
+      style={{ marginBottom: 14 }}
+    >
+      {!has ? (
+        <div className="muted" style={{ fontSize: 12.5 }}>Not enough website history to project — a forecast needs at least one complete month of channel data.</div>
+      ) : (
+        <ForecastChart fc={fc} D={D} metric={metric} title={`${fmtMonth(fc.asOfMonth)} as-of · ${fc.grain}-grain ${FC_METRICS.find((m) => m.key === metric)?.label.toLowerCase()}`} height={240} />
+      )}
+    </Card>
+  );
+};
+
 /* ─── helpers (NaN-free, formatting) ─────────────────────────────────────── */
 function num(n) { const v = Number(n); return Number.isFinite(v) ? v : 0; }
 function numOrNull(n) { const v = Number(n); return Number.isFinite(v) ? v : null; }
+
+// Guard a possibly-throwing engine call so one bad section never blanks the page
+// (rubric 79 — designed error state). Returns null on throw; callers fall back.
+function safeCall(fn) { try { return fn(); } catch { return null; } }
+
+// VIII · the marketing slice of the shared cross-lever queue — the ad-cut and
+// reallocate levers only, re-ranked by |₹ impact| within the slice. The full
+// queue (with reorder/delist/reprice) is the founder's single Monday list on Sales;
+// this is the same contract, filtered to the levers this page owns.
+function marketingSliceOfQueue(q) {
+  return q
+    .filter((r) => r.lever === "ad-cut" || r.lever === "reallocate")
+    .sort((a, b) => Math.abs(num(b.impactPerMonth)) - Math.abs(num(a.impactPerMonth)))
+    .map((r, i) => ({ ...r, rank: i + 1 }));
+}
+
+// SEO keyword count for the header sub — true to the source (all tracked keywords,
+// not a truncated 30). Reads the parsed total; falls back to the array length.
+function seoCount(facts) {
+  const seo = facts?.meta?.bySource?.["monarch-seo"];
+  return seo ? (Number(seo.totalKeywords) || (seo.keywords || []).length || 0) : 0;
+}
+
+// VI-96 · staleness in whole days between an ISO snapshot date and the live
+// data-through date (or today as a fallback). >45d is flagged severe (a quarter+
+// of drift on a slow-cadence feed). Returns null when either date is unparseable.
+function staleness(snapISO, throughISO) {
+  const a = Date.parse(String(snapISO || ""));
+  const b = Date.parse(String(throughISO || "")) || Date.now();
+  if (!Number.isFinite(a)) return null;
+  const days = Math.max(0, Math.round((b - a) / 86400000));
+  if (days <= 0) return null;
+  return { days, severe: days > 45 };
+}
+
+// 23 · per-channel attribution-confidence model. Delegates to the SHARED engine
+// `attributionConfidence` in bizAnalytics so the Finance CM3 waterfall and this
+// Marketing panel read ONE source (no two definitions of "% measured"). The
+// shared result is ordered CH_ORDER-first for this panel's display, and exposes
+// `total` as the overall-measured alias the existing UI consumes.
+function buildAttributionConfidence(facts, month) {
+  const ac = attributionConfidence(facts, { month, costs: COSTS });
+  const order = (ch) => { const i = CH_ORDER.indexOf(ch); return i === -1 ? 99 : i; };
+  const channels = ac.channels.slice().sort((a, b) => order(a.ch) - order(b.ch) || b.total - a.total);
+  return {
+    channels,
+    directTotal: ac.directTotal, allocTotal: ac.allocTotal, spendTotal: ac.spendTotal,
+    total: ac.overall,
+  };
+}
+
+// per-channel measured-attribution source label (used in the confidence popover).
+const ATTR_SOURCE = {
+  amazon: "Amazon Sponsored Products (per-ASIN)",
+  flipkart: "Flipkart PLA (per-SKU)",
+  blinkit: "Snell Blinkit channel total (no per-SKU split → all allocated)",
+  website: "Google Ads product-wise (Monarch)",
+};
+// confidence colour: ≥80% measured = green, ≥40% = ink, else amber (caution).
+function confColor(measured) {
+  if (measured == null) return "var(--ink-3)";
+  if (measured >= 0.8) return "var(--success)";
+  if (measured >= 0.4) return "var(--ink)";
+  return "#B7791F";
+}
+// prescription action verb — derive a tight imperative from the action id so the
+// founder reads "Stop / Cut / Optimise" without the full sentence repeating the SKU.
+function actionVerb(r) {
+  if (r.id?.startsWith("zerosale")) return "Stop zero-sale ads on";
+  if (r.id?.startsWith("cutad")) return "Cut / optimise ads on";
+  if (r.id?.startsWith("realloc")) return "Reallocate";
+  return r.action;
+}
 
 // View C — a one-line budgeting steer from the blended ROAS comparison. Honest:
 // only speaks when both platforms have a same-window blended ROAS to compare.

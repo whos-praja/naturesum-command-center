@@ -1274,6 +1274,15 @@ const UnifiedStockTab = ({ inventory }) => {
           </div>
           <div className="rw-risk-num" style={{ color: "var(--success)" }}>
             {topMover ? `${D.fmtN(topMover.velocity)}/d` : "—"}
+            {topMover && (
+              <span
+                className="muted"
+                style={{ fontSize: 10, fontWeight: 600, marginLeft: 6, whiteSpace: "nowrap" }}
+                title="All-channel sell-through, MAX(30-day avg, 15-day avg). Sales → Margin shows the same SKU at per-channel MTD grain — same SKU, two grains."
+              >
+                all-channel · max(30,15)d
+              </span>
+            )}
           </div>
           <div className="rw-risk-detail">
             {topMover

@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 
 // ── Icons (inline SVG, 16px) ─────────────────────────────
-const Icon = ({ name, size = 16 }) => {
+const Icon = ({ name, size = 16, "aria-hidden": ariaHidden }) => {
   const paths = {
     home:        <><path d="M3 9l5-5 5 5v4H3V9z" stroke="currentColor" strokeWidth="1.4" fill="none"/><path d="M6.5 13v-2.5h3V13" stroke="currentColor" strokeWidth="1.4" fill="none"/></>,
     sales:       <><path d="M2.5 12.5l3.5-4 2.5 2.5 5-5.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/><path d="M10 5.5h3.5V9" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round"/></>,
@@ -36,7 +36,11 @@ const Icon = ({ name, size = 16 }) => {
     moon:        <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round"/>,
   };
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16">
+    // Icons are decorative by default (label text or an aria-label on the
+    // control carries the meaning); callers pass aria-hidden where the icon
+    // sits next to its own accessible label (X-80). focusable="false" keeps
+    // the SVG out of the tab order in every browser.
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden={ariaHidden} focusable="false">
       {paths[name] || null}
     </svg>
   );

@@ -238,14 +238,28 @@ export async function parseAmazonOrders(file, _opts = {}) {
     date: col("purchase-date"), status: col("order-status"), itemStatus: col("item-status"),
     salesCh: col("sales-channel"), sku: col("sku"), asin: col("asin"),
     qty: col("quantity"), price: col("item-price"),
+    state: col("ship-state"), postal: col("ship-postal-code"),
   };
   for (const [k, v] of Object.entries(C)) {
-    if (v === -1) { dq.push({ level: "error", code: "AMZ_SCHEMA", msg: `Amazon All-Orders missing column for "${k}".` }); throw new Error(`Amazon All-Orders: missing expected column (${k}). Schema drift.`); }
+    // ship-state/postal are OPTIONAL (geo cut g) — their absence must NOT fail the
+    // core parse, only suppress the geo aggregation. Required columns still throw.
+    if (v === -1 && k !== "state" && k !== "postal") { dq.push({ level: "error", code: "AMZ_SCHEMA", msg: `Amazon All-Orders missing column for "${k}".` }); throw new Error(`Amazon All-Orders: missing expected column (${k}). Schema drift.`); }
   }
   const facts = emptyFacts();
   const mcf = {};            // code → mcf units (website-fulfilment proxy for mcfShare)
   let mcfTotal = 0, unmapped = 0, returnUnits = 0, returnValue = 0;
   const dates = new Set();
+  // (g) GEO: monthly per-state demand/returns concentration. "YYYY-MM|STATE" →
+  // { units, netRev, returns }. Mirrors build-business-data.buildAmazon exactly.
+  const geo = {};
+  const bumpGeo = (m, st, q, rev, isReturn) => {
+    const state = String(st || "").trim().toUpperCase() || "UNKNOWN";
+    const k = `${m}|${state}`;
+    const cur = geo[k] || { units: 0, netRev: 0, returns: 0 };
+    if (isReturn) { cur.units -= q; cur.netRev = r2(cur.netRev - rev / 1.05); cur.returns += q; }
+    else { cur.units += q; cur.netRev = r2(cur.netRev + rev / 1.05); }
+    geo[k] = cur;
+  };
 
   for (let i = 1; i < lines.length; i++) {
     const cells = lines[i].split("\t");
@@ -284,18 +298,22 @@ export async function parseAmazonOrders(file, _opts = {}) {
 
     // Net-out: returns subtract from units & grossRev AND are recorded as
     // returnsUnits/returnsValue so the Sales page returns-view can show them.
+    const st = C.state === -1 ? "" : cells[C.state];
     if (isReturn) {
       bumpMonthly(facts, month, "amazon", code, {
         units: -q, grossRev: -rev, netRev: -rev / 1.05, returnsUnits: q, returnsValue: rev,
       });
-      returnUnits += q; returnValue += rev;
+      returnUnits += q; returnValue += rev; bumpGeo(month, st, q, rev, true);
     } else {
       bumpMonthly(facts, month, "amazon", code, { units: q, grossRev: rev, netRev: rev / 1.05 });
+      bumpGeo(month, st, q, rev, false);
     }
   }
 
+  for (const k of Object.keys(geo)) geo[k].netRev = r2(geo[k].netRev);
   facts.meta.mcf = { byCode: mcf, totalUnits: mcfTotal };
   facts.meta.amazonReturns = { units: returnUnits, value: r2(returnValue) };
+  facts.meta.geo = { source: "amazon-all-orders ship-state", byMonthState: geo };
   if (unmapped > 5) dq.push({ level: "warn", code: "AMZ_UNMAPPED_MORE", msg: `${unmapped} total unmapped Amazon rows.` });
   if (Object.keys(facts.monthly).length === 0) dq.push({ level: "error", code: "AMZ_NOFACTS", msg: "Amazon parse produced no facts — check sales-channel filter." });
   dq.push({ level: "info", code: "AMZ_OK", msg: `Amazon: ${Object.keys(facts.monthly).length} month×SKU cells; returns ${returnUnits}u/₹${r2(returnValue)}; MCF ${mcfTotal}u.` });
@@ -362,15 +380,24 @@ export async function parseFlipkartSales(file, _opts = {}) {
   }
 
   // Cashback report — settlement-layer "net realization" note, EXCLUDED from CM.
+  // (d) Trended BY MONTH from the cashback sheet's "Invoice Date" so it reads as a
+  // settlement-drag signal over time, not just one lump.
   const cbSheet = wb.SheetNames.find((n) => /cash\s*back/i.test(n));
   if (cbSheet) {
     const cg = sheetGrid(wb.Sheets[cbSheet]);
     const ch = cg[0] || [];
-    const ia = ch.indexOf("Invoice Amount");
-    let cb = 0, cn = 0;
-    if (ia !== -1) for (let i = 1; i < cg.length; i++) { if (cg[i] && cg[i][ia] !== "") { cb += num(cg[i][ia]); cn++; } }
-    facts.meta.flipkartCashback = { value: r2(cb), rows: cn };
-    dq.push({ level: "info", code: "FK_CASHBACK", msg: `Flipkart cashback ₹${r2(cb)} (${cn} notes) — excluded from CM, reported as net-realization note.` });
+    const ia = ch.indexOf("Invoice Amount"); const idc = ch.indexOf("Invoice Date");
+    let cb = 0, cn = 0; const cbByMonth = {};
+    if (ia !== -1) for (let i = 1; i < cg.length; i++) {
+      if (!cg[i] || cg[i][ia] === "") continue;
+      const v = num(cg[i][ia]); cb += v; cn++;
+      const ym = idc !== -1 ? monthOf(excelToISODate(cg[i][idc])) : null;
+      const key = ym || "unknown";
+      const mm = cbByMonth[key] || { value: 0, rows: 0 };
+      mm.value = r2(mm.value + v); mm.rows++; cbByMonth[key] = mm;
+    }
+    facts.meta.flipkartCashback = { value: r2(cb), rows: cn, byMonth: cbByMonth };
+    dq.push({ level: "info", code: "FK_CASHBACK", msg: `Flipkart cashback ₹${r2(cb)} (${cn} notes, ${Object.keys(cbByMonth).length} months) — excluded from CM, reported as net-realization/settlement-drag note.` });
   }
   if (unmapped > 5) dq.push({ level: "warn", code: "FK_UNMAPPED_MORE", msg: `${unmapped} total unmapped Flipkart SKUs.` });
   dq.push({ level: "info", code: "FK_OK", msg: `Flipkart: ${Object.keys(facts.monthly).length} cells; ${returnRows} return/cancel rows native-netted.` });
@@ -851,6 +878,14 @@ export async function parseSnellSkuUnits(file, _opts = {}) {
     }
     if (mapped === 0) { dq.push({ level: "warn", code: "SCU_NOCOLS", msg: `Snell Categorywise '${name}': no SKU columns mapped.` }); continue; }
     let dayRows = 0, units = 0; const span = { first: null, last: null };
+    // (I/b) Capture the tab's own "Total" row (sheet headline per-SKU total, *N
+    // folded) — surfaces every Categorywise field AND supports daily-vs-total recon.
+    const tabTotal = {}; let tabTotalUnits = 0;
+    for (let i = 1; i < Math.min(grid.length, 6); i++) {
+      if (String(grid[i][0] || "").trim().toLowerCase() !== "total") continue;
+      for (const c of Object.keys(colMap)) { const { code, mult } = colMap[c]; const u = num(grid[i][c]) * mult; if (!u) continue; tabTotal[code] = r2((tabTotal[code] || 0) + u); tabTotalUnits += u; }
+      break;
+    }
     for (let i = 1; i < grid.length; i++) {
       const r = grid[i];
       const d = r[0];
@@ -869,11 +904,83 @@ export async function parseSnellSkuUnits(file, _opts = {}) {
         units += u;
       }
     }
-    perChannel[tabDef.channel] = { tab: name, mappedCols: mapped, dayRows, units, span };
+    perChannel[tabDef.channel] = { tab: name, mappedCols: mapped, dayRows, units, span, tabTotal, tabTotalUnits, dailySeriesUnits: units };
   }
   facts.meta.snellSkuUnits = { tier: "agency", source: "snell-cat", perChannel, monthly: skuMonthly, daily: skuDaily };
   const summary = Object.entries(perChannel).map(([ch, v]) => `${ch} ${v.units}u`).join(", ");
   dq.push({ level: "info", code: "SCU_OK", msg: `Snell SKU units: ${summary || "no tabs"}; ${Object.keys(skuMonthly).length} monthly + ${Object.keys(skuDaily).length} daily agency SKU-unit cells (meta, units only).` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 9d · SNELL "Sale" tab — ORDER-MIX decomposition + Total-row reconciliation
+// ═══════════════════════════════════════════════════════════════════════════
+// (a) Amazon Non-Advt / Review / Organic ORDER decomposition over time:
+//     c12 Non Advt order Units, c13 Review Oder Units, c14 Organic Order Units;
+//     c18 Review Oder AMT, c19 Organic Order AMT. Rolled monthly on the amazon
+//     channel (this split exists only for amazon). (b) The sheet's own "Total"
+//     row (r4) differs from the daily-series sum (it is a narrower founder window);
+//     both are captured so the UI can reconcile the gap. Twin of build-business-
+//     data.buildSnellOrderMix. SHAPE: meta.snellOrderMix = { byMonth, reconciliation }.
+const SNELL_MIX_FALLBACK = { amzShipUnits: 7, amzGross: 20, nonAdvt: 12, review: 13, organic: 14, reviewAmt: 18, organicAmt: 19 };
+export async function parseSnellOrderMix(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const saleSheet = wb.SheetNames.find((n) => /^sale\s*$/i.test(n) || /^sale$/i.test(n.trim()));
+  if (!saleSheet) { dq.push({ level: "error", code: "SOM_NOSALE", msg: `Snell workbook has no 'Sale' tab (sheets: ${wb.SheetNames.join(", ")}).` }); throw new Error("Snell order-mix: no 'Sale' tab."); }
+  const grid = sheetGrid(wb.Sheets[saleSheet]);
+  if (grid.length < 6) { dq.push({ level: "error", code: "SOM_SHORT", msg: "Snell Sale tab too short." }); throw new Error("Snell order-mix: Sale tab too short."); }
+  const b2 = ffRow(grid[2] || []); const r3 = grid[3] || [];
+  const C = {
+    amzShipUnits: findSnellCol(b2, r3, { band: /^total$/i, leaf: /shipped units/i }),
+    amzGross: findSnellCol(b2, r3, { band: /total gross value/i, leaf: null }),
+    nonAdvt: findSnellCol(b2, r3, { band: /sales value/i, leaf: /non advt order units/i }),
+    review: findSnellCol(b2, r3, { band: /sales value/i, leaf: /review oder units/i }),
+    organic: findSnellCol(b2, r3, { band: /sales value/i, leaf: /organic order units/i }),
+    reviewAmt: findSnellCol(b2, r3, { band: /sales value/i, leaf: /review oder amt/i }),
+    organicAmt: findSnellCol(b2, r3, { band: /sales value/i, leaf: /organic order amt/i }),
+  };
+  const fellBack = [];
+  for (const k of Object.keys(SNELL_MIX_FALLBACK)) { if (C[k] === -1) { C[k] = SNELL_MIX_FALLBACK[k]; fellBack.push(k); dq.push({ level: "warn", code: "SOM_COLFALLBACK", msg: `Snell order-mix column "${k}" not located by header — used pinned position ${SNELL_MIX_FALLBACK[k]}.` }); } }
+  const byMonth = {};
+  const daily = { shippedUnits: 0, grossValue: 0, nonAdvtUnits: 0, reviewUnits: 0, organicUnits: 0, reviewAmt: 0, organicAmt: 0, dayRows: 0 };
+  for (let i = 5; i < grid.length; i++) {
+    const r = grid[i]; const d = r[0];
+    if (typeof d !== "number" || d < 30000 || d > 80000) continue;
+    const ym = monthOf(excelToISODate(d)); if (!ym) continue;
+    const na = num(r[C.nonAdvt]), rv = num(r[C.review]), og = num(r[C.organic]);
+    const rvA = num(r[C.reviewAmt]), ogA = num(r[C.organicAmt]);
+    daily.shippedUnits += num(r[C.amzShipUnits]); daily.grossValue += num(r[C.amzGross]);
+    daily.nonAdvtUnits += na; daily.reviewUnits += rv; daily.organicUnits += og;
+    daily.reviewAmt += rvA; daily.organicAmt += ogA; daily.dayRows++;
+    if (!na && !rv && !og && !rvA && !ogA) continue;
+    const b = byMonth[ym] || { channel: "amazon", nonAdvtUnits: 0, reviewUnits: 0, organicUnits: 0, reviewAmt: 0, organicAmt: 0 };
+    b.nonAdvtUnits += na; b.reviewUnits += rv; b.organicUnits += og; b.reviewAmt += rvA; b.organicAmt += ogA;
+    byMonth[ym] = b;
+  }
+  for (const ym of Object.keys(byMonth)) { const b = byMonth[ym]; b.reviewAmt = r2(b.reviewAmt); b.organicAmt = r2(b.organicAmt); }
+  const tr = grid[4] || [];
+  const totalRow = {
+    shippedUnits: num(tr[C.amzShipUnits]), grossValue: r2(num(tr[C.amzGross])),
+    nonAdvtUnits: num(tr[C.nonAdvt]), reviewUnits: num(tr[C.review]), organicUnits: num(tr[C.organic]),
+  };
+  const dailySeries = {
+    shippedUnits: daily.shippedUnits, grossValue: r2(daily.grossValue),
+    nonAdvtUnits: daily.nonAdvtUnits, reviewUnits: daily.reviewUnits, organicUnits: daily.organicUnits,
+    reviewAmt: r2(daily.reviewAmt), organicAmt: r2(daily.organicAmt), dayRows: daily.dayRows,
+  };
+  const facts = emptyFacts();
+  facts.meta.snellOrderMix = {
+    source: "snell-ordermix", tier: "agency", byMonth,
+    reconciliation: {
+      totalRow, dailySeries,
+      deltaUnits: dailySeries.shippedUnits - totalRow.shippedUnits,
+      deltaGross: r2(dailySeries.grossValue - totalRow.grossValue),
+      note: "Snell's own 'Total' row (r4) is a founder-curated narrower window and does NOT equal the sum of the daily rows. Both surfaced so the gap (daily-series − Total-row) is an explicit reconciliation, never a hidden inconsistency.",
+    },
+    columns: C, columnFallbacks: fellBack,
+  };
+  dq.push({ level: "info", code: "SOM_OK", msg: `Snell order-mix: ${Object.keys(byMonth).length} months; Total-row ${totalRow.shippedUnits}u/₹${totalRow.grossValue} vs daily-series ${dailySeries.shippedUnits}u/₹${dailySeries.grossValue}.` });
   return { facts, dq };
 }
 
@@ -1073,8 +1180,8 @@ export async function parseSnellCancel(file, _opts = {}) {
 // rank = better). Keep TOP-30 keywords by best current rank. Emits
 // meta.monarchSeo = { dates:[iso...asc], prev30Date, keywords:[{kw, latest,
 // latestDate, prev30, prev30Date, earliest, earliestDate, best, worst,
-// movement30, movementAll}], totalKeywords }. movement = prev − latest (+ve=improved).
-const SEO_TOP_N = 30;
+// movement30, movementAll}], totalKeywords, latestDate, staleAsOf }.
+// movement = prev − latest (+ve=improved). ALL ranked keywords are kept (no slice).
 export async function parseMonarchSeo(file, _opts = {}) {
   const dq = [];
   const wb = await fileToWorkbook(file);
@@ -1107,10 +1214,14 @@ export async function parseMonarchSeo(file, _opts = {}) {
     });
   }
   rows.sort((a, b) => (a.latest - b.latest) || ((b.movementAll || 0) - (a.movementAll || 0)));
-  const keywords = rows.slice(0, SEO_TOP_N);
+  // I/VI fix (2026-06-13): keep ALL ranked keywords (every row with a current rank),
+  // not a top-30 slice. The full set (44) is small enough to surface in full; the
+  // earlier top-30 silently dropped 14 keywords the founder audit flagged.
+  const keywords = rows;
+  const staleness = latestCol.iso;             // latest snapshot date — SEO stale past this
   const facts = emptyFacts();
-  facts.meta.monarchSeo = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, keywords, totalKeywords: rows.length };
-  dq.push({ level: "info", code: "SEO_OK", msg: `Monarch SEO: ${rows.length} ranked keywords (kept top ${keywords.length}); snapshots ${isoList.join(", ")}.` });
+  facts.meta.monarchSeo = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, latestDate: staleness, staleAsOf: staleness, keywords, totalKeywords: rows.length };
+  dq.push({ level: "info", code: "SEO_OK", msg: `Monarch SEO: ${rows.length} ranked keywords (ALL kept); latest snapshot ${staleness}; snapshots ${isoList.join(", ")}.` });
   return { facts, dq };
 }
 
@@ -1196,6 +1307,14 @@ export async function parseBmRepeatsReturns(file, _opts = {}) {
       const aq = String(r[7] || "").trim();
       if (aq && amzByQ[aq]) { amzByQ[aq].salesFromRepeatShare = r2(num(r[9]) * 100); }
     }
+    // (e) new-vs-returning AOV per Shopify quarter + the gap (guarded /0 → null).
+    for (const s of shopify) {
+      const newAOV = s.newCustomers > 0 && s.newCustomerSales != null ? r2(s.newCustomerSales / s.newCustomers) : null;
+      const returningAOV = s.returningCustomers > 0 && s.returningCustomerSales != null ? r2(s.returningCustomerSales / s.returningCustomers) : null;
+      s.newAOV = newAOV; s.returningAOV = returningAOV;
+      s.aovGap = (newAOV != null && returningAOV != null) ? r2(returningAOV - newAOV) : null;
+      s.aovGapPct = (newAOV && returningAOV != null) ? r2((returningAOV - newAOV) / newAOV * 100) : null;
+    }
     facts.meta.bmRepeats = { source: "bm-repeats", tier: "businessmodel", sourceLabel: SRC_LABEL, shopify, amazon };
     dq.push({ level: "info", code: "BMR_OK", msg: `BusinessModel Repeats: ${shopify.length} Shopify quarters, ${amazon.length} Amazon quarters.` });
   } else { dq.push({ level: "warn", code: "BMR_NOTAB", msg: "BusinessModel: no Repeats tab." }); }
@@ -1209,6 +1328,126 @@ export async function parseBmRepeatsReturns(file, _opts = {}) {
     dq.push({ level: "info", code: "BRT_OK", msg: `BusinessModel Returns: ${monthly.length} months Shopify returns %.` });
   } else { dq.push({ level: "warn", code: "BRT_NOTAB", msg: "BusinessModel: no Returns tab." }); }
   if (!repName && !retName) throw new Error("BusinessModel: neither Repeats nor Returns tab found.");
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// I · MONARCH supplementary tabs — March-2025 + Weekly-Comparison (monarch)
+// ═══════════════════════════════════════════════════════════════════════════
+// Surface the two Monarch tabs not otherwise read: "March 2025" (earliest daily
+// website log — the 0→1 ramp) and "Weekly Comparsion" (founder 7-/3-day/vs-last-
+// month Google-vs-Meta blocks). Twin of build-business-data.buildMonarchExtraTabs.
+// SHAPE: meta.monarchExtra = { march2025:{ monthly, daily, labels }, weekly:{ blocks } }.
+export async function parseMonarchExtra(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const findTab = (re) => wb.SheetNames.find((k) => re.test(String(k).trim()));
+  const facts = emptyFacts();
+  const out = {};
+  const m25Name = findTab(/^march 2025$/i);
+  if (m25Name) {
+    const grid = sheetGrid(wb.Sheets[m25Name]);
+    const lbl = (grid[2] || []).map((h) => String(h || "").trim());
+    const ci = (re) => lbl.findIndex((h) => re.test(h));
+    const cols = {
+      totalOrders: ci(/^total oders$/i), cancelOrders: ci(/cancel oders total/i),
+      netOrders: ci(/after removing cancel orders/i), salesValue: ci(/^total sales value$/i),
+      cancelValue: ci(/^cancel order value$/i), netSalesValue: ci(/after removing cancel order - sales value/i),
+    };
+    let mOrders = 0, mCancels = 0, mSalesValue = 0, mNetSalesValue = 0, dayRows = 0;
+    const daily = [];
+    for (let i = 3; i < grid.length; i++) {
+      const r = grid[i]; if (!r) continue;
+      const d0 = r[0]; if (d0 === "" || d0 == null) continue;
+      const ord = cols.totalOrders === -1 ? 0 : num(r[cols.totalOrders]);
+      const sv = cols.salesValue === -1 ? 0 : num(r[cols.salesValue]);
+      if (!ord && !sv) continue;
+      dayRows++;
+      mOrders += ord; mCancels += cols.cancelOrders === -1 ? 0 : num(r[cols.cancelOrders]);
+      mSalesValue += sv; mNetSalesValue += cols.netSalesValue === -1 ? 0 : num(r[cols.netSalesValue]);
+      daily.push({
+        date: String(d0).trim(), totalOrders: ord,
+        cancelOrders: cols.cancelOrders === -1 ? 0 : num(r[cols.cancelOrders]),
+        netOrders: cols.netOrders === -1 ? 0 : num(r[cols.netOrders]),
+        salesValue: r2(sv), cancelValue: cols.cancelValue === -1 ? 0 : r2(num(r[cols.cancelValue])),
+        netSalesValue: cols.netSalesValue === -1 ? 0 : r2(num(r[cols.netSalesValue])),
+      });
+    }
+    out.march2025 = { tab: m25Name.trim(), labels: lbl.filter(Boolean), monthly: { month: "2025-03", totalOrders: mOrders, cancelOrders: mCancels, salesValue: r2(mSalesValue), netSalesValue: r2(mNetSalesValue), dayRows }, daily };
+  } else { dq.push({ level: "warn", code: "MEX_NOM25", msg: "Monarch: no 'March 2025' tab." }); }
+  const wcName = findTab(/^weekly compar/i);
+  if (wcName) {
+    const grid = sheetGrid(wb.Sheets[wcName]);
+    const blocks = [];
+    for (let i = 0; i < grid.length; i++) {
+      const title = String((grid[i] || [])[1] || "").trim();
+      if (!/compar/i.test(title)) continue;
+      const rows = [];
+      for (let j = i + 2; j < grid.length; j++) {
+        const r = grid[j] || [];
+        const gDate = String(r[1] || "").trim(); const mDate = String(r[8] || "").trim();
+        if (/compar/i.test(gDate)) break;
+        if (/^date$/i.test(gDate)) continue;
+        if (!gDate && !mDate) { if (rows.length) break; else continue; }
+        if (gDate && !/^date$/i.test(gDate)) rows.push({ platform: "google", date: gDate, cost: r2(num(r[2])), sales: num(r[3]), salesValue: r2(num(r[4])), roas: r2(num(r[5])), cpa: r2(num(r[6])) });
+        if (mDate && !/^date$/i.test(mDate)) rows.push({ platform: "meta", date: mDate, cost: r2(num(r[9])), sales: num(r[10]), salesValue: r2(num(r[11])), roas: r2(num(r[12])), cpa: r2(num(r[13])) });
+      }
+      if (rows.length) blocks.push({ title, rows });
+    }
+    out.weekly = { tab: wcName.trim(), blocks };
+  } else { dq.push({ level: "warn", code: "MEX_NOWC", msg: "Monarch: no 'Weekly Comparison' tab." }); }
+  facts.meta.monarchExtra = { source: "monarch-extra-tabs", tier: "monarch", ...out };
+  dq.push({ level: "info", code: "MEX_OK", msg: `Monarch extra: March-2025 ${out.march2025?.daily?.length || 0} days, ${out.weekly?.blocks?.length || 0} weekly blocks.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// f · UNIT_COGS Notes-column cost-change history per SKU
+// ═══════════════════════════════════════════════════════════════════════════
+// Parse the "Source / Notes" column's "was Rs X" prior raw-material values into a
+// per-SKU cost-change history. SKU resolved by the UNIQUE Total COGS/Unit (col5)
+// matching the engine's DEFAULT_COGS. Twin of build-business-data.buildCogsHistory.
+// SHAPE: meta.cogsHistory = { source, asOf, byCode: { CODE: { productName, current,
+// prior:[{rmPerKg,note}], changed } } }.
+const COGS_TOTAL_TO_CODE = {
+  150: "NSACDT30", 375: "NSJO100", 133: "NSSB100", 305.25: "NSSB250", 582.5: "NSSB500",
+  136.5: "NSSBDB100", 314: "NSSBDB250", 600: "NSSBDB500", 39.5: "NSMP100", 71.5: "NSMP250",
+  180.5: "NSSBBO15", 353: "NSSBBO30", 232.7: "NSSBJ300", 342.3: "NSSBJ500",
+};
+function resolveCogsCode(totalCogs) {
+  if (COGS_TOTAL_TO_CODE[totalCogs]) return COGS_TOTAL_TO_CODE[totalCogs];
+  let best = null, bestD = 0.5;
+  for (const [t, code] of Object.entries(COGS_TOTAL_TO_CODE)) { const d = Math.abs(Number(t) - totalCogs); if (d <= bestD) { bestD = d; best = code; } }
+  return best;
+}
+export async function parseCogsHistory(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const sn = wb.SheetNames.find((n) => /unit\s*cogs/i.test(n)) || wb.SheetNames[0];
+  const grid = sheetGrid(wb.Sheets[sn]);
+  const H = (grid[0] || []).map((h) => String(h || "").trim());
+  const cName = H.findIndex((h) => /^sku$/i.test(h));
+  const cRm = H.findIndex((h) => /rm landed cost/i.test(h));
+  const cTotal = H.findIndex((h) => /total cogs\/?unit/i.test(h));
+  const cNotes = H.findIndex((h) => /source\s*\/?\s*notes/i.test(h));
+  if (cTotal === -1 || cNotes === -1) { dq.push({ level: "error", code: "COG_SCHEMA", msg: "Unit_COGS: missing Total COGS/Notes column." }); throw new Error("Unit_COGS: schema drift."); }
+  const byCode = {}; let changed = 0;
+  for (let i = 1; i < grid.length; i++) {
+    const r = grid[i]; if (!r) continue;
+    const name = String(r[cName === -1 ? 0 : cName] || "").trim(); if (!name) continue;
+    const total = num(r[cTotal]); if (!total) continue;
+    const code = resolveCogsCode(r2(total)); if (!code) continue;
+    const notes = String(r[cNotes] || "");
+    const rmNow = cRm !== -1 ? num(r[cRm]) : null;
+    const m = notes.match(/was\s*Rs[\s,]*([\d,]+(?:\.\d+)?)/i);
+    const rmWas = m ? num(m[1]) : null;
+    const prior = rmWas != null ? [{ rmPerKg: rmWas, note: `RM was Rs${rmWas} → Rs${rmNow} (per Unit_COGS Notes, 11-Jun-26)` }] : [];
+    if (prior.length) changed++;
+    byCode[code] = { productName: name, current: { rmPerKg: rmNow, totalCogs: r2(total), asOf: "2026-06-11" }, prior, changed: prior.length > 0, noteRaw: notes };
+  }
+  const facts = emptyFacts();
+  facts.meta.cogsHistory = { source: "Naturesum_Unit_COGS Notes column", asOf: "2026-06-11", byCode };
+  dq.push({ level: "info", code: "COG_OK", msg: `COGS history: ${Object.keys(byCode).length} SKUs, ${changed} with a prior-value change.` });
   return { facts, dq };
 }
 
@@ -1237,6 +1476,11 @@ export const BUSINESS_FILE_TYPES = {
   "monarch-seo": { label: "Monarch SEO - Keywords — rank-over-time (monarch)", channel: "website", parse: parseMonarchSeo, tier: "monarch" },
   "monarch-platform": { label: "Monarch Master Sheet — Google vs Meta efficiency (monarch)", channel: "website", parse: parseMonarchPlatform, tier: "monarch" },
   "bm-repeats": { label: "BusinessModel — Repeats & Returns (historical actuals)", channel: "*", parse: parseBmRepeatsReturns, tier: "businessmodel" },
+  // R3 left-on-table — Snell order-mix + reconciliation (a/b), Monarch March-2025 +
+  // Weekly-Comparison tabs (I), Unit_COGS Notes cost-change history (f).
+  "snell-ordermix": { label: "Snell Sale tab — Amazon order-mix + Total-row reconciliation (agency)", channel: "amazon", parse: parseSnellOrderMix, tier: "agency" },
+  "monarch-extra": { label: "Monarch March-2025 + Weekly-Comparison tabs (monarch)", channel: "website", parse: parseMonarchExtra, tier: "monarch" },
+  "cogs-history": { label: "Unit_COGS Notes — per-SKU cost-change history", channel: "*", parse: parseCogsHistory, tier: "businessmodel" },
 };
 
 export async function parseBusinessFile(type, file, opts = {}) {
