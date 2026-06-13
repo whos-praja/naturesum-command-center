@@ -242,6 +242,34 @@ function Cm3ConfidenceChip({ measured, attrib }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Cross-page active-period persistence (rubric X). The selected business month is
+// stored under ONE key so it survives navigation and is consistent across the biz
+// modules. SSR-safe: every access is guarded for a missing window/localStorage (the
+// ssr-gate renders these pages server-side with no window), and a thrown storage
+// error (private-mode quota, disabled storage) degrades to "no persistence" rather
+// than crashing the page. The value is validated against real months at render time
+// (see `month` derivation), so a stale or malformed key falls back to the latest.
+const BIZ_PERIOD_KEY = "ns.bizPeriod";
+function readBizPeriod() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    const v = window.localStorage.getItem(BIZ_PERIOD_KEY);
+    // Accept only a "YYYY-MM" shape; anything else is ignored (defensive).
+    return /^\d{4}-\d{2}$/.test(String(v || "")) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function writeBizPeriod(month) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    if (/^\d{4}-\d{2}$/.test(String(month || ""))) window.localStorage.setItem(BIZ_PERIOD_KEY, month);
+  } catch {
+    /* storage unavailable — persistence is best-effort, never fatal */
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 const PageFinance = ({ initialTab } = {}) => {
   // Default tab is "waterfall". `initialTab` is an optional verification hook so
   // SSR harnesses can render any tab's panels; the production UI never passes it.
@@ -271,10 +299,28 @@ const PageFinance = ({ initialTab } = {}) => {
 
   // selectedMonth holds the user's pick; the EFFECTIVE month is derived during
   // render so a stale pick safely falls back to the latest available.
-  const [selectedMonth, setSelectedMonth] = useState(null);
+  // PERSISTENCE (rubric X): the pick survives navigation via localStorage key
+  // "ns.bizPeriod" — initialised from storage on mount (SSR-safe; ignored when no
+  // window) and written on every change. Sales/Marketing have no independent month
+  // selector, so this single key is the shared active-period source for the biz
+  // pages; if either grows a selector it reads/writes this same key.
+  const [selectedMonth, setSelectedMonth] = useState(() => readBizPeriod());
+  // Re-validate the persisted pick against the months that actually exist; a stale
+  // key (a month no longer in the data) safely falls back to the latest.
   const month = selectedMonth && months.includes(selectedMonth)
     ? selectedMonth
     : months[months.length - 1];
+  // Persist on change. Writing the EFFECTIVE month (post-validation) keeps the key
+  // clean: a navigated-away-and-back mount restores exactly what the founder saw.
+  useEffect(() => {
+    writeBizPeriod(month);
+  }, [month]);
+  // Change handler the picker calls — also persists immediately so a re-mount that
+  // happens before the effect flushes still reads the latest pick.
+  const onMonthChange = (m) => {
+    setSelectedMonth(m);
+    writeBizPeriod(m);
+  };
   const monthModel = useMemo(
     () => monthModels.find((m) => m.month === month) || { month, channels: {}, partial: false },
     [monthModels, month]
@@ -334,8 +380,9 @@ const PageFinance = ({ initialTab } = {}) => {
           <button className="btn ghost sm" onClick={() => setUploadOpen(true)} title="Upload native / agency reports — they upsert into the fact store and override by month×channel">
             <Icon name="download" size={13}/> Upload reports
           </button>
-          {/* Coverage-aware month selector. */}
-          <MonthPicker months={monthModels} value={month} onChange={setSelectedMonth}/>
+          {/* Coverage-aware month selector. The pick persists across navigation
+              (localStorage "ns.bizPeriod") via onMonthChange. */}
+          <MonthPicker months={monthModels} value={month} onChange={onMonthChange}/>
         </div>
       </div>
 

@@ -1276,9 +1276,16 @@ export async function parseMonarchSeo(file, _opts = {}) {
   let prev30 = dateCols[dateCols.length - 2] || dateCols[0]; let bestDiff = Infinity;
   for (const d of dateCols) { if (d.iso >= latestCol.iso) continue; const diff = Math.abs((latestMs - Date.parse(d.iso)) / 86400000 - 30); if (diff < bestDiff) { bestDiff = diff; prev30 = d; } }
   const rows = [];
+  let trackedRows = 0;           // every keyword the source tracks (non-empty kw cell)
   for (let i = 1; i < grid.length; i++) {
     const kw = String(grid[i][0] || "").trim(); if (!kw) continue;
+    trackedRows++;
     const rk = (col) => { const v = grid[i][col.c]; const n = num(v); return v === "" || v == null || !Number.isFinite(n) || n === 0 ? null : n; };
+    // Filter rule: keep only keywords that carry a RANK at the latest snapshot —
+    // i.e. those ranking in the tracked top-100 as of `latestCol.iso`. Keywords with
+    // no position at the latest snapshot (untracked or fallen out of the top 100) are
+    // counted in `trackedKeywords` but not surfaced as a current rank. This is the
+    // rule the header label must reconcile to ("N of M tracked, as of <date>").
     const latest = rk(latestCol); if (latest == null) continue;
     const vals = dateCols.map((d) => rk(d)).filter((v) => v != null);
     const best = vals.length ? Math.min(...vals) : null; const worst = vals.length ? Math.max(...vals) : null;
@@ -1291,14 +1298,17 @@ export async function parseMonarchSeo(file, _opts = {}) {
     });
   }
   rows.sort((a, b) => (a.latest - b.latest) || ((b.movementAll || 0) - (a.movementAll || 0)));
-  // I/VI fix (2026-06-13): keep ALL ranked keywords (every row with a current rank),
-  // not a top-30 slice. The full set (44) is small enough to surface in full; the
-  // earlier top-30 silently dropped 14 keywords the founder audit flagged.
+  // I/VI/X fix (2026-06-14): keep every keyword carrying a RANK at the latest
+  // snapshot (the rule above). `totalKeywords` is that surfaced count; the audit
+  // flagged "all 44" as misleading because the tab tracks more keywords than rank
+  // at the latest snapshot — so we ALSO emit `trackedKeywords` (every keyword the
+  // tab carries) so the label reconciles as "N of M tracked, as of <date>" rather
+  // than an unexplained absolute. (For the bundled file: 44 ranked of 93 tracked.)
   const keywords = rows;
   const staleness = latestCol.iso;             // latest snapshot date — SEO stale past this
   const facts = emptyFacts();
-  facts.meta.monarchSeo = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, latestDate: staleness, staleAsOf: staleness, keywords, totalKeywords: rows.length };
-  dq.push({ level: "info", code: "SEO_OK", msg: `Monarch SEO: ${rows.length} ranked keywords (ALL kept); latest snapshot ${staleness}; snapshots ${isoList.join(", ")}.` });
+  facts.meta.monarchSeo = { source: "monarch-seo", tier: "monarch", dates: isoList, prev30Date: prev30.iso, latestDate: staleness, staleAsOf: staleness, keywords, totalKeywords: rows.length, trackedKeywords: trackedRows };
+  dq.push({ level: "info", code: "SEO_OK", msg: `Monarch SEO: ${rows.length} keywords ranking at latest snapshot of ${trackedRows} tracked; latest snapshot ${staleness}; snapshots ${isoList.join(", ")}.` });
   return { facts, dq };
 }
 

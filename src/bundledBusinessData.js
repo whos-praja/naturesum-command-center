@@ -23853,6 +23853,7 @@ export const BUNDLED_BUSINESS = {
           }
         ],
         "totalKeywords": 44,
+        "trackedKeywords": 93,
         "label": "Monarch website SEO keyword ranks",
         "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },

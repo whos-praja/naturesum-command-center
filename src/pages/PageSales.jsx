@@ -429,8 +429,9 @@ const PageSales = ({ initialTab } = {}) => {
           A <span className="cov-badge cov-native">native</span> badge means the channel&apos;s own per-SKU export is
           loaded (overrides agency); <span className="cov-badge cov-agency">agency</span> is Snell/Monarch
           channel-grain. The current month is <span className="cov-badge cov-mtd">MTD</span> (partial) and is kept out
-          of month-over-month unless compared day-for-day. Website revenue is gross in source, shown net-derived
-          (÷1.05). Every non-trivial number has an <span className="formula-icon" style={{ position: "static", display: "inline" }}>ⓘ</span> with its formula, actual inputs, and source.
+          of month-over-month unless compared day-for-day. Website revenue uses Shopify <strong>Net sales</strong> as-is
+          where the native export exists (e.g. May 2026); agency-only months derive net from Monarch gross conversion
+          value (÷1.05). Every non-trivial number has an <span className="formula-icon" style={{ position: "static", display: "inline" }}>ⓘ</span> with its formula, actual inputs, and source.
         </span>
       </div>
 
@@ -497,7 +498,7 @@ const PageSales = ({ initialTab } = {}) => {
           {/* DAILY net-revenue curve (VI/44). */}
           <Card
             title="Daily net revenue · the shape of the business"
-            sub="Every channel, day by day. Amazon runs back to Aug-2024 (the early ramp); other channels begin when their daily feed does. Net-of-GST; website net-derived (÷1.05)."
+            sub="Every channel, day by day. Amazon runs back to Aug-2024 (the early ramp); other channels begin when their daily feed does. Net-of-GST; the daily website feed is gross-only, so days without a Shopify net figure derive net (÷1.05)."
             action={
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <div className="seg">

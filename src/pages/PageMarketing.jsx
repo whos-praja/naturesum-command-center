@@ -272,7 +272,7 @@ const PageMarketing = () => {
           <div className="page-title">Marketing &amp; Advertising</div>
           <div className="page-sub">
             Attribution confidence per channel · ranked ad actions (₹ impact) in the shared Monday queue · spend vs net revenue &amp; TCOS across {history.length} months ·
-            channel spend forecast (banded) · Google vs Meta ROAS/CPA · all {seoCount(facts)} SEO keywords · modeled Blinkit per-SKU ad · per-SKU ROAS / ACOS ·
+            channel spend forecast (banded) · Google vs Meta ROAS/CPA · {seoCountLabel(facts)} · modeled Blinkit per-SKU ad · per-SKU ROAS / ACOS ·
             AMS daily spend + anomaly flags · ad-reporting inflation · Flipkart cashback drag · ad-budget what-if
           </div>
         </div>
@@ -1301,6 +1301,11 @@ const SeoKeywordRanks = ({ facts }) => {
   // data-through date. The SEO tab is a separate cadence from sales/ad data and
   // tends to lag; the founder must read these ranks knowing how old they are.
   const stale = staleness(latestDate, facts?.meta?.latestDataDate);
+  // Tracked universe (every keyword the tab carries) vs the surfaced set (those
+  // ranking at the latest snapshot). The label reconciles "N of M tracked, as of
+  // <date>" so the count is never an unexplained absolute. Falls back to the shown
+  // count when the parser didn't emit a tracked total (old bundles).
+  const trackedCount = Number(seo.trackedKeywords) || kws.length;
   // counts for the headline: top-3 / top-10 at the latest snapshot + net movers.
   const top3 = kws.filter((k) => num(k.latest) > 0 && num(k.latest) <= 3).length;
   const top10 = kws.filter((k) => num(k.latest) > 0 && num(k.latest) <= 10).length;
@@ -1310,7 +1315,7 @@ const SeoKeywordRanks = ({ facts }) => {
   return (
     <Card
       title="SEO keyword ranks"
-      sub={`Where Naturesum ranks on its tracked keywords, latest vs 30 days ago (Monarch SEO tab). Lower rank = better — rank 1 is the #1 result. An ↑ arrow means the position improved (the rank number dropped). ${seo.totalKeywords} keywords tracked across ${seo.dates?.length || 0} snapshots (${fmtSeoDate(firstDate)} → ${fmtSeoDate(latestDate)}).`}
+      sub={`Where Naturesum ranks on its tracked keywords (Monarch SEO tab). Lower rank = better — rank 1 is the #1 result. An ↑ arrow means the position improved (the rank number dropped). Showing the ${kws.length}${trackedCount > kws.length ? ` of ${trackedCount} tracked` : ""} keywords that carry a rank at the latest snapshot (${fmtSeoDate(latestDate)}), across ${seo.dates?.length || 0} snapshots (${fmtSeoDate(firstDate)} → ${fmtSeoDate(latestDate)}). As-of ${fmtSeoDate(latestDate)} — a point-in-time snapshot, not today's ranks.`}
       padded={false}
       action={
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1399,9 +1404,9 @@ const SeoKeywordRanks = ({ facts }) => {
 
       <div className="card-body" style={{ paddingTop: 10 }}>
         <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.5 }}>
-          <strong style={{ color: "var(--ink-3)" }}>Source:</strong> Monarch Master Sheet · &quot;SEO - Keywords&quot; tab (rank-over-time snapshots).
+          <strong style={{ color: "var(--ink-3)" }}>Source:</strong> Monarch Master Sheet · &quot;SEO - Keywords&quot; tab (rank-over-time snapshots) · as-of {fmtSeoDate(latestDate)}.
           Movement = rank 30 days ago − rank now: a positive number means the position climbed (rank number fell).
-          A blank rank means the keyword was not tracked at that snapshot. Showing {shown.length} of {kws.length} ranked keywords.
+          A blank rank means the keyword was not tracked at that snapshot. Showing {shown.length} of {kws.length} keywords ranking at the latest snapshot{trackedCount > kws.length ? ` (${trackedCount} keywords tracked in total; the other ${trackedCount - kws.length} carry no position at the latest snapshot)` : ""}.
         </div>
       </div>
     </Card>
@@ -2065,11 +2070,27 @@ function marketingSliceOfQueue(q) {
     .map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-// SEO keyword count for the header sub — true to the source (all tracked keywords,
-// not a truncated 30). Reads the parsed total; falls back to the array length.
+// SEO keyword count for the header sub — true to the source. `totalKeywords` is the
+// count RANKING at the latest snapshot (those with a current position); the tab
+// tracks more keywords than that (some have no position at the latest snapshot), so
+// the previous "all 44" was misleading. We surface the rule instead.
 function seoCount(facts) {
   const seo = facts?.meta?.bySource?.["monarch-seo"];
   return seo ? (Number(seo.totalKeywords) || (seo.keywords || []).length || 0) : 0;
+}
+// Honest one-line label for the header sub: states the filter (keywords ranking at
+// the latest snapshot), the tracked universe, and the snapshot's as-of date — so the
+// count reconciles to a stated rule rather than an unexplained absolute. Falls back
+// gracefully when the tracked total or date isn't present.
+function seoCountLabel(facts) {
+  const seo = facts?.meta?.bySource?.["monarch-seo"];
+  const ranked = seoCount(facts);
+  if (!ranked) return "SEO keyword ranks";
+  const tracked = Number(seo?.trackedKeywords) || 0;
+  const asOf = seo?.staleAsOf || seo?.latestDate || seo?.dates?.[seo.dates.length - 1];
+  const ofTracked = tracked && tracked > ranked ? ` of ${tracked} tracked` : "";
+  const asOfTxt = asOf ? ` as of ${fmtSeoDate(asOf)}` : "";
+  return `${ranked}${ofTracked} SEO keywords ranking${asOfTxt}`;
 }
 
 // VI-96 · staleness in whole days between an ISO snapshot date and the live
