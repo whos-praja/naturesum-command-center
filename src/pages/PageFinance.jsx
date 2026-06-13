@@ -514,8 +514,35 @@ const FinanceHeadline = ({ view, month, projection, concentration }) => {
           </>
         ) : (
           <>
-            <div className="stat-num lg">{fmtINR(proj.projected ?? co?.netRev)}</div>
-            <div className="muted" style={{ fontSize: 11.5 }}>{monthLabel(month)} complete · {fmtN(co?.units)} units</div>
+            {/* DEFECT-2 FIX — the complete-month headline net revenue is the SAME
+                coherent engine sum-of-channels (co.netRev) the CM% card uses as its
+                basis, NOT the daily-series sum (proj.projected). proj.projected for a
+                complete month is Σ daily channel-grain net, which rides on the agency
+                Amazon figure (Snell ₹12.14L) where the engine uses native per-SKU
+                (₹11.43L, native-overrides-agency) — so the two never reconciled
+                (₹25.02L headline vs ₹21.13L CM% basis). We show co.netRev and bridge
+                to the daily/agency-tracked figure in the popover so a founder sees ONE
+                net-revenue number, with the agency delta explained, not two unreconciled
+                ones. (Defect-3 already rebased website daily to Shopify-net.) */}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <div className="stat-num lg">{fmtINR(co?.netRev)}</div>
+              {proj.projected != null && co?.netRev != null && Math.abs(proj.projected - co.netRev) > 1 && (
+                <DerivationPopover
+                  title={`${monthLabel(month)} net revenue — basis bridge`}
+                  formula="headline = engine Σ channel net (native per-SKU + agency channel-grain)"
+                  plain="The headline net revenue is the coverage-aware engine sum-of-channels — the SAME basis the CM% card divides by. The daily channel series totals higher because, where a channel has BOTH a native per-SKU export and an agency feed, the daily series rides on the agency figure (e.g. Amazon Snell ₹12.14L) while the engine takes the native per-SKU net (₹11.43L, native-overrides-agency). The gap below is that agency-vs-native delta, not extra revenue."
+                  inputs={[
+                    { label: "Headline net (engine Σ channels)", value: fmtINR(co?.netRev) },
+                    { label: "Daily-series total (agency-tracked)", value: fmtINR(proj.projected) },
+                    { label: "Agency-over-native delta", value: fmtINR(proj.projected - co.netRev) },
+                  ]}
+                  value={fmtINR(co?.netRev)}
+                  source="cmEngine company rollup (native-overrides-agency)"
+                  asOf={proj.lastDay || month}
+                />
+              )}
+            </div>
+            <div className="muted" style={{ fontSize: 11.5 }}>{monthLabel(month)} complete · {fmtN(co?.units)} units · engine Σ-channel net (= CM% basis)</div>
           </>
         )}
       </Card>
@@ -852,26 +879,30 @@ const ForecastView = ({ facts, month, view }) => {
             <ForecastTable fc={fc} metric={metric}/>
             <div style={{ padding: "8px 2px 0", fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
               <strong>Method:</strong> {fc.method}. The trailing window uses <strong>complete months only</strong> (a partial
-              month would bias the slope down). Units ride the held realized ₹/unit; contribution rides the{" "}
-              <strong>held CM3 margin</strong>{" "}
-              {fc.heldMargin?.pct != null ? fmtPct(fc.heldMargin.pct) : (fc.cm3MarginPct != null ? fmtPct(fc.cm3MarginPct) : "—")}
+              month would bias the slope down). Units ride the held realized ₹/unit; contribution is{" "}
+              <strong>{fc.heldMargin?.label || "held at trailing CM3"}</strong>{" "}
+              {fc.heldMargin?.pct != null ? `(${fmtPct(fc.heldMargin.pct)})` : (fc.cm3MarginPct != null ? `(${fmtPct(fc.cm3MarginPct)})` : "(—)")}
               {fc.heldMargin && fc.heldMargin.pct != null && (
                 <DerivationPopover
                   title="Held CM3 margin · forward contribution"
-                  formula="Σ CM3 ÷ Σ net revenue, over the trailing complete months"
-                  plain={`The forward CM3 line rides this blended margin. It is the REAL same-window CM3% of the exact trailing complete months whose revenue feeds the trend — not a placeholder. It runs low/negative when a recent month ran ad-heavy (May company CM3 was negative), so the forward contribution honestly reflects that.`}
+                  formula={fc.heldMargin.basis}
+                  plain={`The forward CM3 line is held at the REAL recent CM3% the Finance KPI shows — this month's own CM3% when this month carries CM3 coverage, so the forecast does not contradict the headline. (Previously it held a Σ-weighted trailing blend that a single ad-heavy month dragged to a near-zero ~1%, reading as a contradiction against the ~15% shown elsewhere.)`}
                   inputs={[
-                    { label: "Months used", value: (fc.heldMargin.months || []).map(monthShort).join(", ") || "—" },
+                    { label: "Held basis", value: fc.heldMargin.basis },
+                    { label: "Month(s) used", value: (fc.heldMargin.months || []).map(monthShort).join(", ") || "—" },
                     { label: "Σ CM3", value: fmtSignedINR(fc.heldMargin.cm3Sum) },
                     { label: "Σ net revenue", value: fmtINR(fc.heldMargin.revSum) },
                     { label: "= held CM3 margin", value: fmtPct(fc.heldMargin.pct) },
+                    ...(fc.heldMargin.trailing && fc.heldMargin.trailing.pct != null
+                      ? [{ label: `Trailing blend [${(fc.heldMargin.trailing.months || []).map(monthShort).join(", ")}]`, value: fmtPct(fc.heldMargin.trailing.pct) }]
+                      : []),
                   ]}
                   value={fmtPct(fc.heldMargin.pct)}
                   source="bizAnalytics · forecast.heldMargin"
                   asOf={fc.asOfMonth}
                 />
               )}
-              {" "}— the same blended CM3% of the months feeding the trend, not a bare placeholder.
+              {" "}— the recent CM3% the KPI shows, held forward, not a near-zero placeholder.
               The shaded band is ±residual σ·√h — it <strong>widens with
               horizon</strong> because uncertainty compounds. Confidence is{" "}
               <strong>{fc.confidence}</strong>{fc.note ? `; ${fc.note}` : ""}.
@@ -3034,36 +3065,91 @@ const FinanceSourceRecencyLine = ({ facts }) => {
 // synchronous and bounded (~40ms on the full bundle, measured), then shows PASS/FAIL
 // with the count, the wall-clock duration, and a timestamp. This is the permanent,
 // on-page live verification the founder can click any time — not buried in Upload.
+const SELF_TEST_TIMEOUT_MS = 4000;
 const RunnableSelfTest = ({ facts }) => {
   const [run, setRun] = useState(null); // { ok, ranAt, durationMs, anchors:{match,total}, idemOk, sanityOk }
   const [busy, setBusy] = useState(false);
+  // Re-entrancy token + watchdog handle, mirroring the proven UploadModal pattern.
+  const runTokenRef = useRef(0);
+  const watchdogRef = useRef(null);
+  const deferRef = useRef(null);
+
+  // DEFECT-1 FIX: the old handler deferred the work inside a single
+  // requestAnimationFrame. rAF callbacks are PARKED indefinitely by the browser
+  // whenever the tab is backgrounded (or no paint is scheduled), so the closure
+  // that called setRun()/setBusy(false) could never fire — the button stuck on
+  // "Running…" forever while the anchor table (a plain useMemo) still showed 18
+  // MATCH. We now (a) defer with setTimeout(…,0), which fires even on a
+  // backgrounded tab, (b) guard a watchdog so we always reach a terminal state,
+  // and (c) carry a re-entrancy token so a superseded run can't overwrite a fresh
+  // one. Same recipe UploadModal.jsx already documented as the cure.
+  useEffect(() => () => {
+    if (watchdogRef.current) clearTimeout(watchdogRef.current);
+    if (deferRef.current) clearTimeout(deferRef.current);
+  }, []);
 
   const execute = () => {
+    const token = ++runTokenRef.current;
+    if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+    if (deferRef.current) { clearTimeout(deferRef.current); deferRef.current = null; }
     setBusy(true);
-    // Defer to the next frame so the "running…" state paints before the sync work.
-    requestAnimationFrame(() => {
-      const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
-      // (a) anchors live from the fact store.
-      const av = runVerification(facts);
-      const anchorRowsLive = av.filter((r) => r.status !== "INFO");
-      const match = anchorRowsLive.filter((r) => r.status === "MATCH").length;
-      const drift = anchorRowsLive.filter((r) => r.status === "DRIFT").length;
-      // (b) formatting/sanity walk.
-      const sv = runFormattingSanity(facts);
-      // (c) parse-twice == parse-once idempotency + per-source round-trip.
-      let idem;
-      try { idem = runIngestionSelfTest(); } catch (e) { idem = { ok: false, durationMs: 0, error: e.message, idempotency: {}, checks: [] }; }
-      const durationMs = Math.round(((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) * 10) / 10;
-      const ok = drift === 0 && sv.status === "MATCH" && !!idem.ok;
-      setRun({
-        ok, ranAt: new Date(), durationMs,
-        anchors: { match, drift, total: anchorRowsLive.length },
-        sanityOk: sv.status === "MATCH", sanityCells: sv.checks,
-        idemOk: !!idem.ok, idemCells: idem.idempotency?.onceCells ?? null, idemSources: idem.idempotency?.sources?.length ?? null,
-        idemError: idem.error || null,
-      });
+
+    const finish = (payload) => {
+      if (token !== runTokenRef.current) return;          // a newer run superseded this one
+      if (watchdogRef.current) { clearTimeout(watchdogRef.current); watchdogRef.current = null; }
+      setRun(payload);
       setBusy(false);
-    });
+    };
+
+    // Watchdog: if the deferred callback is parked (backgrounded tab) or the main
+    // thread wedges before the work returns, paint a clear timeout state — never
+    // an eternal "Running…".
+    watchdogRef.current = setTimeout(() => {
+      finish({
+        ok: false, timedOut: true, ranAt: new Date(), durationMs: SELF_TEST_TIMEOUT_MS,
+        anchors: { match: 0, drift: 0, total: 0 }, sanityOk: false, sanityCells: 0,
+        idemOk: false, idemCells: null, idemSources: null,
+        idemError: `Self-test exceeded ${Math.round(SELF_TEST_TIMEOUT_MS / 1000)}s and was stopped — bring the tab to the foreground and re-run.`,
+      });
+    }, SELF_TEST_TIMEOUT_MS);
+
+    // Defer with setTimeout (fires even on a backgrounded tab, unlike rAF which a
+    // browser may park indefinitely) so the button paints "Running…" before the
+    // synchronous work runs. The work itself is pure + in-memory (~40ms measured).
+    deferRef.current = setTimeout(() => {
+      if (token !== runTokenRef.current) return;          // superseded before it ran
+      try {
+        const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+        // (a) anchors live from the fact store.
+        const av = runVerification(facts);
+        const anchorRowsLive = av.filter((r) => r.status !== "INFO");
+        const match = anchorRowsLive.filter((r) => r.status === "MATCH").length;
+        const drift = anchorRowsLive.filter((r) => r.status === "DRIFT").length;
+        // (b) formatting/sanity walk.
+        const sv = runFormattingSanity(facts);
+        // (c) parse-twice == parse-once idempotency + per-source round-trip.
+        let idem;
+        try { idem = runIngestionSelfTest(); } catch (e) { idem = { ok: false, durationMs: 0, error: e.message, idempotency: {}, checks: [] }; }
+        const durationMs = Math.round(((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) * 10) / 10;
+        const ok = drift === 0 && sv.status === "MATCH" && !!idem.ok;
+        finish({
+          ok, ranAt: new Date(), durationMs,
+          anchors: { match, drift, total: anchorRowsLive.length },
+          sanityOk: sv.status === "MATCH", sanityCells: sv.checks,
+          idemOk: !!idem.ok, idemCells: idem.idempotency?.onceCells ?? null, idemSources: idem.idempotency?.sources?.length ?? null,
+          idemError: idem.error || null,
+        });
+      } catch (e) {
+        // Any unexpected throw in runVerification/runFormattingSanity still lands
+        // on a terminal FAIL state instead of hanging on "Running…".
+        finish({
+          ok: false, ranAt: new Date(), durationMs: 0,
+          anchors: { match: 0, drift: 0, total: 0 }, sanityOk: false, sanityCells: 0,
+          idemOk: false, idemCells: null, idemSources: null,
+          idemError: e?.message || String(e),
+        });
+      }
+    }, 0);
   };
 
   const ok = run?.ok;
@@ -3091,15 +3177,19 @@ const RunnableSelfTest = ({ facts }) => {
               borderColor: (ok ? "var(--success)" : "var(--critical)") + "55",
               fontWeight: 700, fontSize: 12,
             }}>
-              {ok ? "✓ PASS" : "✗ FAIL"}
+              {/* Terminal verdict with a re-derived timestamp — proves the handler
+                  reached a done state (DEFECT-1). timedOut surfaces a distinct state. */}
+              {run.timedOut ? "⏱ TIMED OUT" : ok ? `✓ PASS · re-derived ${run.ranAt.toLocaleTimeString()}` : "✗ FAIL"}
             </span>
-            <span style={{ fontSize: 12 }}>
-              <strong>{run.anchors.match}/{run.anchors.total}</strong> anchors MATCH{run.anchors.drift ? ` · ${run.anchors.drift} DRIFT` : ""} ·{" "}
-              sanity {run.sanityOk ? "clean" : "FAILURES"} ({run.sanityCells} cells) ·{" "}
-              idempotency {run.idemOk ? "parse-twice == parse-once" : "FAILED"}{run.idemCells != null ? ` (${run.idemCells} cells, ${run.idemSources} sources)` : ""}
-            </span>
+            {!run.timedOut && (
+              <span style={{ fontSize: 12 }}>
+                <strong>{run.anchors.match}/{run.anchors.total}</strong> anchors MATCH{run.anchors.drift ? ` · ${run.anchors.drift} DRIFT` : ""} ·{" "}
+                sanity {run.sanityOk ? "clean" : "FAILURES"} ({run.sanityCells} cells) ·{" "}
+                idempotency {run.idemOk ? "parse-twice == parse-once" : "FAILED"}{run.idemCells != null ? ` (${run.idemCells} cells, ${run.idemSources} sources)` : ""}
+              </span>
+            )}
             <span className="muted" style={{ fontSize: 11 }}>
-              ran in {run.durationMs}ms · {run.ranAt.toLocaleTimeString()}
+              {run.timedOut ? `stopped after ${run.durationMs}ms` : `ran in ${run.durationMs}ms · ${run.ranAt.toLocaleTimeString()}`}
             </span>
           </>
         )}
@@ -3110,7 +3200,7 @@ const RunnableSelfTest = ({ facts }) => {
         )}
       </div>
       {run && run.idemError && (
-        <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--critical)" }}>idempotency error: {run.idemError}</div>
+        <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--critical)" }}>{run.timedOut ? run.idemError : `idempotency error: ${run.idemError}`}</div>
       )}
     </Card>
   );

@@ -178,6 +178,30 @@ function dailyNet(cell, ch) {
   return net;
 }
 
+// DEFECT-3 FIX — ONE declared website basis everywhere: Shopify "Net sales"
+// AS-IS (spec §1.3). The daily website feed only exists as Monarch conversion-
+// value (gross), which over-states net (~+74% vs Shopify net), so summing
+// gross÷1.05 daily gave a DIFFERENT website revenue than the margin/Verification
+// layer's Shopify-net total (May: daily ₹7.46L vs monthly ₹4.28L). We keep the
+// daily SHAPE from Monarch but SCALE each month's website daily values so they
+// sum to that month's Shopify per-SKU net total — for any month where that net
+// exists in the fact store. Months without a Shopify-net monthly total (only
+// Monarch daily history) keep the conv-value basis as the only available source.
+// Result: the daily website series reconciles to the SAME monthly ₹4,28,378/610u
+// the engine reports (no two-bases incoherence). Returns { "YYYY-MM": netTotal }.
+function websiteShopifyNetByMonth(facts) {
+  const monthly = (facts && facts.monthly) || {};
+  const out = {};
+  for (const [key, cell] of Object.entries(monthly)) {
+    const [m, ch, code] = key.split("|");
+    if (ch !== "website") continue;
+    if (code === CH_CODE) continue;            // per-SKU Shopify-net rows only (AS-IS)
+    const net = num(cell.netRev);
+    if (net > 0) out[m] = (out[m] || 0) + net;
+  }
+  return out;
+}
+
 /**
  * dailyChannelSeries(facts) → { dates:[iso…asc], byChannel:{ ch:{ iso:net } },
  *   unitsByChannel:{ ch:{ iso:units } }, adByChannel:{ ch:{ iso:adSpend } },
@@ -200,6 +224,30 @@ export function dailyChannelSeries(facts) {
     (adByChannel[ch] = adByChannel[ch] || {})[iso] = fin0(adByChannel[ch][iso]) + num(cell.adSpend);
     dateSet.add(iso);
   }
+
+  // DEFECT-3 FIX — rebase the website daily series onto Shopify-net AS-IS.
+  // The raw website daily values above are Monarch conv-value÷1.05 (a different,
+  // higher basis). For every month that HAS a Shopify per-SKU net total, scale
+  // that month's website days by (shopifyNet ÷ Σ monarch-daily) so the daily
+  // series sums to the SAME monthly net the margin/Verification layer reports
+  // (e.g. May → ₹4,28,378), preserving the daily shape from Monarch. Months with
+  // no Shopify-net total keep the Monarch basis (the only website source there).
+  const web = byChannel.website;
+  if (web) {
+    const shopByMonth = websiteShopifyNetByMonth(facts);
+    const monarchByMonth = {};
+    for (const [iso, v] of Object.entries(web)) {
+      const mm = iso.slice(0, 7);
+      monarchByMonth[mm] = fin0(monarchByMonth[mm]) + fin0(v);
+    }
+    for (const [iso, v] of Object.entries(web)) {
+      const mm = iso.slice(0, 7);
+      const target = shopByMonth[mm];
+      const monarch = monarchByMonth[mm];
+      if (target > 0 && monarch > 1e-9) web[iso] = fin0(v) * (target / monarch);
+    }
+  }
+
   return { dates: [...dateSet].sort(), byChannel, unitsByChannel, adByChannel, channels: Object.keys(byChannel).sort() };
 }
 
@@ -1574,32 +1622,52 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
   const reg = lin(ysRev);
   const avgRev = ysRev.length ? ysRev.reduce((a, b) => a + b, 0) / ysRev.length : 0;
   const avgUnits = trail.length ? trail.reduce((a, h) => a + h.units, 0) / trail.length : 0;
-  const cm3Trail = trail.filter((h) => h.cm3 != null);
-  const avgCm3 = cm3Trail.length ? cm3Trail.reduce((a, h) => a + h.cm3, 0) / cm3Trail.length : null;
-  // effective realized ₹/unit and CM3-margin% held forward.
+  // effective realized ₹/unit held forward.
   const trailRevSum = trail.reduce((a, h) => a + h.netRev, 0);
   const trailUnitsSum = trail.reduce((a, h) => a + h.units, 0);
   const pricePerUnit = trailUnitsSum > 0 ? trailRevSum / trailUnitsSum : null;
-  // Held-forward CM3 margin = Σ trailing CM3 ÷ Σ trailing covered-month revenue
-  // (effective recent margin — the forward contribution rides this, not a guess).
-  // This is a REAL, same-window margin: it is the blended CM3% of the exact same
-  // trailing complete months whose revenue feeds the trend. It can legitimately be
-  // low or negative when a recent month ran ad-heavy (e.g. May company CM3 was
-  // negative), so the forward contribution honestly reflects that — but we expose
-  // the components (cm3 sum, revenue sum, the months used) so the popover
-  // re-derives it and the founder never sees a bare "0.1%" with no provenance.
-  const cm3RevSum = cm3Trail.reduce((a, h) => a + h.netRev, 0);
-  const cm3SumV = cm3Trail.reduce((a, h) => a + h.cm3, 0);
-  const marginPct = cm3RevSum > 0 ? cm3SumV / cm3RevSum : null;
+
+  // DEFECT-4 FIX — held-forward CM3 margin must be COHERENT with the CM3% the
+  // Finance KPI shows, not a near-zero that reads as a contradiction. The old
+  // window was the trailing-3 COMPLETE months only, Σ-weighted; a single ad-heavy
+  // high-revenue month (May company CM3 −2.29% on ₹21L) dominated the blend and
+  // dragged the held margin to ~1.1% — while the KPI shows this-month CM3 ≈15.2%.
+  // The forward contribution should ride the REAL recent CM3% a founder sees: we
+  // hold the asOf (this-)month's own CM3% when it carries CM3 coverage — that is
+  // exactly the KPI number — and fall back to the trailing-month blend only when
+  // this month has no CM3 grain. Either way it is LABELLED "held at trailing CM3 X%"
+  // so it never reads as a contradictory ~0% against the headline. We always expose
+  // the trailing blend alongside (heldMargin.trailing) for provenance.
+  const asOfH = history.find((h) => h.month === asOf);
+  const trailCm3 = trail.filter((h) => h.cm3 != null);
+  const trailRevSumCm3 = trailCm3.reduce((a, h) => a + h.netRev, 0);
+  const trailCm3SumV = trailCm3.reduce((a, h) => a + h.cm3, 0);
+  const trailPct = trailRevSumCm3 > 0 ? trailCm3SumV / trailRevSumCm3 : null;
+  // Prefer this-month's KPI-visible CM3% (the real, current margin) when present.
+  const thisMonthHasCm3 = !!asOfH && asOfH.cm3 != null && asOfH.netRev > 0;
+  const heldFromThisMonth = thisMonthHasCm3;
+  const cm3Trail = trailCm3;                  // months feeding the trailing provenance blend
+  const avgCm3 = cm3Trail.length ? cm3Trail.reduce((a, h) => a + h.cm3, 0) / cm3Trail.length : null;
+  const cm3RevSum = heldFromThisMonth ? asOfH.netRev : trailRevSumCm3;
+  const cm3SumV = heldFromThisMonth ? asOfH.cm3 : trailCm3SumV;
+  const marginPct = heldFromThisMonth ? (asOfH.netRev > 0 ? asOfH.cm3 / asOfH.netRev : null) : trailPct;
+  const heldBasisMonths = heldFromThisMonth ? [asOf] : cm3Trail.map((h) => h.month);
   const heldMargin = {
     pct: marginPct,
+    label: marginPct == null ? "held CM3 margin unavailable" : `held at trailing CM3 ${(marginPct * 100).toFixed(1)}%`,
     cm3Sum: round2(cm3SumV),
     revSum: round2(cm3RevSum),
-    months: cm3Trail.map((h) => h.month),
-    basis: "trailing complete months (same window as the revenue trend)",
+    months: heldBasisMonths,
+    basis: heldFromThisMonth
+      ? "this month's own CM3% (the KPI-visible margin) held forward"
+      : "trailing complete months (this month has no CM3 grain)",
+    // trailing blend always available for reconciliation/provenance.
+    trailing: { pct: clampPct(trailPct), months: cm3Trail.map((h) => h.month), cm3Sum: round2(trailCm3SumV), revSum: round2(trailRevSumCm3) },
     note: marginPct == null
       ? "held CM3 margin unavailable — no covered trailing month at this grain"
-      : `held CM3 margin ${(marginPct * 100).toFixed(1)}% = Σ CM3 ${round2(cm3SumV).toLocaleString("en-IN")} ÷ Σ net ${round2(cm3RevSum).toLocaleString("en-IN")} over ${cm3Trail.length} trailing complete month(s) [${cm3Trail.map((h) => h.month).join(", ")}]. This is the real blended CM3% of those exact months — it is low/negative when a recent month ran ad-heavy, NOT a 0.1% placeholder.`,
+      : heldFromThisMonth
+        ? `held at trailing CM3 ${(marginPct * 100).toFixed(1)}% = this month's (${asOf}) own CM3 ${round2(cm3SumV).toLocaleString("en-IN")} ÷ net ${round2(cm3RevSum).toLocaleString("en-IN")} — the SAME CM3% the Finance KPI shows, held forward (so the forecast does not contradict the headline). Trailing-${trailCm3.length}mo blend for reference: ${trailPct != null ? (trailPct * 100).toFixed(1) + "%" : "n/a"} [${cm3Trail.map((h) => h.month).join(", ")}].`
+        : `held at trailing CM3 ${(marginPct * 100).toFixed(1)}% = Σ CM3 ${round2(cm3SumV).toLocaleString("en-IN")} ÷ Σ net ${round2(cm3RevSum).toLocaleString("en-IN")} over ${cm3Trail.length} trailing complete month(s) [${cm3Trail.map((h) => h.month).join(", ")}] (this month has no CM3 grain). It runs low when a recent month ran ad-heavy.`,
   };
 
   // EFFECTIVE partiality for THIS grain: the asOf month is only "completable" if it
@@ -1682,7 +1750,7 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
   return {
     grain, channel: channel || null, sku: sku || null,
     asOfMonth: asOf,
-    method: `trailing-${trailN}mo linear trend ⊕ run-rate (50/50); units @ held ₹/unit; CM3 @ held margin ${marginPct != null ? (marginPct * 100).toFixed(1) + "%" : "n/a"}; band = ±residualσ·√h${effPartial ? "; current month completed via month-end pace" : ""}`,
+    method: `trailing-${trailN}mo linear trend ⊕ run-rate (50/50); units @ held ₹/unit; CM3 ${marginPct != null ? "held at trailing CM3 " + (marginPct * 100).toFixed(1) + "%" + (heldFromThisMonth ? " (this month's own CM3%)" : " (trailing blend)") : "n/a"}; band = ±residualσ·√h${effPartial ? "; current month completed via month-end pace" : ""}`,
     history,
     trailing: { months: trailN, avgNetRev: round2(avgRev), avgUnits: Math.round(avgUnits), avgCm3: avgCm3 == null ? null : round2(avgCm3), slopePerMonth: round2(reg.slope), residualSd: round2(reg.sd), pricePerUnit: clampPct(pricePerUnit) },
     cm3MarginPct: clampPct(marginPct),
