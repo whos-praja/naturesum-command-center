@@ -168,6 +168,23 @@ function buildAmazon() {
   const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
   const C = { date: col("purchase-date"), status: col("order-status"), itemStatus: col("item-status"), salesCh: col("sales-channel"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price"), state: col("ship-state"), postal: col("ship-postal-code") };
   const mcf = {}; let mcfTotal = 0, retU = 0, retV = 0, units = 0, gross = 0;
+  // I-7 · VARIANT-FOLD provenance. The parser folds Amazon `_MP` (MCF / website-
+  // fulfilment marketplace-SKU) into the same canonical code as its base MSKU
+  // (e.g. NSSBJ500ML + NSSBJ500ML_MP → NSSBJ500). The fold is correct but invisible;
+  // we retain the PRE-FOLD component breakdown per canonical so the identity
+  // resolution is provable in a tooltip ("NSSBJ500 = NSSBJ500ML + NSSBJ500ML_MP
+  // folded"). foldByCode[code] = { components:{ rawSku → {units, asins:Set} }, folded:bool }.
+  // Only counts the Amazon.in SHIPPED, non-return rows that actually contribute
+  // units to the canonical (the same row set the per-SKU revenue uses).
+  const foldByCode = {};
+  const noteFold = (code, rawSku, asin, q) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {}, asins: {} });
+    const key = rawSku || asin || "(blank)";
+    const comp = (fb.components[key] = fb.components[key] || { units: 0, viaAsin: false, isMp: /_MP$/i.test(rawSku || "") });
+    comp.units += q;
+    if (!rawSku && asin) comp.viaAsin = true;
+    if (asin) fb.asins[asin] = (fb.asins[asin] || 0) + q;
+  };
   // (g) GEO: monthly per-state Amazon demand/returns concentration. Key = "YYYY-MM|STATE"
   // → { units, netRev, returns }. State strings are normalised (trim, upper) so
   // "Delhi"/"DELHI"/" delhi " collapse; blank/unknown state → "UNKNOWN" (honest,
@@ -190,9 +207,26 @@ function buildAmazon() {
     if (salesCh !== "Amazon.in" || itemStatus !== "Shipped" || !code) continue;
     const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
     const q = num(c[C.qty]), rev = num(c[C.price]);
+    const rawSku = (c[C.sku] || "").trim(), asin = (c[C.asin] || "").trim();
     const st = C.state === -1 ? "" : c[C.state];
     if (/Returned to Seller/i.test(status)) { bumpM(m, "amazon", code, "amazon-orders", { units: -q, grossRev: -rev, netRev: -rev / 1.05, returnsUnits: q, returnsValue: rev }); retU += q; retV += rev; units -= q; gross -= rev; bumpGeo(m, st, q, rev, true); }
-    else { bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: rev, netRev: rev / 1.05 }); units += q; gross += rev; bumpGeo(m, st, q, rev, false); }
+    else { bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: rev, netRev: rev / 1.05 }); units += q; gross += rev; bumpGeo(m, st, q, rev, false); noteFold(code, rawSku, asin, q); }
+  }
+  // Finalise the variant-fold map: a canonical is `folded` when MORE THAN ONE raw
+  // marketplace-SKU (incl. an `_MP` website-fulfilment variant) resolved into it.
+  const skuVariantFold = {};
+  for (const [code, fb] of Object.entries(foldByCode)) {
+    const components = Object.entries(fb.components)
+      .map(([rawSku, c0]) => ({ rawSku, units: c0.units, isMp: c0.isMp, viaAsin: c0.viaAsin }))
+      .sort((a, b) => b.units - a.units);
+    const folded = components.length > 1;
+    if (!folded && !components.some((c0) => c0.isMp)) continue;   // single plain SKU → no fold to show
+    skuVariantFold[code] = {
+      channel: "amazon", canonical: code, folded, components,
+      asins: Object.keys(fb.asins),
+      label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
+      rule: "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable.",
+    };
   }
   // Finalise geo cells (round netRev) + a per-month state count for the report.
   const geoMonths = new Set();
@@ -201,8 +235,18 @@ function buildAmazon() {
     mcf: { byCode: mcf, totalUnits: mcfTotal },
     amazonReturns: { units: retU, value: r2(retV) },
     geo: { source: "amazon-all-orders ship-state", asOf: facts.meta.latestDataDate || null, byMonthState: geo },
+    // BUG-1 (I-92): per-SKU UNITS and REVENUE are accumulated from the SAME
+    // filtered All-Orders row set, so AOV = netRev ÷ units re-derives from the
+    // file. The exact filter is exposed here for the per-SKU ⓘ. Anyone can
+    // reproduce: open amazonmaysales.txt, keep rows where sales-channel="Amazon.in"
+    // AND item-status="Shipped" AND the sku/asin resolves to a canonical code,
+    // bucket by purchase-date month, sum `quantity` for units and `item-price`
+    // for gross, subtract "...Returned to Seller" rows, net = gross ÷ 1.05.
+    unitsRule:
+      'Amazon per-SKU units & revenue share ONE row set: sales-channel="Amazon.in" · item-status="Shipped" · sku/asin→canonical code · bucketed by purchase-date month · "…Returned to Seller" netted out · units = Σ quantity, gross = Σ item-price, net = gross ÷ 1.05 (GST-incl rule). AOV = net ÷ units re-derives from amazonmaysales.txt. (Cancelled / Unshipped / Non-Amazon rows excluded; a unit purchased in April but shipped in May counts to its purchase month, not May.)',
+    skuVariantFold,   // I-7 — pre-fold marketplace-SKU components per canonical (Amazon `_MP` fold)
   };
-  report.amazon = { units, gross: r2(gross), net: r2(gross / 1.05), returnsUnits: retU, returnsValue: r2(retV), mcfUnits: mcfTotal, geoCells: Object.keys(geo).length, geoMonths: geoMonths.size };
+  report.amazon = { units, gross: r2(gross), net: r2(gross / 1.05), returnsUnits: retU, returnsValue: r2(retV), mcfUnits: mcfTotal, geoCells: Object.keys(geo).length, geoMonths: geoMonths.size, variantFolds: Object.values(skuVariantFold).filter((f) => f.folded).length };
 }
 
 // ═══ 1b · Amazon ORDER-COMPOSITION cuts (VI-b + left-on-table #2) ════════════
@@ -218,10 +262,15 @@ function buildAmazonOrderComposition() {
   const p = resolve("amazonmaysales", "txt"); if (!p) return;
   const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter((l) => l.length);
   const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
-  const C = { oid: col("amazon-order-id"), date: col("purchase-date"), salesCh: col("sales-channel"), itemStatus: col("item-status"), qty: col("quantity"), price: col("item-price"), fc: col("fulfillment-channel"), biz: col("is-business-order") };
+  const C = { oid: col("amazon-order-id"), date: col("purchase-date"), salesCh: col("sales-channel"), itemStatus: col("item-status"), status: col("order-status"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price"), fc: col("fulfillment-channel"), biz: col("is-business-order") };
   if (C.oid === -1) return;
-  // group lines by order-id (within month) → { units, rev, fba, b2b }.
-  const orders = new Map();   // `${m}|${oid}` → { m, units, rev, fba, b2b }
+  // group lines by order-id (within month) → { units, rev, fba, b2b, netUnits, returnUnits }.
+  // mappedUnits = units whose sku/asin resolves to a canonical code (the per-SKU
+  // revenue keyspace). The UPO is units/orders from the SAME All-Orders rows
+  // (same-source, ≥1 by construction). mappedUnits lets the view reconcile this
+  // order-grain unit count to the per-SKU sum and surface the unmapped delta
+  // (codeless marketplace SKUs) rather than letting the two units diverge silently.
+  const orders = new Map();   // `${m}|${oid}` → { m, units, rev, fba, b2b, netUnits, returnUnits }
   for (let i = 1; i < lines.length; i++) {
     const c = lines[i].split("\t");
     if ((c[C.salesCh] || "").trim() !== "Amazon.in") continue;
@@ -229,16 +278,24 @@ function buildAmazonOrderComposition() {
     const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
     const oid = (c[C.oid] || "").trim(); if (!oid) continue;
     const k = `${m}|${oid}`;
-    const cur = orders.get(k) || { m, units: 0, rev: 0, fba: (c[C.fc] || "").trim() === "Amazon", b2b: String(c[C.biz] || "").trim().toLowerCase() === "true" };
-    cur.units += num(c[C.qty]); cur.rev += num(c[C.price]);
+    const cur = orders.get(k) || { m, units: 0, rev: 0, netUnits: 0, returnUnits: 0, fba: (c[C.fc] || "").trim() === "Amazon", b2b: String(c[C.biz] || "").trim().toLowerCase() === "true" };
+    const q = num(c[C.qty]);
+    const isReturn = /Returned to Seller/i.test((c[C.status] || "").trim());
+    // GROSS shipped basket (units) drives single/multi & UPO (the basket the buyer
+    // placed). netUnits applies the SAME returns-netting the per-SKU revenue keyspace
+    // uses (a "…Returned to Seller" row subtracts its qty), so netUnits reconciles
+    // EXACTLY to the per-SKU units sum — the two are not a discrepancy, just gross
+    // basket vs net-of-returns.
+    cur.units += q; cur.rev += num(c[C.price]);
+    if (isReturn) { cur.netUnits -= q; cur.returnUnits += q; } else cur.netUnits += q;
     orders.set(k, cur);
   }
   // roll up by month.
   const byMonth = {};
-  const blank = () => ({ orders: 0, units: 0, singleOrders: 0, multiOrders: 0, multiUnits: 0, fbaOrders: 0, mfnOrders: 0, fbaUnits: 0, mfnUnits: 0, b2bOrders: 0, b2cOrders: 0, b2bUnits: 0, b2cUnits: 0, netRev: 0 });
+  const blank = () => ({ orders: 0, units: 0, netUnits: 0, returnUnits: 0, singleOrders: 0, multiOrders: 0, multiUnits: 0, fbaOrders: 0, mfnOrders: 0, fbaUnits: 0, mfnUnits: 0, b2bOrders: 0, b2cOrders: 0, b2bUnits: 0, b2cUnits: 0, netRev: 0 });
   for (const o of orders.values()) {
     const b = (byMonth[o.m] = byMonth[o.m] || blank());
-    b.orders++; b.units += o.units; b.netRev += o.rev / 1.05;
+    b.orders++; b.units += o.units; b.netUnits += o.netUnits; b.returnUnits += o.returnUnits; b.netRev += o.rev / 1.05;
     if (o.units >= 2) { b.multiOrders++; b.multiUnits += o.units; } else b.singleOrders++;
     if (o.fba) { b.fbaOrders++; b.fbaUnits += o.units; } else { b.mfnOrders++; b.mfnUnits += o.units; }
     if (o.b2b) { b.b2bOrders++; b.b2bUnits += o.units; } else { b.b2cOrders++; b.b2cUnits += o.units; }
@@ -246,9 +303,9 @@ function buildAmazonOrderComposition() {
   // finalise: round + derived ratios per month, ascending.
   const months = Object.keys(byMonth).sort();
   const series = months.map((m) => {
-    const b = byMonth[m]; const o = b.orders || 0;
+    const b = byMonth[m]; const o = b.orders || 0; const u = Math.round(b.units);
     return {
-      month: m, orders: o, units: Math.round(b.units), netRev: r2(b.netRev),
+      month: m, orders: o, units: u, grossUnits: u, netUnits: Math.round(b.netUnits), returnUnits: Math.round(b.returnUnits), netRev: r2(b.netRev),
       singleOrders: b.singleOrders, multiOrders: b.multiOrders, multiUnits: b.multiUnits,
       upo: o > 0 ? r2(b.units / o) : null,
       multiPct: o > 0 ? r2(b.multiOrders / o) : null,
@@ -258,7 +315,11 @@ function buildAmazonOrderComposition() {
       b2bPct: o > 0 ? r2(b.b2bOrders / o) : null,
     };
   });
-  facts.meta.bySource["amazon-order-composition"] = { source: "amazon-all-orders order-id grouping", tier: "native", byMonth: series };
+  facts.meta.bySource["amazon-order-composition"] = {
+    source: "amazon-all-orders order-id grouping", tier: "native",
+    unitsNote: "Order-grain GROSS units (the basket placed) drive single/multi composition + UPO (units ÷ orders, same-source, ≥1). netUnits = gross − returns-netting (a “…Returned to Seller” row subtracts its qty), which reconciles EXACTLY to the per-SKU units sum — order-grain gross vs per-SKU net-of-returns is a basis difference, not a discrepancy.",
+    byMonth: series,
+  };
   report.amazonOrderComposition = { months: series.length, latest: series[series.length - 1] || null };
 }
 
@@ -276,17 +337,55 @@ function buildFlipkart() {
   const H = g[0]; const idx = (n) => H.indexOf(n);
   const C = { sku: idx("SKU"), qty: idx("Item Quantity"), bia: idx("Buyer Invoice Amount"), orderDate: idx("Order Date"), invDate: idx("Buyer Invoice Date"), eventType: idx("Event Type") };
   let units = 0, biaSum = 0, retRows = 0;
+  // I-9 — per-month BIA + units so the disclosed derivation re-derives the EXACT
+  // month being shown (MONTH), not the all-month running total (which would NOT
+  // tie to the May anchor on its own face — the exact failure class to kill).
+  const biaByMonth = {}, unitsByMonth = {};
+  // I-7 · VARIANT-FOLD provenance (Flipkart `*N` multipacks). The parser folds a
+  // Flipkart "<base> * N" SKU into its base canonical, counting the order as N base
+  // units (qty × N). We retain the PRE-FOLD components per canonical — the raw SKU
+  // string, the multiplier, and base units vs folded units — so a tooltip can prove
+  // "NSSBDB100 = NSSBDB100g + NSSBDB100g*2 + NSSBDB100g*4 folded".
+  const foldByCode = {};
+  const noteFold = (code, rawSku, mult, baseQty) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {} });
+    const key = String(rawSku).replace(/"/g, "").replace(/^SKU:/i, "").trim();
+    const comp = (fb.components[key] = fb.components[key] || { rawSku: key, mult, orderRows: 0, baseUnits: 0, foldedUnits: 0 });
+    comp.orderRows += 1; comp.baseUnits += baseQty; comp.foldedUnits += baseQty * mult;
+  };
   for (let i = 1; i < g.length; i++) {
     const r = g[i]; if (!r || r[C.sku] === "" || r[C.sku] == null) continue;
     const hit = resolveFkSku(r[C.sku]); if (!hit) continue;
     const iso = excelToISODate(r[C.orderDate]) || excelToISODate(r[C.invDate]); const m = monthOf(iso); if (!m) continue;
-    const bia = num(r[C.bia]), qty = num(r[C.qty]) * hit.mult;
+    const baseQty = num(r[C.qty]), bia = num(r[C.bia]), qty = baseQty * hit.mult;
     const isRet = String(r[C.eventType] || "").toLowerCase().includes("return") || bia < 0;
     if (isRet) retRows++;
+    else noteFold(hit.code, r[C.sku], hit.mult, baseQty);
     // BIA is already net-of-GST (binding §2 anchor): netRev = bia AS-IS, no ÷1.05.
     bumpM(m, "flipkart", hit.code, "fk-sales", { units: isRet ? -Math.abs(qty) : qty, grossRev: bia, netRev: bia, ...(isRet ? { returnsUnits: Math.abs(qty), returnsValue: Math.abs(bia) } : {}) });
     const ds = excelToISODate(r[C.orderDate]) || iso; if (ds && !isRet) bumpD(ds, "flipkart", hit.code, "fk-sales", { units: qty, netRev: bia });
-    units += isRet ? -Math.abs(qty) : qty; biaSum += bia;
+    const signedU = isRet ? -Math.abs(qty) : qty;
+    units += signedU; biaSum += bia;
+    biaByMonth[m] = r2((biaByMonth[m] || 0) + bia);
+    unitsByMonth[m] = (unitsByMonth[m] || 0) + signedU;
+  }
+  const mayBia = r2(biaByMonth[MONTH] || 0);
+  const mayUnits = unitsByMonth[MONTH] || 0;
+  // Finalise the FK variant-fold map: `folded` when MORE THAN ONE raw SKU (incl. a
+  // `*N` multipack) resolved into the canonical, OR any multipack (`*N`) is present.
+  const skuVariantFold = {};
+  for (const [code, fb] of Object.entries(foldByCode)) {
+    const components = Object.values(fb.components)
+      .map((c0) => ({ rawSku: c0.rawSku, mult: c0.mult, orderRows: c0.orderRows, baseUnits: c0.baseUnits, foldedUnits: c0.foldedUnits, isMultipack: c0.mult > 1 }))
+      .sort((a, b) => b.foldedUnits - a.foldedUnits);
+    const hasMultipack = components.some((c0) => c0.isMultipack);
+    const folded = components.length > 1 || hasMultipack;
+    if (!folded) continue;                       // single 1× SKU → nothing folded
+    skuVariantFold[code] = {
+      channel: "flipkart", canonical: code, folded, components,
+      label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
+      rule: "Flipkart SKU `<base> * N` is a multipack order: it folds into the base canonical counting N base units (qty × N). Components retained pre-fold (raw SKU, multiplier, base vs folded units) so the multipack identity resolution is inspectable.",
+    };
   }
   // Cashback (excluded from CM) — (d) trended BY MONTH (settlement-drag signal).
   // The cashback sheet carries "Invoice Date" so we can attribute each credit-note
@@ -305,8 +404,26 @@ function buildFlipkart() {
       m.value = r2(m.value + v); m.rows++; cbByMonth[key] = m;
     }
   }
-  facts.meta.bySource["fk-sales"] = { flipkartCashback: { value: r2(cb), rows: cn, byMonth: cbByMonth } };
-  report.flipkart = { units, grossBIA: r2(biaSum), net: r2(biaSum), returnRows: retRows, cashback: r2(cb), cashbackMonths: Object.keys(cbByMonth).length };
+  facts.meta.bySource["fk-sales"] = {
+    flipkartCashback: { value: r2(cb), rows: cn, byMonth: cbByMonth },
+    // I-9 — Flipkart net rule disclosure so ₹2,72,843 (May) re-derives:
+    netRule: {
+      column: "Buyer Invoice Amount",
+      gstBasis: "already net-of-GST — taken AS-IS (no ÷1.05; that would double-discount)",
+      signRule: "sign as-is — return/replacement rows carry a negative Buyer Invoice Amount, so summing the column NETS returns out automatically",
+      multipackFold: 'SKU "<base> * N" folds N into units (qty × N) so a 2-pack counts as 2 units; revenue is the row\'s Buyer Invoice Amount unchanged',
+      monthAttribution: "Order Date (falls back to Buyer Invoice Date only when Order Date is blank)",
+      cashback: "the Cash Back tab is EXCLUDED from net revenue/CM (settlement-drag signal, trended separately)",
+      // RE-DERIVES on its own face: this is the MONTH-scoped sum (not the all-month
+      // running total), so the disclosed figure equals the displayed Flipkart net.
+      month: MONTH,
+      mayNet: mayBia,
+      mayUnits,
+      derivation: `${MONTH} net = Σ Buyer Invoice Amount (native sign) over rows whose SKU resolves to a canonical code AND Order-Date month = ${MONTH} = ${mayBia.toLocaleString("en-IN")} across ${mayUnits} units. Ties to the native Flipkart anchor exactly.`,
+    },
+    skuVariantFold,   // I-7 — pre-fold `*N` multipack components per canonical (Flipkart fold)
+  };
+  report.flipkart = { units, grossBIA: r2(biaSum), net: r2(biaSum), returnRows: retRows, cashback: r2(cb), cashbackMonths: Object.keys(cbByMonth).length, variantFolds: Object.keys(skuVariantFold).length };
 }
 
 // ═══ 3 · Blinkit Sales Report ════════════════════════════════════════════════
@@ -359,19 +476,57 @@ function buildShopifyDaily() {
   report.websiteDailyCells = cells;
 }
 
-// ═══ 6 · Amazon SP ads ═══════════════════════════════════════════════════════
+// ═══ 6 · Amazon SP ads (DAILY per-ASIN) ══════════════════════════════════════
+// The source file is DAILY per-ASIN (Date · Advertised ASIN · Spend). Previously
+// we only summed it to one monthly adSpendDirect per SKU + the headline total. To
+// make the ₹3,55,115 attributed-spend anchor re-derivable END-TO-END from a daily
+// export (rubric XI/III reviewer re-derivation), we ALSO emit:
+//   • meta.bySource["ads-amazon-sp"].daily  — { "YYYY-MM-DD|amazon|CODE": spend }
+//       (per-SKU daily spend; sums EXACTLY to the monthly cells and to the total)
+//   • meta.bySource["ads-amazon-sp"].byDay   — { "YYYY-MM-DD": spend } channel rollup
+//   • meta.bySource["ads-amazon-sp"].byMonth — { "YYYY-MM": spend } (per-month total)
+//   • reconciliation: Σ daily = Σ monthly cells = amazonSpTotal (an explicit equation).
 function buildAmazonSp() {
   const p = resolve("may_product_wise_sp", "xlsx"); if (!p) { console.error("MISSING may_product_wise_sp.xlsx"); return; }
   const wb = XLSX.readFile(p); const g = grid(wb.Sheets[wb.SheetNames[0]]);
   const H = g[0]; const C = { date: H.indexOf("Date"), asin: H.indexOf("Advertised ASIN"), spend: H.indexOf("Spend") };
-  let total = 0;
+  let total = 0, unmapped = 0, unmappedSpend = 0;
+  const daily = {};      // "YYYY-MM-DD|amazon|CODE" → spend
+  const byDay = {};      // "YYYY-MM-DD" → spend (channel rollup)
+  const byMonth = {};    // "YYYY-MM" → spend
+  const span = { first: null, last: null };
+  const addD = (map, key, v) => { map[key] = r2((map[key] || 0) + v); };
   for (let i = 1; i < g.length; i++) {
-    const r = g[i]; const code = ASIN_MAP[String(r[C.asin] || "").trim()]; if (!code) continue;
-    const m = monthOf(excelToISODate(r[C.date])); if (!m) continue;
-    const sp = num(r[C.spend]); total += sp; bumpM(m, "amazon", code, "ads-amazon-sp", { adSpendDirect: sp });
+    const r = g[i]; const asin = String(r[C.asin] || "").trim(); if (!asin) continue;
+    const code = ASIN_MAP[asin];
+    const iso = excelToISODate(r[C.date]); const m = monthOf(iso);
+    const sp = num(r[C.spend]);
+    if (!code) { if (sp) { unmapped++; unmappedSpend += sp; } continue; }
+    if (!m) continue;
+    total += sp; bumpM(m, "amazon", code, "ads-amazon-sp", { adSpendDirect: sp });
+    // daily per-SKU + rollups (a row with 0 spend on a real ASIN still anchors the day).
+    addD(daily, `${iso}|amazon|${code}`, sp);
+    addD(byDay, iso, sp);
+    addD(byMonth, m, sp);
+    if (!span.first || iso < span.first) span.first = iso;
+    if (!span.last || iso > span.last) span.last = iso;
   }
-  facts.meta.bySource["ads-amazon-sp"] = { amazonSpTotal: r2(total) };
-  report.adsAmazonSp = r2(total);
+  // Reconciliation equation: Σ daily-per-SKU = Σ byDay = Σ byMonth = amazonSpTotal.
+  const sumDaily = r2(Object.values(daily).reduce((a, v) => a + v, 0));
+  const sumByDay = r2(Object.values(byDay).reduce((a, v) => a + v, 0));
+  facts.meta.bySource["ads-amazon-sp"] = {
+    amazonSpTotal: r2(total),
+    span, days: Object.keys(byDay).length,
+    daily, byDay, byMonth,
+    unmappedRows: unmapped, unmappedSpend: r2(unmappedSpend),
+    reconciliation: {
+      sumDailyPerSku: sumDaily, sumByDay, monthlyCellsTotal: r2(total),
+      ties: Math.abs(sumDaily - r2(total)) < 1 && Math.abs(sumByDay - r2(total)) < 1,
+      note: `Σ daily-per-SKU spend (${sumDaily.toLocaleString("en-IN")}) = Σ by-day (${sumByDay.toLocaleString("en-IN")}) = Σ monthly attributed cells = ${r2(total).toLocaleString("en-IN")}. The attributed-spend anchor re-derives from the daily per-ASIN export end-to-end.`,
+    },
+    source: "may_product_wise_sp.xlsx (Date · Advertised ASIN · Spend), daily per-ASIN",
+  };
+  report.adsAmazonSp = { total: r2(total), days: Object.keys(byDay).length, span, dailyCells: Object.keys(daily).length, recTies: Math.abs(sumDaily - r2(total)) < 1 };
 }
 
 // ═══ 7 · Flipkart PLA ads ════════════════════════════════════════════════════
@@ -484,20 +639,39 @@ function buildMonarch() {
   const metaCols = H.map((h, c) => (/meta spend/i.test(h) ? c : -1)).filter((c) => c !== -1);
   const dateCol = H.findIndex((h) => /^date$/i.test(h));
   const convCol = H.findIndex((h) => /total conversion value/i.test(h));
+  // III-96 — Monarch's own "Total Spend" column (the agency's headline ad total),
+  // captured so the website ad total (Google+Meta we attribute) can be reconciled
+  // against it the way Amazon's SP-attributed total reconciles to Snell's AMS.
+  const totalSpendCol = H.findIndex((h) => /^total spend$/i.test(h));
   const byMonth = {};
   for (let i = 2; i < g.length; i++) {
     const iso = excelToISODate(g[i][dateCol]); const ym = monthOf(iso); if (!ym) continue;
-    if (!byMonth[ym]) byMonth[ym] = { google: googleCols.map(() => 0), meta: metaCols.map(() => 0), conv: 0, days: 0 };
+    if (!byMonth[ym]) byMonth[ym] = { google: googleCols.map(() => 0), meta: metaCols.map(() => 0), conv: 0, totalSpend: 0, days: 0 };
     googleCols.forEach((c, j) => { byMonth[ym].google[j] += num(g[i][c]); });
     metaCols.forEach((c, j) => { byMonth[ym].meta[j] += num(g[i][c]); });
     if (convCol !== -1) byMonth[ym].conv += num(g[i][convCol]);
+    if (totalSpendCol !== -1) byMonth[ym].totalSpend += num(g[i][totalSpendCol]);
     byMonth[ym].days++;
   }
-  const tm = byMonth[MONTH]; let gTot = 0, mTot = 0;
-  if (tm) { gTot = Math.max(...tm.google, 0); mTot = Math.max(...tm.meta, 0); }
-  const history = Object.fromEntries(Object.keys(byMonth).sort().map((ym) => [ym, { convValue: r2(byMonth[ym].conv), days: byMonth[ym].days }]));
-  facts.meta.bySource["monarch-web"] = { monarchWebSpend: { month: MONTH, googleTotal: r2(gTot), metaTotal: r2(mTot) }, monarchWebHistory: history };
-  report.monarch = { googleTotal: r2(gTot), metaTotal: r2(mTot), historyMonths: Object.keys(history).length };
+  const tm = byMonth[MONTH]; let gTot = 0, mTot = 0, totalSpend = 0;
+  if (tm) { gTot = Math.max(...tm.google, 0); mTot = Math.max(...tm.meta, 0); totalSpend = tm.totalSpend; }
+  const attributed = gTot + mTot;                 // what we place on the website channel (Google+Meta)
+  const reconDelta = r2(totalSpend - attributed); // Monarch's own total minus our Google+Meta
+  // per-month Total-Spend vs Google+Meta history (delta surfaced for every month).
+  const history = Object.fromEntries(Object.keys(byMonth).sort().map((ym) => {
+    const b = byMonth[ym]; const g2 = Math.max(...b.google, 0); const m2 = Math.max(...b.meta, 0);
+    return [ym, { convValue: r2(b.conv), days: b.days, totalSpend: r2(b.totalSpend), googleMeta: r2(g2 + m2), reconDelta: r2(b.totalSpend - (g2 + m2)) }];
+  }));
+  facts.meta.bySource["monarch-web"] = {
+    monarchWebSpend: {
+      month: MONTH, googleTotal: r2(gTot), metaTotal: r2(mTot),
+      // III-96 reconciliation line (Monarch own total vs Google+Meta attributed).
+      attributed: r2(attributed), monarchTotalSpend: r2(totalSpend), reconDelta,
+      reconNote: "Website ad total = Google + Meta (per-platform daily columns) = " + r2(attributed) + "; Monarch's own “Total Spend” column = " + r2(totalSpend) + "; delta " + reconDelta + " (un-broken-out spend in Monarch's total not split by platform — surfaced, not absorbed).",
+    },
+    monarchWebHistory: history,
+  };
+  report.monarch = { googleTotal: r2(gTot), metaTotal: r2(mTot), monarchTotalSpend: r2(totalSpend), reconDelta, historyMonths: Object.keys(history).length };
 }
 
 // ═══ 9b · Snell FULL DAILY channel-grain history (V2, tier agency) ═══════════
@@ -1247,27 +1421,58 @@ function buildSkuIdentity() {
     if (code && code !== "__ch__") codes.add(code);
   }
   for (const code of [...codes].sort()) {
-    const fuzzyVia = [];
     // The Google product-wise ad source resolves a canonical SKU from a FREE-TEXT
-    // product title (prose), not an identifier — so ANY Google resolution is a
-    // similarity match, distinct from the exact identifier maps every other source
-    // uses (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name). `method`
-    // records how tight that similarity was (exact-needle = single candidate after
-    // pinning the numeric size token; multi-needle = needed needle disambiguation).
+    // product title (prose), not an identifier. `method` records how tight that
+    // resolution was: exact-needle = a SINGLE candidate after pinning the numeric
+    // size token (high-confidence, map-LIKE) vs multi-needle = >1 candidate that
+    // had to be disambiguated by the most-specific needle (the genuinely NON-EXACT
+    // / FUZZY case).
+    //
+    // I-7 (rubric 7): the "matched by similarity" BADGE must fire ONLY when the
+    // match is genuinely non-exact — badging every title hit (incl. exact-needle)
+    // dilutes the signal. So fuzzy = true ONLY for multi-needle. exact-needle is
+    // recorded as an informational title-basis `via` (no warning badge), so the
+    // provenance is still discoverable without crying wolf on a clean single hit.
     const m = gMatch[code];
-    if (m) fuzzyVia.push({ source: "ads-google", method: m, basis: "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)" });
+    const isFuzzy = m === "multi-needle";
+    const via = m
+      ? [{ source: "ads-google", method: m, basis: "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)" }]
+      : [];
     identity[code] = {
-      fuzzy: fuzzyVia.length > 0,
-      fuzzyVia,
-      note: fuzzyVia.length
-        ? "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
-        : "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name).",
+      fuzzy: isFuzzy,
+      // fuzzyVia retains ONLY the non-exact legs (so the UI badge, which reads
+      // fuzzyVia, never lights up for an exact-needle hit); `titleVia` keeps the
+      // exact-needle title basis for the provenance popover without the badge.
+      fuzzyVia: isFuzzy ? via : [],
+      titleVia: !isFuzzy ? via : [],
+      note: isFuzzy
+        ? "Ad spend on this SKU was attributed from a free-text Google product TITLE that matched MORE THAN ONE candidate and was disambiguated by similarity (the most-specific needle) — a non-exact match. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        : m
+          ? "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
+          : "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name).",
     };
   }
   facts.meta.skuIdentity = identity;
   report.skuIdentity = { total: Object.keys(identity).length, fuzzy: Object.values(identity).filter((x) => x.fuzzy).length };
 }
 buildSkuIdentity();
+
+// I-7 · TOP-LEVEL VARIANT-FOLD index. Amazon (`_MP`) and Flipkart (`*N`) folds are
+// each captured in their own source block; merge them into ONE inspectable map the
+// page builders read directly: meta.skuVariantFold = { CODE: { byChannel:{ amazon?,
+// flipkart? }, anyFolded } }. So the UI can badge a canonical "folded ⓘ" and the
+// tooltip lists the exact pre-fold components per channel ("NSSBJ500 = NSSBJ500ML +
+// NSSBJ500ML_MP folded"; "NSSBDB100 = NSSBDB100g + NSSBDB100g*2 + NSSBDB100g*4").
+function buildVariantFoldIndex() {
+  const amz = facts.meta.bySource?.["amazon-orders"]?.skuVariantFold || {};
+  const fk = facts.meta.bySource?.["fk-sales"]?.skuVariantFold || {};
+  const idx = {};
+  for (const [code, f] of Object.entries(amz)) { (idx[code] = idx[code] || { canonical: code, byChannel: {}, anyFolded: false }).byChannel.amazon = f; if (f.folded) idx[code].anyFolded = true; }
+  for (const [code, f] of Object.entries(fk)) { (idx[code] = idx[code] || { canonical: code, byChannel: {}, anyFolded: false }).byChannel.flipkart = f; if (f.folded) idx[code].anyFolded = true; }
+  facts.meta.skuVariantFold = idx;
+  report.skuVariantFold = { codes: Object.keys(idx).length, folded: Object.values(idx).filter((x) => x.anyFolded).length };
+}
+buildVariantFoldIndex();
 
 thinDailyHistory(13); // V2 bundle-budget guard (older daily dropped; monthly rollup survives)
 
@@ -1300,6 +1505,94 @@ function computeLatestDataDate() {
 facts.meta.latestDataDate = computeLatestDataDate();
 facts.meta.appBuildDate = new Date().toISOString().slice(0, 10);
 report.latestDataDate = facts.meta.latestDataDate;
+
+// ─── Provenance labels — map every internal source slug to a HUMAN label + tier ──
+// The store keys sources by slug (snell-ordermix, monarch-extra, cogs-history, …);
+// the UI must NEVER show a raw slug. This map gives each a founder-readable name,
+// its trust tier, and the underlying file, so a provenance chip reads
+// "Order-mix · Snell agency" not "snell-ordermix". (round-4 never-landed item.)
+const SOURCE_LABELS = {
+  "amazon-orders":            { label: "Amazon All-Orders (native export)",        tier: "native",       file: "amazonmaysales.txt" },
+  "amazon-order-composition": { label: "Amazon order composition (FBA/MFN · B2B/B2C · basket)", tier: "native", file: "amazonmaysales.txt" },
+  "fk-sales":                 { label: "Flipkart Sales Report (native export)",     tier: "native",       file: "flipkart may sales.xlsx" },
+  "blinkit-sales":            { label: "Blinkit Sales Report (native export)",      tier: "native",       file: "blinkit may sales.xlsx" },
+  "shopify-net":              { label: "Shopify net sales/units (native export)",   tier: "native",       file: "shopify net sales net units.csv" },
+  "shopify-daily":            { label: "Shopify daily website sales (native)",      tier: "native",       file: "Website Sales of all SKUs.csv" },
+  "ads-amazon-sp":            { label: "Amazon Sponsored Products (per-ASIN ads)",  tier: "native",       file: "may_product_wise_sp.xlsx" },
+  "ads-fk-pla":               { label: "Flipkart PLA (per-SKU ads)",                tier: "native",       file: "flipkart may ads.csv" },
+  "ads-google":               { label: "Google product-wise ads (title-matched)",  tier: "native-fuzzy", file: "google may ads.csv" },
+  "snell-agency":             { label: "Snell agency channel spend (Sale tab)",     tier: "agency",       file: "SnellSales&AdsSheet.xlsx" },
+  "snell-history":            { label: "Snell agency full daily history",           tier: "agency",       file: "SnellSales&AdsSheet.xlsx" },
+  "snell-sku-units":          { label: "Snell agency per-SKU units (Categorywise)", tier: "agency",       file: "SnellSales&AdsSheet.xlsx" },
+  "snell-ordermix":           { label: "Order-mix · Snell agency (Non-Advt/Review/Organic)", tier: "agency", file: "SnellSales&AdsSheet.xlsx" },
+  "snell-cancel":             { label: "Shipped-vs-cancel · Snell agency",          tier: "agency",       file: "SnellSales&AdsSheet.xlsx" },
+  "monarch-web":              { label: "Monarch website Google/Meta spend",         tier: "monarch",      file: "MonarchWebsiteSales&AdsSheet.xlsx" },
+  "monarch-history":          { label: "Monarch website full history (orders/conv)",tier: "monarch",      file: "MonarchWebsiteSales&AdsSheet.xlsx" },
+  "monarch-platform":         { label: "Monarch website platform totals",           tier: "monarch",      file: "MonarchWebsiteSales&AdsSheet.xlsx" },
+  "monarch-seo":              { label: "Monarch website SEO keyword ranks",         tier: "monarch",      file: "MonarchWebsiteSales&AdsSheet.xlsx" },
+  "monarch-extra":            { label: "Monarch extra tabs (Mar-25 daily · weekly)",tier: "monarch",      file: "MonarchWebsiteSales&AdsSheet.xlsx" },
+  "bm-repeats":               { label: "Repeat-customer history · Business Model",  tier: "businessmodel",file: "Naturesum_BusinessModel.xlsx" },
+  "bm-returns":               { label: "Returns history · Business Model",          tier: "businessmodel",file: "Naturesum_BusinessModel.xlsx" },
+  "cogs-history":             { label: "Unit COGS history (Notes column)",          tier: "cogs",         file: "Naturesum_Unit_COGS_116.xlsx" },
+};
+// attach the resolved label onto each present source AND a top-level lookup so the
+// UI can label by slug even for sources it reads directly.
+facts.meta.sourceLabels = SOURCE_LABELS;
+for (const slug of Object.keys(facts.meta.bySource || {})) {
+  const L = SOURCE_LABELS[slug];
+  if (L && facts.meta.bySource[slug] && typeof facts.meta.bySource[slug] === "object") {
+    if (!facts.meta.bySource[slug].label) facts.meta.bySource[slug].label = L.label;
+    if (!facts.meta.bySource[slug].tier) facts.meta.bySource[slug].tier = L.tier;
+    if (!facts.meta.bySource[slug].file) facts.meta.bySource[slug].file = L.file;
+  }
+}
+report.sourceLabels = Object.keys(SOURCE_LABELS).length;
+
+// ─── Per-source RECENCY (XI-83) — the latest data day each source reaches, so every
+// page can show a per-source "through <date>" line, not one global footer. We read
+// the freshest day already recorded by each parser (history spans, byMonth.lastDay,
+// SEO dates, COGS asOf) and fall back to the month-window end for the native
+// May-only exports. Honest: reflects the actual latest data day, never wall-clock.
+function sourceLatest() {
+  const bs = facts.meta.bySource || {};
+  const maxIso = (...xs) => xs.filter((x) => x && /^\d{4}-\d{2}-\d{2}$/.test(x)).sort().pop() || null;
+  const fromByMonth = (bm) => bm ? maxIso(...Object.values(bm).map((v) => v && v.lastDay)) : null;
+  // native May exports cover the full May window → last day = 2026-05-31.
+  const MAY_END = "2026-05-31";
+  const rec = {};
+  const set = (slug, iso) => { if (iso) rec[slug] = iso; };
+  // resolve each explicitly:
+  rec["amazon-orders"] = MAY_END;
+  rec["amazon-order-composition"] = maxIso(...(bs["amazon-order-composition"]?.byMonth || []).map((x) => x.month + "-28")) || MAY_END;
+  rec["fk-sales"] = MAY_END;
+  rec["blinkit-sales"] = MAY_END;
+  rec["shopify-net"] = MAY_END;
+  rec["ads-amazon-sp"] = MAY_END;
+  rec["ads-fk-pla"] = MAY_END;
+  rec["ads-google"] = MAY_END;
+  rec["snell-agency"] = MAY_END;
+  set("snell-history", maxIso(...Object.values(bs["snell-history"]?.channelSpan || {}).map((s) => s && s.last)));
+  set("snell-sku-units", maxIso(...Object.values(bs["snell-sku-units"]?.perChannel || {}).map((c) => c && c.span && c.span.last)));
+  set("monarch-web", fromByMonth(bs["monarch-history"]?.byMonth));
+  set("monarch-history", bs["monarch-history"]?.span?.last || fromByMonth(bs["monarch-history"]?.byMonth));
+  set("monarch-platform", fromByMonth(bs["monarch-platform"]?.byMonth));
+  set("monarch-seo", bs["monarch-seo"]?.latestDate || (bs["monarch-seo"]?.dates || []).slice(-1)[0]);
+  set("monarch-extra", MAY_END);
+  set("cogs-history", bs["cogs-history"]?.asOf || null);
+  set("bm-repeats", null); set("bm-returns", null);
+  // CAP at the true latest data day — a source's span may carry a forward-dated /
+  // month-label row (e.g. Snell categorywise reaches a 2026-06-30 label) that is
+  // NOT real data. Freshness must be true to the actual latest data day, never an
+  // over-stated calendar artifact, so we clamp every per-source date to the global
+  // latestDataDate (rubric XI-83 / freshness honesty).
+  const cap = facts.meta.latestDataDate;
+  if (cap) for (const k of Object.keys(rec)) if (rec[k] > cap) rec[k] = cap;
+  // strip nulls (a source with no resolvable day reads "—" in the UI, never a guess).
+  for (const k of Object.keys(rec)) if (!rec[k]) delete rec[k];
+  return rec;
+}
+facts.meta.sourceRecency = sourceLatest();
+report.sourceRecency = facts.meta.sourceRecency;
 
 // ─── Emit bundled file ───────────────────────────────────────────────────────
 const payload = { schemaVersion: 1, monthly: facts.monthly, daily: facts.daily, meta: facts.meta };

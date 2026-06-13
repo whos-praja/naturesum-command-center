@@ -155,6 +155,10 @@ export function deriveChannelAdTotals(facts, month) {
 }
 
 const fin0 = (n) => (Number.isFinite(n) ? n : 0);
+// 2-dp round (mirrors the build's r2) — used only for the additive ⓘ-disclosure
+// fields exposed below; the core rollups keep full precision and are formatted at
+// the page (D.fmtINR/fmtN). NaN/Inf → 0 (numeric-integrity invariant).
+const r2 = (n) => (Number.isFinite(n) ? Math.round(n * 100) / 100 : 0);
 
 function pctOf(part, whole) {
   const w = fin0(whole);
@@ -664,6 +668,15 @@ export function computeCMv2({ facts, month, costs } = {}) {
   }
   const out = { month: m, channels: {}, company: blankRollup(), coverageNote: null };
   let anyAgency = false, anyNative = false;
+  // V-90 — "no-COGS passthrough" leg. A channel whose COGS is UNCOVERED contributes
+  // its netRev (and its fees + ad) to the company totals, but its cm1/cm2/cm3 are
+  // null and excluded from the company CM sums. So a naïve company ladder
+  // (net − cogs − fees − ad) OVER-credits by exactly that channel's
+  // (netRev − fees − adSpend) — its would-be CM3 had COGS been known. We tally this
+  // leg explicitly so the CM3 ⓘ re-derives on its own face:
+  //   cm3 = net − cogs − fees − ad − noCogsPassthrough.
+  let noCogsPassthrough = 0;
+  const noCogsChannels = [];
   for (const ch of [...channels].sort()) {
     const r = computeMonthChannelCM({ facts, month: m, channel: ch, costs: C, coverage: cov });
     out.channels[ch] = r;
@@ -679,10 +692,23 @@ export function computeCMv2({ facts, month, costs } = {}) {
     out.company.cm1 += fin0(r.cm1);
     out.company.cm2 += fin0(r.cm2);
     out.company.cm3 += fin0(r.cm3);
-    if (r.cogsCovered === false || r.cogs == null) out.company.cogsCovered = false;
+    if (r.cogsCovered === false || r.cogs == null) {
+      out.company.cogsCovered = false;
+      // this channel's net flows into company.netRev but its CM3 (null) does not —
+      // the passthrough leg is net − fees − ad (its would-be pre-COGS contribution).
+      const leg = fin0(r.netRev) - fin0(r.fees) - fin0(r.adSpend);
+      noCogsPassthrough += leg;
+      noCogsChannels.push({ channel: ch, netRev: r2(fin0(r.netRev)), fees: r2(fin0(r.fees)), adSpend: r2(fin0(r.adSpend)), leg: r2(leg) });
+    }
   }
   finalizeRollup(out.company);
   out.company.cm4 = null; // CM4 is the v1 native-month path only (fixed alloc)
+  // expose the passthrough leg so the company CM3 ⓘ closes on its own face.
+  out.company.noCogsPassthrough = r2(noCogsPassthrough);
+  out.company.noCogsChannels = noCogsChannels;
+  out.company.ladderNote = noCogsChannels.length
+    ? `Company CM3 = net − COGS − fees − ad − no-COGS passthrough. ${noCogsChannels.map((c) => c.channel).join(", ")} carries net ${noCogsChannels.reduce((a, c) => a + c.netRev, 0).toLocaleString("en-IN")} with COGS UNKNOWN, so its would-be contribution (net − fees − ad = ${r2(noCogsPassthrough).toLocaleString("en-IN")}) is held OUT of CM3 (Unknown ≠ zero) — this is the leg that closes net − cogs − fees − ad to the reported CM3.`
+    : "Company CM3 = net − COGS − fees − ad (all channels COGS-covered; no passthrough leg).";
   out.coverageNote = anyNative && anyAgency ? "mixed: native + agency channels"
     : anyNative ? "all native" : anyAgency ? "all agency" : "no coverage";
   return out;

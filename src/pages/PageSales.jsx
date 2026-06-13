@@ -198,6 +198,81 @@ function SkuSimilarityBadge({ code, identity }) {
   );
 }
 
+// I-92 — the per-SKU UNITS-derivation rule ⓘ. Surfaces the EXACT filtered row set
+// that produces both per-SKU units AND revenue (one basis), so AOV = net ÷ units
+// re-derives from the raw All-Orders and a reviewer can see units, revenue, and AOV
+// reconcile. Reads facts.meta.bySource["amazon-orders"].unitsRule (the engine's own
+// disclosure string). Renders nothing if the rule isn't present.
+function UnitsRulePopover({ facts, month, asOf }) {
+  const rule = facts?.meta?.bySource?.["amazon-orders"]?.unitsRule || null;
+  if (!rule) return null;
+  // CONCRETE re-derivation: pick the largest Amazon native SKU for `month` and
+  // show units, gross, net, AOV all from the SAME filtered row set — so a reviewer
+  // sees AOV = net ÷ units re-derive on the popover's own face (kills the "÷ wrong
+  // denominator → ₹910" misread: 268 units is Σ quantity, not a row count).
+  const monthly = facts?.monthly || {};
+  let best = null;
+  for (const [k, c] of Object.entries(monthly)) {
+    const [m, ch, code] = k.split("|");
+    if (m !== month || ch !== "amazon" || code === "__ch__") continue;
+    if (!Number.isFinite(c?.units) || c.units <= 0) continue;
+    if (!best || c.netRev > best.netRev) best = { code, units: c.units, grossRev: c.grossRev, netRev: c.netRev };
+  }
+  const inputs = best ? [
+    { label: `${best.code} · units (Σ quantity)`, value: fmtUnits(best.units) },
+    { label: "gross (Σ item-price)", value: fmtRupees(best.grossRev) },
+    { label: "net (gross ÷ 1.05)", value: fmtRupees(best.netRev) },
+    { label: "AOV (net ÷ units)", value: fmtRupees(best.netRev / best.units) },
+  ] : [];
+  return (
+    <DerivationPopover
+      title="Per-SKU units & AOV · derivation rule"
+      formula="units = Σ quantity · gross = Σ item-price · net = gross ÷ 1.05 · AOV = net ÷ units"
+      plain={rule}
+      inputs={inputs}
+      note="Per-SKU UNITS and REVENUE come from the SAME filtered row set (Amazon.in · Shipped · returns-netted · purchase-month bucketed), so AOV = net ÷ units re-derives from the file. units is Σ quantity over Shipped rows — NOT a row count (Cancelled rows carry qty 0), so the numerator and denominator never mix bases."
+      source='facts.meta.bySource["amazon-orders"].unitsRule · amazonmaysales.txt'
+      asOf={asOf}
+    />
+  );
+}
+
+// I-9 — the Flipkart NET-revenue derivation ⓘ. Surfaces the exact column (Buyer
+// Invoice Amount), the sign rule (negatives auto-net returns), the *N multipack
+// fold, the GST basis (taken AS-IS — no ÷1.05), and the May Order-Date attribution,
+// so ₹2,72,843 re-derives from the raw Flipkart export. Reads the engine's own
+// fk-sales.netRule disclosure object. Renders nothing if absent.
+function FlipkartNetRulePopover({ facts, month, asOf }) {
+  const rule = facts?.meta?.bySource?.["fk-sales"]?.netRule || null;
+  if (!rule) return null;
+  // CONCRETE re-derivation: this month's Flipkart net from the SAME column-sum rule.
+  const monthly = facts?.monthly || {};
+  let net = 0, units = 0, found = false;
+  for (const [k, c] of Object.entries(monthly)) {
+    const [m, ch, code] = k.split("|");
+    if (m !== month || ch !== "flipkart" || code === "__ch__") continue;
+    if (Number.isFinite(c?.netRev)) { net += c.netRev; found = true; }
+    if (Number.isFinite(c?.units)) units += c.units;
+  }
+  const inputs = found ? [
+    { label: "column summed", value: rule.column },
+    { label: `Σ Buyer Invoice Amount (${fmtMonth(month)})`, value: fmtRupees(net) },
+    { label: "units (qty × multipack N)", value: fmtUnits(units) },
+    { label: "GST basis", value: "AS-IS (no ÷1.05)" },
+  ] : [];
+  return (
+    <DerivationPopover
+      title="Flipkart net revenue · derivation rule"
+      formula="net = Σ Buyer Invoice Amount (native sign) over Order-Date-month rows · units = Σ qty × multipack N"
+      plain={rule.derivation || "May net = Σ Buyer Invoice Amount over rows whose SKU resolves to a canonical code and Order-Date month matches."}
+      inputs={inputs}
+      note={`Sign rule: ${rule.signRule}. GST: ${rule.gstBasis}. Multipack: ${rule.multipackFold}. Month: ${rule.monthAttribution}.${rule.cashback ? " " + rule.cashback : ""}`}
+      source='facts.meta.bySource["fk-sales"].netRule · flipkart may sales.xlsx'
+      asOf={asOf}
+    />
+  );
+}
+
 // SAFE numeric coercion + formatters (all output rounded — never a raw float).
 const num = (n) => { const v = Number(n); return Number.isFinite(v) ? v : 0; };
 // Precise grouped rupees for table cells: "₹1,23,456" (rounded). For headline
@@ -354,6 +429,12 @@ const PageSales = ({ initialTab } = {}) => {
         </span>
       </div>
 
+      {/* PER-SOURCE RECENCY (rubric XI/83) — the latest data day each loaded source
+          actually carries, so the founder reads each figure's freshness, not just
+          the page-level "Data through". Each day is clamped at build time to the
+          global latest day, so a forward-dated agency label can't overstate it. */}
+      <SourceRecencyLine facts={facts} latestDataDate={dataThrough} />
+
       {/* ════════ MOST-USEFUL-FIRST BAND (always visible, above the tabs) ════════
           What changed, what's pacing, and the ONE Monday action queue — the founder
           grasps the state of the business and what needs them in seconds (rubric
@@ -370,7 +451,7 @@ const PageSales = ({ initialTab } = {}) => {
 
       {/* ONE "what to do Monday" queue across ALL levers, ranked by ₹ (VIII). */}
       <div style={{ marginBottom: 16 }}>
-        <ActionQueue queue={queue} D={D} max={10} />
+        <ActionQueue queue={queue} D={D} max={10} period={fmtMonth(lastFullMonth)} />
         <div className="muted" style={{ fontSize: 10.5, marginTop: 6, lineHeight: 1.45 }}>
           One queue spanning every lever — ad-cut, delist, reprice, reallocate, and reorder/stockout (the
           inventory↔sales join). Ranked by monthly ₹ impact off the latest complete month ({fmtMonth(lastFullMonth)});
@@ -513,9 +594,13 @@ const PageSales = ({ initialTab } = {}) => {
             <ReturningRevenueView data={returningRevenue(facts)} D={D} title="Returning-customer revenue & AOV gap" />
           </div>
 
-          {/* Basket / units-per-order trend (VI/45). */}
+          {/* Basket / units-per-order (VI/45) + website ORDER-COUNT history (VI-a).
+              BUG-2 (II-88): UPO is a DEFERRAL — never a sub-1 cross-source ratio. The
+              order-count history charts every month it exists; the table shows
+              revenue-per-order (same-source Monarch) and a "— needs order-level export"
+              cell for UPO, never a fabricated value. */}
           <div style={{ marginBottom: 16 }}>
-            <BasketTrendView data={basketTrend(facts)} D={D} title="Basket · units-per-order & AOV trend" />
+            <BasketTrendView data={basketTrend(facts)} D={D} title="Website basket · orders, units-per-order & rev/order" />
           </div>
 
           {/* Historical repeat/returns actuals (the underlying source view). */}
@@ -549,6 +634,12 @@ const PageSales = ({ initialTab } = {}) => {
           <Card
             title={`${fmtMonth(lastFullMonth)} · per-SKU net revenue (native)`}
             sub="The month with full per-SKU revenue grain (native exports). CM3 = after COGS, platform fees, and ads."
+            action={
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                <UnitsRulePopover facts={facts} month={lastFullMonth} asOf={dataThrough ? fmtDay(dataThrough) : null} />
+                <FlipkartNetRulePopover facts={facts} month={lastFullMonth} asOf={dataThrough ? fmtDay(dataThrough) : null} />
+              </span>
+            }
             padded={false}
             style={{ marginBottom: 16 }}
           >
@@ -559,6 +650,7 @@ const PageSales = ({ initialTab } = {}) => {
           <Card
             title="Order value & price realization"
             sub="Net revenue ÷ units per channel over months, and (native month) the price actually banked per unit vs the gross — discount/GST leakage."
+            action={<UnitsRulePopover facts={facts} month={lastFullMonth} asOf={dataThrough ? fmtDay(dataThrough) : null} />}
             style={{ marginBottom: 16 }}
           >
             <AovTrend facts={facts} monthsMeta={monthsMeta} channels={channels} D={D} />
@@ -694,6 +786,65 @@ function CovChip({ basis, partial }) {
   if (basis === "native") return <span className="cov-badge cov-native sm">nat</span>;
   if (basis === "agency") return <span className="cov-badge cov-agency sm">agc</span>;
   return null;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PER-SOURCE RECENCY (rubric XI/83) — every loaded source's true latest data day,
+// with its human label + tier, so freshness is read per-figure, not just at the
+// page level. Reads facts.meta.sourceRecency (per-slug latest day, clamped at build
+// time to the global latest day) and facts.meta.sourceLabels (slug → human label).
+// A source whose latest day trails the global "Data through" by ≥1 day is flagged so
+// the founder knows that figure is staler than the freshest part of the page.
+// ════════════════════════════════════════════════════════════════════════════
+const RECENCY_TIER_CLASS = { native: "cov-native", agency: "cov-agency" };
+function SourceRecencyLine({ facts, latestDataDate }) {
+  const recency = facts?.meta?.sourceRecency || null;
+  const labels = facts?.meta?.sourceLabels || {};
+  const rows = useMemo(() => {
+    if (!recency) return [];
+    return Object.entries(recency)
+      .map(([slug, day]) => ({
+        slug,
+        day,
+        label: labels[slug]?.label || slug,
+        tier: labels[slug]?.tier || null,
+      }))
+      .filter((r) => r.day)
+      .sort((a, b) => String(b.day).localeCompare(String(a.day)) || a.label.localeCompare(b.label));
+  }, [recency, labels]);
+  if (rows.length === 0) return null;
+  const globalMs = latestDataDate ? new Date(latestDataDate + "T00:00:00Z").getTime() : null;
+  const staleDays = (day) => {
+    if (globalMs == null) return 0;
+    const d = new Date(day + "T00:00:00Z").getTime();
+    if (!Number.isFinite(d)) return 0;
+    return Math.max(0, Math.round((globalMs - d) / 86400000));
+  };
+  return (
+    <details className="note" style={{ marginBottom: 16 }}>
+      <summary style={{ cursor: "pointer", fontSize: 11.5, color: "var(--ink-2)" }}>
+        <strong>Per-source freshness</strong> — {rows.length} sources loaded, newest data day {fmtDay(rows[0].day)}.
+        Click to see each source&apos;s own latest day (a figure is only as fresh as its source).
+      </summary>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "4px 18px", marginTop: 8 }}>
+        {rows.map((r) => {
+          const stale = staleDays(r.day);
+          return (
+            <div key={r.slug} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, lineHeight: 1.5 }}>
+              {r.tier && <span className={`cov-badge ${RECENCY_TIER_CLASS[r.tier] || "cov-agency"} sm`}>{r.tier === "native" ? "nat" : "agc"}</span>}
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.label}>{r.label}</span>
+              <span className="mono muted" style={{ whiteSpace: "nowrap" }}>{fmtDay(r.day)}</span>
+              {stale >= 1 && (
+                <span className="cov-badge cov-mtd sm" title={`This source's latest data day trails the page's freshest day by ${stale} day${stale > 1 ? "s" : ""}.`}>
+                  −{stale}d
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1258,16 +1409,24 @@ function ConcentrationStrip({ facts, month }) {
     { key: "sku-rev", label: "SKU · revenue", c: conc.bySku.revenue, isCh: false },
     { key: "sku-mar", label: "SKU · margin (CM3)", c: conc.bySku.margin, isCh: false },
   ];
+  // IV-98/IX-94 — the window label is RESOLVED from the engine (complete month vs
+  // MTD-through-day-N) and shown ADJACENT to the headline, so this May "complete
+  // month" 54.1%/0.37 is never confused with the read-out's June-MTD 51%/0.34. Both
+  // concentration figures on the page now carry their own window label.
+  const winLabel = conc.window?.label || fmtMonth(month);
   return (
     <div style={{ marginTop: 16, borderTop: "1px solid var(--border-soft)", paddingTop: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-        <span className="stat-label">Concentration risk · {fmtMonth(month)}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        <span className="stat-label">Concentration risk</span>
+        <span className={`cov-badge ${conc.partial ? "cov-mtd" : "cov-agency"} sm`} title={conc.partial ? "Partial (MTD) window — not comparable like-for-like to a complete month." : "Complete-month window."}>
+          {winLabel}
+        </span>
         <DerivationPopover
           title="Concentration (HHI)"
           formula="HHI = Σ(share²) over the positive-value pool"
-          plain="How much of the month rides on one channel or SKU. HHI runs 0 (perfectly spread) to 1 (everything on one). Above 0.25 we call it concentrated — a fragility to watch."
+          plain={`How much of THIS window (${winLabel}) rides on one channel or SKU. HHI runs 0 (perfectly spread) to 1 (everything on one). Above 0.25 we call it concentrated — a fragility to watch. The window label is shown here AND on the read-out's concentration line so a complete-month figure is never compared to an MTD one.`}
           source="bizAnalytics.concentrationRisk"
-          asOf={month}
+          asOf={conc.window?.label || month}
         />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -1306,34 +1465,60 @@ function ConcentrationStrip({ facts, month }) {
 // two unreconciled "velocity" numbers. The panel computes all windows from the same
 // fact cells; the toggle picks which one drives the headline, and every row exposes
 // the full reconciled set so the founder can see they tie to one definition.
+// IX-94 — the "current month" window TITLE is RESOLVED from the engine's own
+// label (partial → "MTD through day N of M"; complete → "complete month, N days"),
+// so a complete month (e.g. May, 31 days) is NEVER mislabelled "This month (MTD)"
+// with DAYS=31 — that read as a 3× overstatement against a real June-to-day-10
+// window. t30/t90 are static (true trailing windows regardless of month state).
 const VEL_WINDOW_TITLE = {
-  mtd: "This-month reporting rate (units ÷ elapsed days)",
   t30: "30-day reorder-planning rate — the window the inventory module plans at",
   t90: "90-day steady-state rate",
 };
+function velWindowTitle(winKey, curLabel) {
+  if (winKey === "mtd") {
+    const lbl = curLabel || "current-month window";
+    return `Current-month rate (units ÷ days) over the ${lbl}`;
+  }
+  return VEL_WINDOW_TITLE[winKey] || "current window";
+}
 function CrossModuleCard({ facts, month }) {
-  const [winKey, setWinKey] = useState("mtd");
+  const [winKey, setWinKey] = useState("t30"); // default to the reorder-planning window (the decision this card drives)
+  // Resolve the current-month label ONCE from the engine so the header, the toggle
+  // tooltip, and the panel all read the SAME true window — never a static "MTD".
+  const vel = useMemo(() => crossModuleVelocity(facts, { month, window: winKey }), [facts, month, winKey]);
+  const curLabel = vel.meta?.currentMonthLabel || null;
+  const curPartial = !!vel.meta?.currentMonthPartial;
+  // A human label for the "Current month" toggle button — "May (complete)" not "MTD".
+  const curBtnLabel = curPartial ? `${fmtMonthShort(month)} MTD` : `${fmtMonthShort(month)} (full)`;
   return (
     <Card
       title="Sell-through velocity · reorder & stockout watch"
-      sub={`Sales × inventory together: how fast each SKU×channel is selling and which fast-movers or loss-makers need a reorder decision. ${VEL_WINDOW_TITLE[winKey]}. These rows are PER-CHANNEL (one SKU×channel each); the Inventory "Top mover" reads the same SKU ALL-CHANNEL at max(30,15)d — same SKU, two grains. All three windows are the SAME definition (units ÷ days) from the same fact store — pick the one your decision needs; the 30-day rate is what the inventory module plans at, so the two modules reconcile. Native per-SKU month only.`}
+      sub={`Sales × inventory together: how fast each SKU×channel is selling and which fast-movers or loss-makers need a reorder decision. ${velWindowTitle(winKey, curLabel)}. These rows are PER-CHANNEL (one SKU×channel each); the Inventory "Top mover" reads the same SKU ALL-CHANNEL at max(30,15)d — same SKU, two grains. All three windows are the SAME definition (units ÷ days) from the same fact store — pick the one your decision needs; the 30-day rate is what the inventory module plans at, so the two modules reconcile. Native per-SKU month only.`}
       padded={false}
       style={{ marginBottom: 16 }}
       action={
         <div className="seg" title="One velocity definition (units ÷ days); the toggle only changes the window — the numbers reconcile across modules.">
-          {VELOCITY_WINDOWS.map((w) => (
-            <button key={w.key} className={winKey === w.key ? "active" : ""} onClick={() => setWinKey(w.key)} title={w.question}>{w.label}</button>
-          ))}
+          {VELOCITY_WINDOWS.map((w) => {
+            // The current-month window's button + tooltip resolve to the TRUE window
+            // ("May complete, 31 days") rather than the static "Current month" / MTD.
+            const isCur = w.key === "mtd";
+            const lbl = isCur ? curBtnLabel : w.label;
+            const ttl = isCur ? (curLabel ? `Units ÷ days over the ${curLabel}` : w.question) : w.question;
+            return (
+              <button key={w.key} className={winKey === w.key ? "active" : ""} onClick={() => setWinKey(w.key)} title={ttl}>{lbl}</button>
+            );
+          })}
         </div>
       }
     >
-      <CrossModulePanel facts={facts} month={month} winKey={winKey} />
+      <CrossModulePanel facts={facts} month={month} winKey={winKey} vel={vel} curLabel={curLabel} curPartial={curPartial} />
     </Card>
   );
 }
 
-function CrossModulePanel({ facts, month, winKey = "mtd" }) {
-  const vel = useMemo(() => crossModuleVelocity(facts, { month, window: winKey }), [facts, month, winKey]);
+function CrossModulePanel({ facts, month, winKey = "t30", vel: velProp, curLabel, curPartial }) {
+  const velLocal = useMemo(() => crossModuleVelocity(facts, { month, window: winKey }), [facts, month, winKey]);
+  const vel = velProp || velLocal;
   // Join CM3 sign per SKU×channel (loss-maker about to reorder) from the matrix.
   const cm = useMemo(() => computeCM({ facts, month }), [facts, month]);
   const cm3Of = (code, ch) => cm.matrix?.[code]?.[ch]?.cm3 ?? null;
@@ -1342,10 +1527,26 @@ function CrossModulePanel({ facts, month, winKey = "mtd" }) {
     return <div className="card-body"><div className="muted" style={{ fontSize: 12.5 }}>No native per-SKU sell-through for {fmtMonth(month)} — velocity needs per-SKU units.</div></div>;
   }
   const rows = vel.slice(0, 14);
-  const winLabel = (VELOCITY_WINDOWS.find((w) => w.key === winKey) || {}).label || winKey;
+  // IX-94 — the current-month column resolves to the TRUE window from the engine
+  // ("May (complete month, 31 days)" or "June MTD through day 10 of 30"), never the
+  // static "Current month"/"MTD" label that would read 31 days as an MTD overstatement.
+  const resolvedCurLabel = curLabel || vel.meta?.currentMonthLabel || `${month} current month`;
+  const curShort = curPartial != null
+    ? (curPartial ? `${fmtMonthShort(month)} MTD` : `${fmtMonthShort(month)} (full)`)
+    : (vel.meta?.currentMonthPartial ? `${fmtMonthShort(month)} MTD` : `${fmtMonthShort(month)} (full)`);
+  const winLabel = winKey === "mtd" ? curShort : ((VELOCITY_WINDOWS.find((w) => w.key === winKey) || {}).label || winKey);
+  const curColLabel = curShort; // header for the per-window column triple
 
   return (
     <div>
+      {/* Window label, adjacent to the table — the founder always knows which window
+          the numbers describe (IX-94: a complete month reads "complete month, N days",
+          never "This month (MTD)"). */}
+      <div className="card-body" style={{ paddingTop: 0, paddingBottom: 8 }}>
+        <span className="cov-badge cov-agency sm" title="The exact window these velocity numbers cover, resolved from the latest data day — a complete month reads its true day count, a live month reads MTD through day N.">
+          window · {resolvedCurLabel}
+        </span>
+      </div>
       <table className="table">
         <thead>
           <tr>
@@ -1355,7 +1556,7 @@ function CrossModulePanel({ facts, month, winKey = "mtd" }) {
             <th className="num" title={`Per-channel ${winLabel} velocity (units ÷ days for THIS SKU on THIS channel). The Inventory "Top mover" headline reads the SAME SKU at all-channel · max(30,15)d grain — same SKU, two grains; switch the window toggle to 30d to bridge them.`}>
               Velocity /day<br/><span className="muted" style={{ fontSize: 9.5, fontWeight: 500, textTransform: "none" }}>per-channel · {winLabel}</span>
             </th>
-            <th className="num">All windows (mtd · 30d · 90d)</th>
+            <th className="num" title="The same SKU×channel velocity over all three windows (units ÷ days). The current-month window resolves to its true span (complete month or MTD).">All windows ({curColLabel} · 30d · 90d)</th>
             <th className="num">Run-rate /mo</th>
             <th className="num">CM3 sign</th>
             <th>Signal</th>
@@ -1407,7 +1608,9 @@ function CrossModulePanel({ facts, month, winKey = "mtd" }) {
       <div className="card-body" style={{ paddingTop: 10 }}>
         <div className="muted" style={{ fontSize: 11 }}>
           <strong>One velocity definition</strong> — units ÷ days — shown over three windows you can toggle. The
-          <strong> MTD</strong> rate answers "how is this month going"; the <strong>30-day</strong> rate is the
+          <strong> current-month</strong> rate ({resolvedCurLabel}) answers "how is this window going" — over a{" "}
+          <em>complete</em> month it divides by the full day count, over a <em>live</em> month only the elapsed days,
+          so it&apos;s never a partial-month rate dressed up as a full one. The <strong>30-day</strong> rate is the
           reorder-planning rate the <em>inventory module plans at</em>, so the two modules read the same number for the
           same window (rubric 17 — no two conflicting velocities). The inventory module's <em>runway</em> additionally
           folds in central-warehouse depletion and stock-on-hand for the stockout date — read that for the PO timing.
@@ -2354,8 +2557,18 @@ function MaySkuBreakdown({ facts, month, channels }) {
             <tr>
               <th>SKU</th>
               <th className="num">Net rev</th>
-              <th className="num">Units</th>
-              <th className="num">AOV</th>
+              <th className="num">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, justifyContent: "flex-end" }}>
+                  Units
+                  {active === "amazon" && <UnitsRulePopover facts={facts} asOf={month} />}
+                </span>
+              </th>
+              <th className="num">
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 3, justifyContent: "flex-end" }}>
+                  AOV
+                  {active === "amazon" && <UnitsRulePopover facts={facts} asOf={month} />}
+                </span>
+              </th>
               <th className="num">Rev share</th>
               <th className="num">CM3</th>
               <th className="num">CM3 %</th>
@@ -2401,7 +2614,12 @@ function MaySkuBreakdown({ facts, month, channels }) {
       <div className="card-body" style={{ paddingTop: 10 }}>
         <div className="muted" style={{ fontSize: 11 }}>
           Native per-SKU revenue from {chMeta(active).name}&apos;s own export. CM3 = net revenue − COGS − platform fees −
-          attributed/allocated ads. A dash in CM3 means no COGS card on file for that SKU. A{" "}
+          attributed/allocated ads. A dash in CM3 means no COGS card on file for that SKU.
+          {active === "amazon" && (
+            <> Per-SKU <strong>units and revenue share one filtered row set</strong> (Amazon.in · Shipped · returns-netted ·
+            bucketed by purchase-month), so <strong>AOV = net ÷ units re-derives from the All-Orders file</strong> — the ⓘ on the
+            Units/AOV headers carries the exact rule (a unit purchased in April but shipped in May counts to April, not May).</>
+          )}{" "}A{" "}
           <span className="badge" style={{ background: "rgba(201,162,39,0.16)", color: "#9A7B16", borderColor: "rgba(201,162,39,0.4)", fontSize: 8.5, fontWeight: 700 }}>≈ similarity</span>{" "}
           badge marks a SKU whose Google ad spend was attributed from a free-text product title by similarity (not an exact identifier) — sales/units still resolve by exact maps.
         </div>

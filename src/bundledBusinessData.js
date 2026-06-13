@@ -16904,107 +16904,107 @@ export const BUNDLED_BUSINESS = {
     "uploads": [
       {
         "sourceTag": "amazon-orders",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "fk-sales",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "blinkit-sales",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "shopify-net",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "shopify-daily",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "ads-amazon-sp",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "ads-fk-pla",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "ads-google",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "snell-agency",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-web",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "snell-history",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "snell-sku-units",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-history",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "snell-cancel",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-seo",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-platform",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "bm-repeats",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "bm-returns",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "snell-ordermix",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "monarch-extra",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       },
       {
         "sourceTag": "cogs-history",
-        "at": "2026-06-13T15:04:17.609Z",
+        "at": "2026-06-13T17:12:20.367Z",
         "baked": true
       }
     ],
@@ -17282,6 +17282,177 @@ export const BUNDLED_BUSINESS = {
             }
           }
         },
+        "unitsRule": "Amazon per-SKU units & revenue share ONE row set: sales-channel=\"Amazon.in\" · item-status=\"Shipped\" · sku/asin→canonical code · bucketed by purchase-date month · \"…Returned to Seller\" netted out · units = Σ quantity, gross = Σ item-price, net = gross ÷ 1.05 (GST-incl rule). AOV = net ÷ units re-derives from amazonmaysales.txt. (Cancelled / Unshipped / Non-Amazon rows excluded; a unit purchased in April but shipped in May counts to its purchase month, not May.)",
+        "skuVariantFold": {
+          "NSSBJ300": {
+            "channel": "amazon",
+            "canonical": "NSSBJ300",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBJ300ML",
+                "units": 158,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBJ300ML_MP",
+                "units": 34,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GRMC94JJ"
+            ],
+            "label": "NSSBJ300 = NSSBJ300ML + NSSBJ300ML_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSSB500": {
+            "channel": "amazon",
+            "canonical": "NSSB500",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP500",
+                "units": 102,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP500_MP",
+                "units": 18,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GHQVMC93"
+            ],
+            "label": "NSSB500 = NSSBP500 + NSSBP500_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSSB100": {
+            "channel": "amazon",
+            "canonical": "NSSB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP100_MP",
+                "units": 86,
+                "isMp": true,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP100",
+                "units": 28,
+                "isMp": false,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0FPMJMRW7"
+            ],
+            "label": "NSSB100 = NSSBP100_MP + NSSBP100 folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSSB250": {
+            "channel": "amazon",
+            "canonical": "NSSB250",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP250",
+                "units": 170,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP250_MP",
+                "units": 29,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0FPMDD8ZS"
+            ],
+            "label": "NSSB250 = NSSBP250 + NSSBP250_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSSBJ500": {
+            "channel": "amazon",
+            "canonical": "NSSBJ500",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBJ500ML_MP",
+                "units": 181,
+                "isMp": true,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBJ500ML",
+                "units": 95,
+                "isMp": false,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GRMG2BLQ"
+            ],
+            "label": "NSSBJ500 = NSSBJ500ML_MP + NSSBJ500ML folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSSBDB100": {
+            "channel": "amazon",
+            "canonical": "NSSBDB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBDB100g",
+                "units": 68,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBDB100g_MP",
+                "units": 43,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0DV5K7BB4"
+            ],
+            "label": "NSSBDB100 = NSSBDB100g + NSSBDB100g_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "NSACDT30": {
+            "channel": "amazon",
+            "canonical": "NSACDT30",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "DI-TE-1-A",
+                "units": 31,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "DI-TE-1-A_MP",
+                "units": 3,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0F88G8DYP"
+            ],
+            "label": "NSACDT30 = DI-TE-1-A + DI-TE-1-A_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
         "mcfShare": {
           "share": 1,
           "rawProxy": 1.02,
@@ -17290,16 +17461,23 @@ export const BUNDLED_BUSINESS = {
           "capped": true,
           "asOf": "2026-06-12",
           "source": "All-Orders Non-Amazon units × website per-unit net price (May build, capped [0,1])"
-        }
+        },
+        "label": "Amazon All-Orders (native export)",
+        "tier": "native",
+        "file": "amazonmaysales.txt"
       },
       "amazon-order-composition": {
         "source": "amazon-all-orders order-id grouping",
         "tier": "native",
+        "unitsNote": "Order-grain GROSS units (the basket placed) drive single/multi composition + UPO (units ÷ orders, same-source, ≥1). netUnits = gross − returns-netting (a “…Returned to Seller” row subtracts its qty), which reconciles EXACTLY to the per-SKU units sum — order-grain gross vs per-SKU net-of-returns is a basis difference, not a discrepancy.",
         "byMonth": [
           {
             "month": "2026-04",
             "orders": 4,
             "units": 4,
+            "grossUnits": 4,
+            "netUnits": 4,
+            "returnUnits": 0,
             "netRev": 3690.48,
             "singleOrders": 4,
             "multiOrders": 0,
@@ -17321,6 +17499,9 @@ export const BUNDLED_BUSINESS = {
             "month": "2026-05",
             "orders": 1326,
             "units": 1426,
+            "grossUnits": 1426,
+            "netUnits": 1380,
+            "returnUnits": 23,
             "netRev": 1176126.67,
             "singleOrders": 1251,
             "multiOrders": 75,
@@ -17338,7 +17519,9 @@ export const BUNDLED_BUSINESS = {
             "b2cUnits": 1379,
             "b2bPct": 0.03
           }
-        ]
+        ],
+        "label": "Amazon order composition (FBA/MFN · B2B/B2C · basket)",
+        "file": "amazonmaysales.txt"
       },
       "fk-sales": {
         "flipkartCashback": {
@@ -17350,13 +17533,451 @@ export const BUNDLED_BUSINESS = {
               "rows": 428
             }
           }
-        }
+        },
+        "netRule": {
+          "column": "Buyer Invoice Amount",
+          "gstBasis": "already net-of-GST — taken AS-IS (no ÷1.05; that would double-discount)",
+          "signRule": "sign as-is — return/replacement rows carry a negative Buyer Invoice Amount, so summing the column NETS returns out automatically",
+          "multipackFold": "SKU \"<base> * N\" folds N into units (qty × N) so a 2-pack counts as 2 units; revenue is the row's Buyer Invoice Amount unchanged",
+          "monthAttribution": "Order Date (falls back to Buyer Invoice Date only when Order Date is blank)",
+          "cashback": "the Cash Back tab is EXCLUDED from net revenue/CM (settlement-drag signal, trended separately)",
+          "month": "2026-05",
+          "mayNet": 272842.99,
+          "mayUnits": 498,
+          "derivation": "2026-05 net = Σ Buyer Invoice Amount (native sign) over rows whose SKU resolves to a canonical code AND Order-Date month = 2026-05 = 2,72,842.99 across 498 units. Ties to the native Flipkart anchor exactly."
+        },
+        "skuVariantFold": {
+          "NSSBDB100": {
+            "channel": "flipkart",
+            "canonical": "NSSBDB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBDB100g",
+                "mult": 1,
+                "orderRows": 58,
+                "baseUnits": 58,
+                "foldedUnits": 58,
+                "isMultipack": false
+              },
+              {
+                "rawSku": "NSSBDB100g*2",
+                "mult": 2,
+                "orderRows": 29,
+                "baseUnits": 29,
+                "foldedUnits": 58,
+                "isMultipack": true
+              }
+            ],
+            "label": "NSSBDB100 = NSSBDB100g + NSSBDB100g*2 folded",
+            "rule": "Flipkart SKU `<base> * N` is a multipack order: it folds into the base canonical counting N base units (qty × N). Components retained pre-fold (raw SKU, multiplier, base vs folded units) so the multipack identity resolution is inspectable."
+          }
+        },
+        "label": "Flipkart Sales Report (native export)",
+        "tier": "native",
+        "file": "flipkart may sales.xlsx"
       },
       "ads-amazon-sp": {
-        "amazonSpTotal": 355114.86
+        "amazonSpTotal": 355114.86,
+        "span": {
+          "first": "2026-05-01",
+          "last": "2026-05-31"
+        },
+        "days": 31,
+        "daily": {
+          "2026-05-01|amazon|NSJO100": 138.38,
+          "2026-05-02|amazon|NSJO100": 132.97,
+          "2026-05-03|amazon|NSJO100": 408.28,
+          "2026-05-04|amazon|NSJO100": 271.74,
+          "2026-05-05|amazon|NSJO100": 172.99,
+          "2026-05-06|amazon|NSJO100": 210.26,
+          "2026-05-07|amazon|NSJO100": 110.35,
+          "2026-05-08|amazon|NSJO100": 68.85,
+          "2026-05-09|amazon|NSJO100": 98.02,
+          "2026-05-10|amazon|NSJO100": 123.28,
+          "2026-05-11|amazon|NSJO100": 97.84,
+          "2026-05-12|amazon|NSJO100": 130.79,
+          "2026-05-13|amazon|NSJO100": 213.5,
+          "2026-05-14|amazon|NSJO100": 306.1,
+          "2026-05-15|amazon|NSJO100": 151.87,
+          "2026-05-16|amazon|NSJO100": 153.38,
+          "2026-05-17|amazon|NSJO100": 221.1,
+          "2026-05-18|amazon|NSJO100": 222.5,
+          "2026-05-19|amazon|NSJO100": 240.52,
+          "2026-05-20|amazon|NSJO100": 250.24,
+          "2026-05-21|amazon|NSJO100": 349.05,
+          "2026-05-02|amazon|NSSBBO15": 0,
+          "2026-05-03|amazon|NSSBBO30": 0,
+          "2026-05-01|amazon|NSSBBO15": 0,
+          "2026-05-03|amazon|NSSBBO15": 0,
+          "2026-05-02|amazon|NSSBBO30": 0,
+          "2026-05-04|amazon|NSSBBO30": 0,
+          "2026-05-01|amazon|NSSBDB100": 1310.77,
+          "2026-05-02|amazon|NSSBDB100": 1239.45,
+          "2026-05-03|amazon|NSSBDB100": 1422.07,
+          "2026-05-04|amazon|NSSBDB100": 1539.68,
+          "2026-05-05|amazon|NSSBDB100": 1355.98,
+          "2026-05-06|amazon|NSSBDB100": 1178.52,
+          "2026-05-07|amazon|NSSBDB100": 1477,
+          "2026-05-08|amazon|NSSBDB100": 1306.02,
+          "2026-05-09|amazon|NSSBDB100": 1245.25,
+          "2026-05-10|amazon|NSSBDB100": 885.53,
+          "2026-05-15|amazon|NSSBDB100": 379.55,
+          "2026-05-16|amazon|NSSBDB100": 877.69,
+          "2026-05-17|amazon|NSSBDB100": 415.68,
+          "2026-05-18|amazon|NSSBDB100": 740.47,
+          "2026-05-19|amazon|NSSBDB100": 1556.85,
+          "2026-05-20|amazon|NSSBDB100": 1650.2,
+          "2026-05-21|amazon|NSSBDB100": 1596.77,
+          "2026-05-08|amazon|NSSBDB250": 216.07,
+          "2026-05-09|amazon|NSSBDB250": 319.11,
+          "2026-05-10|amazon|NSSBDB250": 769.85,
+          "2026-05-11|amazon|NSSBDB250": 1587.64,
+          "2026-05-12|amazon|NSSBDB250": 1569.94,
+          "2026-05-13|amazon|NSSBDB250": 1543.28,
+          "2026-05-14|amazon|NSSBDB250": 1634.64,
+          "2026-05-15|amazon|NSSBDB250": 1183.69,
+          "2026-05-16|amazon|NSSBDB250": 814.79,
+          "2026-05-17|amazon|NSSBDB250": 1372.4,
+          "2026-05-18|amazon|NSSBDB250": 876.5,
+          "2026-05-11|amazon|NSSBDB100": 0,
+          "2026-05-13|amazon|NSSBDB100": 0,
+          "2026-05-14|amazon|NSSBDB100": 0,
+          "2026-05-04|amazon|NSSBDB250": 0,
+          "2026-05-05|amazon|NSSBDB250": 279.08,
+          "2026-05-06|amazon|NSSBDB250": 354.03,
+          "2026-05-07|amazon|NSSBDB250": 228.76,
+          "2026-05-19|amazon|NSSBDB250": 0,
+          "2026-05-20|amazon|NSSBDB250": 0,
+          "2026-05-21|amazon|NSSBDB250": 0,
+          "2026-05-12|amazon|NSSBDB100": 0,
+          "2026-05-02|amazon|NSSBDB250": 0,
+          "2026-05-03|amazon|NSSBDB250": 0,
+          "2026-05-01|amazon|NSSBDB250": 0,
+          "2026-05-01|amazon|NSACDT30": 690.14,
+          "2026-05-02|amazon|NSACDT30": 702.68,
+          "2026-05-03|amazon|NSACDT30": 888.4,
+          "2026-05-04|amazon|NSACDT30": 762.55,
+          "2026-05-05|amazon|NSACDT30": 862.44,
+          "2026-05-06|amazon|NSACDT30": 849.16,
+          "2026-05-07|amazon|NSACDT30": 965.47,
+          "2026-05-08|amazon|NSACDT30": 775.36,
+          "2026-05-09|amazon|NSACDT30": 880.78,
+          "2026-05-10|amazon|NSACDT30": 792.5,
+          "2026-05-11|amazon|NSACDT30": 706.6,
+          "2026-05-12|amazon|NSACDT30": 799.08,
+          "2026-05-13|amazon|NSACDT30": 732.01,
+          "2026-05-14|amazon|NSACDT30": 981.97,
+          "2026-05-15|amazon|NSACDT30": 598.94,
+          "2026-05-16|amazon|NSACDT30": 975.91,
+          "2026-05-17|amazon|NSACDT30": 692.67,
+          "2026-05-18|amazon|NSACDT30": 918.81,
+          "2026-05-19|amazon|NSACDT30": 747.43,
+          "2026-05-20|amazon|NSACDT30": 754.11,
+          "2026-05-21|amazon|NSACDT30": 1056.61,
+          "2026-05-01|amazon|NSSB250": 779.42,
+          "2026-05-02|amazon|NSSB250": 803.6,
+          "2026-05-03|amazon|NSSB250": 860.72,
+          "2026-05-04|amazon|NSSB250": 671.77,
+          "2026-05-05|amazon|NSSB250": 860.05,
+          "2026-05-06|amazon|NSSB250": 1056.78,
+          "2026-05-07|amazon|NSSB250": 926.77,
+          "2026-05-08|amazon|NSSB250": 1219.64,
+          "2026-05-09|amazon|NSSB250": 675.43,
+          "2026-05-10|amazon|NSSB250": 839.07,
+          "2026-05-11|amazon|NSSB250": 1326.86,
+          "2026-05-12|amazon|NSSB250": 1034.95,
+          "2026-05-13|amazon|NSSB250": 949.18,
+          "2026-05-14|amazon|NSSB250": 1798.62,
+          "2026-05-15|amazon|NSSB250": 988.31,
+          "2026-05-16|amazon|NSSB250": 984.8,
+          "2026-05-17|amazon|NSSB250": 1216.37,
+          "2026-05-18|amazon|NSSB250": 1222.79,
+          "2026-05-19|amazon|NSSB250": 1360.77,
+          "2026-05-20|amazon|NSSB250": 1134.66,
+          "2026-05-21|amazon|NSSB250": 1711.82,
+          "2026-05-01|amazon|NSSB100": 1399.27,
+          "2026-05-02|amazon|NSSB100": 1593.62,
+          "2026-05-03|amazon|NSSB100": 1389.17,
+          "2026-05-04|amazon|NSSB100": 1575.09,
+          "2026-05-05|amazon|NSSB100": 1579.29,
+          "2026-05-06|amazon|NSSB100": 1429.81,
+          "2026-05-07|amazon|NSSB100": 1175.99,
+          "2026-05-08|amazon|NSSB100": 1258.98,
+          "2026-05-09|amazon|NSSB100": 1540.31,
+          "2026-05-10|amazon|NSSB100": 1102.41,
+          "2026-05-11|amazon|NSSB100": 1492.98,
+          "2026-05-12|amazon|NSSB100": 1027.08,
+          "2026-05-13|amazon|NSSB100": 1236.05,
+          "2026-05-14|amazon|NSSB100": 812.31,
+          "2026-05-15|amazon|NSSB100": 1257.94,
+          "2026-05-16|amazon|NSSB100": 1067.55,
+          "2026-05-17|amazon|NSSB100": 1149.41,
+          "2026-05-18|amazon|NSSB100": 785.49,
+          "2026-05-19|amazon|NSSB100": 1116.1,
+          "2026-05-20|amazon|NSSB100": 832.91,
+          "2026-05-21|amazon|NSSB100": 1165.7,
+          "2026-05-01|amazon|NSSBBO30": 0,
+          "2026-05-01|amazon|NSSBDB500": 1880.61,
+          "2026-05-02|amazon|NSSBDB500": 1783.33,
+          "2026-05-03|amazon|NSSBDB500": 2736.58,
+          "2026-05-04|amazon|NSSBDB500": 2668.63,
+          "2026-05-05|amazon|NSSBDB500": 2587.71,
+          "2026-05-06|amazon|NSSBDB500": 2434.52,
+          "2026-05-07|amazon|NSSBDB500": 2540.37,
+          "2026-05-08|amazon|NSSBDB500": 2540,
+          "2026-05-09|amazon|NSSBDB500": 2605.35,
+          "2026-05-10|amazon|NSSBDB500": 2426.05,
+          "2026-05-11|amazon|NSSBDB500": 2344.65,
+          "2026-05-12|amazon|NSSBDB500": 3633.2,
+          "2026-05-13|amazon|NSSBDB500": 3462.39,
+          "2026-05-14|amazon|NSSBDB500": 3583.88,
+          "2026-05-15|amazon|NSSBDB500": 3370.53,
+          "2026-05-16|amazon|NSSBDB500": 3385.88,
+          "2026-05-17|amazon|NSSBDB500": 3853.46,
+          "2026-05-18|amazon|NSSBDB500": 3155.15,
+          "2026-05-19|amazon|NSSBDB500": 0,
+          "2026-05-20|amazon|NSSBDB500": 0,
+          "2026-05-21|amazon|NSSBDB500": 0,
+          "2026-05-01|amazon|NSSB500": 134.75,
+          "2026-05-02|amazon|NSSB500": 266.22,
+          "2026-05-03|amazon|NSSB500": 239.93,
+          "2026-05-04|amazon|NSSB500": 199.77,
+          "2026-05-05|amazon|NSSB500": 98.88,
+          "2026-05-07|amazon|NSSB500": 209.73,
+          "2026-05-08|amazon|NSSB500": 189.03,
+          "2026-05-09|amazon|NSSB500": 182.37,
+          "2026-05-10|amazon|NSSB500": 188.17,
+          "2026-05-11|amazon|NSSB500": 161.49,
+          "2026-05-12|amazon|NSSB500": 29.04,
+          "2026-05-13|amazon|NSSB500": 172.1,
+          "2026-05-14|amazon|NSSB500": 213.25,
+          "2026-05-15|amazon|NSSB500": 257.59,
+          "2026-05-16|amazon|NSSB500": 139.63,
+          "2026-05-17|amazon|NSSB500": 139.91,
+          "2026-05-18|amazon|NSSB500": 186.79,
+          "2026-05-19|amazon|NSSB500": 139.65,
+          "2026-05-20|amazon|NSSB500": 279.28,
+          "2026-05-21|amazon|NSSB500": 751.02,
+          "2026-05-06|amazon|NSSB500": 197.94,
+          "2026-05-06|amazon|NSSBJ300": 1127.11,
+          "2026-05-07|amazon|NSSBJ300": 2045.18,
+          "2026-05-08|amazon|NSSBJ300": 1572.57,
+          "2026-05-11|amazon|NSSBJ300": 1077.8,
+          "2026-05-12|amazon|NSSBJ300": 1485.27,
+          "2026-05-13|amazon|NSSBJ300": 999.18,
+          "2026-05-14|amazon|NSSBJ300": 1195.19,
+          "2026-05-15|amazon|NSSBJ300": 1240.97,
+          "2026-05-16|amazon|NSSBJ300": 1227.6,
+          "2026-05-17|amazon|NSSBJ300": 1461.04,
+          "2026-05-18|amazon|NSSBJ300": 1276.77,
+          "2026-05-19|amazon|NSSBJ300": 1044.72,
+          "2026-05-20|amazon|NSSBJ300": 1454.97,
+          "2026-05-21|amazon|NSSBJ300": 1102.35,
+          "2026-05-05|amazon|NSSBJ500": 1121.93,
+          "2026-05-07|amazon|NSSBJ500": 1109.75,
+          "2026-05-08|amazon|NSSBJ500": 1803.3,
+          "2026-05-11|amazon|NSSBJ500": 1004.95,
+          "2026-05-12|amazon|NSSBJ500": 1652.82,
+          "2026-05-13|amazon|NSSBJ500": 1691.28,
+          "2026-05-14|amazon|NSSBJ500": 1439.83,
+          "2026-05-15|amazon|NSSBJ500": 1933.81,
+          "2026-05-16|amazon|NSSBJ500": 1580.92,
+          "2026-05-17|amazon|NSSBJ500": 1347.54,
+          "2026-05-18|amazon|NSSBJ500": 1432.37,
+          "2026-05-19|amazon|NSSBJ500": 1642.87,
+          "2026-05-20|amazon|NSSBJ500": 1434.49,
+          "2026-05-21|amazon|NSSBJ500": 1870.64,
+          "2026-05-01|amazon|NSSBJ500": 0,
+          "2026-05-02|amazon|NSSBJ500": 262.16,
+          "2026-05-03|amazon|NSSBJ500": 437.03,
+          "2026-05-04|amazon|NSSBJ500": 623.17,
+          "2026-05-06|amazon|NSSBJ500": 1689.94,
+          "2026-05-09|amazon|NSSBJ500": 1400.65,
+          "2026-05-10|amazon|NSSBJ500": 1300.24,
+          "2026-05-01|amazon|NSSBJ300": 149.53,
+          "2026-05-02|amazon|NSSBJ300": 729.95,
+          "2026-05-03|amazon|NSSBJ300": 400.78,
+          "2026-05-04|amazon|NSSBJ300": 1452.81,
+          "2026-05-05|amazon|NSSBJ300": 1446.39,
+          "2026-05-09|amazon|NSSBJ300": 1778.02,
+          "2026-05-10|amazon|NSSBJ300": 962.4,
+          "2026-05-21|amazon|NSMP250": 0,
+          "2026-05-21|amazon|NSMP100": 0,
+          "2026-05-22|amazon|NSJO100": 269.21,
+          "2026-05-23|amazon|NSJO100": 240.01,
+          "2026-05-24|amazon|NSJO100": 490.78,
+          "2026-05-25|amazon|NSJO100": 198.98,
+          "2026-05-26|amazon|NSJO100": 139.09,
+          "2026-05-27|amazon|NSJO100": 187.85,
+          "2026-05-28|amazon|NSJO100": 349.34,
+          "2026-05-29|amazon|NSJO100": 286.53,
+          "2026-05-30|amazon|NSJO100": 356.91,
+          "2026-05-31|amazon|NSJO100": 432.25,
+          "2026-05-22|amazon|NSSBDB100": 1549.71,
+          "2026-05-23|amazon|NSSBDB100": 1606.38,
+          "2026-05-24|amazon|NSSBDB100": 1657.41,
+          "2026-05-25|amazon|NSSBDB100": 1638.11,
+          "2026-05-26|amazon|NSSBDB100": 1204.46,
+          "2026-05-27|amazon|NSSBDB100": 158.27,
+          "2026-05-22|amazon|NSSBDB250": 0,
+          "2026-05-23|amazon|NSSBDB250": 0,
+          "2026-05-25|amazon|NSSBDB250": 0,
+          "2026-05-28|amazon|NSSBDB100": 0,
+          "2026-05-24|amazon|NSSBDB250": 0,
+          "2026-05-26|amazon|NSSBDB250": 0,
+          "2026-05-30|amazon|NSSBDB100": 88.18,
+          "2026-05-29|amazon|NSSBDB250": 0,
+          "2026-05-22|amazon|NSACDT30": 821.8,
+          "2026-05-23|amazon|NSACDT30": 928.86,
+          "2026-05-24|amazon|NSACDT30": 906.15,
+          "2026-05-25|amazon|NSACDT30": 668.66,
+          "2026-05-26|amazon|NSACDT30": 739.96,
+          "2026-05-27|amazon|NSACDT30": 869.03,
+          "2026-05-28|amazon|NSACDT30": 902.08,
+          "2026-05-29|amazon|NSACDT30": 1093.98,
+          "2026-05-30|amazon|NSACDT30": 864.66,
+          "2026-05-31|amazon|NSACDT30": 953.55,
+          "2026-05-22|amazon|NSSB250": 2246,
+          "2026-05-23|amazon|NSSB250": 2379.58,
+          "2026-05-24|amazon|NSSB250": 2336.01,
+          "2026-05-25|amazon|NSSB250": 2614.1,
+          "2026-05-26|amazon|NSSB250": 2029.41,
+          "2026-05-27|amazon|NSSB250": 2354.39,
+          "2026-05-28|amazon|NSSB250": 2310.45,
+          "2026-05-29|amazon|NSSB250": 2247.77,
+          "2026-05-30|amazon|NSSB250": 2588.9,
+          "2026-05-31|amazon|NSSB250": 2517.51,
+          "2026-05-22|amazon|NSSB100": 804.12,
+          "2026-05-23|amazon|NSSB100": 948.67,
+          "2026-05-24|amazon|NSSB100": 1018.68,
+          "2026-05-25|amazon|NSSB100": 756.11,
+          "2026-05-26|amazon|NSSB100": 581.6,
+          "2026-05-27|amazon|NSSB100": 941.74,
+          "2026-05-28|amazon|NSSB100": 1334.16,
+          "2026-05-29|amazon|NSSB100": 892.54,
+          "2026-05-30|amazon|NSSB100": 995.49,
+          "2026-05-31|amazon|NSSB100": 863.72,
+          "2026-05-22|amazon|NSSBDB500": 0,
+          "2026-05-23|amazon|NSSBDB500": 0,
+          "2026-05-24|amazon|NSSBDB500": 0,
+          "2026-05-25|amazon|NSSBDB500": 0,
+          "2026-05-26|amazon|NSSBDB500": 0,
+          "2026-05-29|amazon|NSSBDB100": 39.38,
+          "2026-05-31|amazon|NSSBDB100": 34.5,
+          "2026-05-29|amazon|NSSBDB500": 0,
+          "2026-05-30|amazon|NSSBDB500": 0,
+          "2026-05-31|amazon|NSSBDB500": 0,
+          "2026-05-28|amazon|NSSBDB500": 0,
+          "2026-05-22|amazon|NSSB500": 966.67,
+          "2026-05-23|amazon|NSSB500": 1115.02,
+          "2026-05-24|amazon|NSSB500": 1078.51,
+          "2026-05-25|amazon|NSSB500": 1029.72,
+          "2026-05-26|amazon|NSSB500": 1182.68,
+          "2026-05-27|amazon|NSSB500": 1267.64,
+          "2026-05-28|amazon|NSSB500": 1160.69,
+          "2026-05-29|amazon|NSSB500": 1060.92,
+          "2026-05-30|amazon|NSSB500": 1258.34,
+          "2026-05-31|amazon|NSSB500": 1174.09,
+          "2026-05-22|amazon|NSSBJ300": 730.45,
+          "2026-05-23|amazon|NSSBJ300": 1037.85,
+          "2026-05-24|amazon|NSSBJ300": 2019.36,
+          "2026-05-25|amazon|NSSBJ300": 750.03,
+          "2026-05-26|amazon|NSSBJ300": 1475.12,
+          "2026-05-27|amazon|NSSBJ300": 1400.43,
+          "2026-05-28|amazon|NSSBJ300": 2719.23,
+          "2026-05-29|amazon|NSSBJ300": 6440.62,
+          "2026-05-30|amazon|NSSBJ300": 9944.85,
+          "2026-05-31|amazon|NSSBJ300": 8383.11,
+          "2026-05-22|amazon|NSSBJ500": 2052.49,
+          "2026-05-23|amazon|NSSBJ500": 3819.97,
+          "2026-05-24|amazon|NSSBJ500": 4086.98,
+          "2026-05-25|amazon|NSSBJ500": 5812.93,
+          "2026-05-26|amazon|NSSBJ500": 8923.22,
+          "2026-05-27|amazon|NSSBJ500": 7859,
+          "2026-05-28|amazon|NSSBJ500": 7676.17,
+          "2026-05-29|amazon|NSSBJ500": 3908.26,
+          "2026-05-30|amazon|NSSBJ500": 405.72,
+          "2026-05-28|amazon|NSSBDB250": 0,
+          "2026-05-30|amazon|NSSBDB250": 37.21,
+          "2026-05-31|amazon|NSSBDB250": 0,
+          "2026-05-31|amazon|NSSBJ500": 326.52,
+          "2026-05-22|amazon|NSMP250": 30.5,
+          "2026-05-23|amazon|NSMP250": 192.75,
+          "2026-05-24|amazon|NSMP250": 302.59,
+          "2026-05-25|amazon|NSMP250": 348.12,
+          "2026-05-26|amazon|NSMP250": 1.78,
+          "2026-05-27|amazon|NSMP250": 0,
+          "2026-05-28|amazon|NSMP250": 23.73,
+          "2026-05-29|amazon|NSMP250": 2.12,
+          "2026-05-30|amazon|NSMP250": 97.65,
+          "2026-05-31|amazon|NSMP250": 253.3,
+          "2026-05-22|amazon|NSMP100": 0,
+          "2026-05-23|amazon|NSMP100": 56.77,
+          "2026-05-24|amazon|NSMP100": 80.59,
+          "2026-05-25|amazon|NSMP100": 95.65,
+          "2026-05-26|amazon|NSMP100": 80.85,
+          "2026-05-27|amazon|NSMP100": 12.52,
+          "2026-05-28|amazon|NSMP100": 12.15,
+          "2026-05-29|amazon|NSMP100": 39.11,
+          "2026-05-30|amazon|NSMP100": 22,
+          "2026-05-31|amazon|NSMP100": 0
+        },
+        "byDay": {
+          "2026-05-01": 6482.87,
+          "2026-05-02": 7513.98,
+          "2026-05-03": 8782.96,
+          "2026-05-04": 9765.21,
+          "2026-05-05": 10364.74,
+          "2026-05-06": 10528.07,
+          "2026-05-07": 10789.37,
+          "2026-05-08": 10949.82,
+          "2026-05-09": 10725.29,
+          "2026-05-10": 9389.5,
+          "2026-05-11": 9800.81,
+          "2026-05-12": 11362.17,
+          "2026-05-13": 10998.97,
+          "2026-05-14": 11965.79,
+          "2026-05-15": 11363.2,
+          "2026-05-16": 11208.15,
+          "2026-05-17": 11869.58,
+          "2026-05-18": 10817.64,
+          "2026-05-19": 7848.91,
+          "2026-05-20": 7790.86,
+          "2026-05-21": 9603.96,
+          "2026-05-22": 9470.95,
+          "2026-05-23": 12325.86,
+          "2026-05-24": 13977.06,
+          "2026-05-25": 13912.41,
+          "2026-05-26": 16358.17,
+          "2026-05-27": 15050.87,
+          "2026-05-28": 16488,
+          "2026-05-29": 16011.23,
+          "2026-05-30": 16659.91,
+          "2026-05-31": 14938.55
+        },
+        "byMonth": {
+          "2026-05": 355114.86
+        },
+        "unmappedRows": 0,
+        "unmappedSpend": 0,
+        "reconciliation": {
+          "sumDailyPerSku": 355114.86,
+          "sumByDay": 355114.86,
+          "monthlyCellsTotal": 355114.86,
+          "ties": true,
+          "note": "Σ daily-per-SKU spend (3,55,114.86) = Σ by-day (3,55,114.86) = Σ monthly attributed cells = 3,55,114.86. The attributed-spend anchor re-derives from the daily per-ASIN export end-to-end."
+        },
+        "source": "may_product_wise_sp.xlsx (Date · Advertised ASIN · Spend), daily per-ASIN",
+        "label": "Amazon Sponsored Products (per-ASIN ads)",
+        "tier": "native",
+        "file": "may_product_wise_sp.xlsx"
       },
       "ads-fk-pla": {
-        "flipkartPlaTotal": 47405.56
+        "flipkartPlaTotal": 47405.56,
+        "label": "Flipkart PLA (per-SKU ads)",
+        "tier": "native",
+        "file": "flipkart may ads.csv"
       },
       "ads-google": {
         "googleProductTotal": 116648.42,
@@ -17374,7 +17995,10 @@ export const BUNDLED_BUSINESS = {
           "NSSB250": "exact-needle",
           "NSSBJ500": "exact-needle",
           "NSSB100": "exact-needle"
-        }
+        },
+        "label": "Google product-wise ads (title-matched)",
+        "tier": "native-fuzzy",
+        "file": "google may ads.csv"
       },
       "snell-agency": {
         "snellChannelSpend": {
@@ -17386,68 +18010,117 @@ export const BUNDLED_BUSINESS = {
           "blinkitGrossCrosscheck": 281560,
           "blinkitUnitsCrosscheck": 386,
           "rows": 31
-        }
+        },
+        "label": "Snell agency channel spend (Sale tab)",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
       },
       "monarch-web": {
         "monarchWebSpend": {
           "month": "2026-05",
           "googleTotal": 135008.32,
-          "metaTotal": 77950.03
+          "metaTotal": 77950.03,
+          "attributed": 212958.35,
+          "monarchTotalSpend": 218066.7,
+          "reconDelta": 5108.35,
+          "reconNote": "Website ad total = Google + Meta (per-platform daily columns) = 212958.35; Monarch's own “Total Spend” column = 218066.7; delta 5108.35 (un-broken-out spend in Monarch's total not split by platform — surfaced, not absorbed)."
         },
         "monarchWebHistory": {
           "2025-06": {
             "convValue": 51824.12,
-            "days": 7
+            "days": 7,
+            "totalSpend": 6704.61,
+            "googleMeta": 6508.7,
+            "reconDelta": 195.91
           },
           "2025-07": {
             "convValue": 175320.92,
-            "days": 31
+            "days": 31,
+            "totalSpend": 33661.48,
+            "googleMeta": 33661.48,
+            "reconDelta": 0
           },
           "2025-08": {
             "convValue": 348681.5,
-            "days": 31
+            "days": 31,
+            "totalSpend": 69368.95,
+            "googleMeta": 69368.95,
+            "reconDelta": 0
           },
           "2025-09": {
             "convValue": 305153.01,
-            "days": 30
+            "days": 30,
+            "totalSpend": 108480.27,
+            "googleMeta": 108480.27,
+            "reconDelta": 0
           },
           "2025-10": {
             "convValue": 432019.58,
-            "days": 31
+            "days": 31,
+            "totalSpend": 110702.16,
+            "googleMeta": 110702.16,
+            "reconDelta": 0
           },
           "2025-11": {
             "convValue": 451948.6,
-            "days": 30
+            "days": 30,
+            "totalSpend": 129263.51,
+            "googleMeta": 129263.51,
+            "reconDelta": 0
           },
           "2025-12": {
             "convValue": 643160.01,
-            "days": 31
+            "days": 31,
+            "totalSpend": 180398.44,
+            "googleMeta": 180398.44,
+            "reconDelta": 0
           },
           "2026-01": {
             "convValue": 686588,
-            "days": 31
+            "days": 31,
+            "totalSpend": 191069.21,
+            "googleMeta": 191069.21,
+            "reconDelta": 0
           },
           "2026-02": {
             "convValue": 597425.12,
-            "days": 28
+            "days": 28,
+            "totalSpend": 182851.25,
+            "googleMeta": 182851.25,
+            "reconDelta": 0
           },
           "2026-03": {
             "convValue": 886146.35,
-            "days": 31
+            "days": 31,
+            "totalSpend": 311499.68,
+            "googleMeta": 311499.68,
+            "reconDelta": 0
           },
           "2026-04": {
             "convValue": 523346.83,
-            "days": 30
+            "days": 30,
+            "totalSpend": 165519.58,
+            "googleMeta": 165519.58,
+            "reconDelta": 0
           },
           "2026-05": {
             "convValue": 782875.24,
-            "days": 31
+            "days": 31,
+            "totalSpend": 218066.7,
+            "googleMeta": 212958.35,
+            "reconDelta": 5108.35
           },
           "2026-06": {
             "convValue": 139266.55,
-            "days": 30
+            "days": 30,
+            "totalSpend": 59629.01,
+            "googleMeta": 59629.01,
+            "reconDelta": 0
           }
-        }
+        },
+        "label": "Monarch website Google/Meta spend",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },
       "snell-history": {
         "tier": "agency",
@@ -17503,7 +18176,9 @@ export const BUNDLED_BUSINESS = {
           "bkUnits": 52,
           "bkGross": 53,
           "bkAd": 56
-        }
+        },
+        "label": "Snell agency full daily history",
+        "file": "SnellSales&AdsSheet.xlsx"
       },
       "snell-sku-units": {
         "tier": "agency",
@@ -22170,7 +22845,9 @@ export const BUNDLED_BUSINESS = {
           "2026-06-10|blinkit|NSSBDB500": 2,
           "2026-06-10|blinkit|NSSB100": 10,
           "2026-06-10|blinkit|NSSB250": 18
-        }
+        },
+        "label": "Snell agency per-SKU units (Categorywise)",
+        "file": "SnellSales&AdsSheet.xlsx"
       },
       "monarch-history": {
         "tier": "monarch",
@@ -22297,7 +22974,9 @@ export const BUNDLED_BUSINESS = {
             "days": 10,
             "lastDay": "2026-06-10"
           }
-        }
+        },
+        "label": "Monarch website full history (orders/conv)",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },
       "snell-cancel": {
         "source": "snell-cancel",
@@ -22583,7 +23262,9 @@ export const BUNDLED_BUSINESS = {
             "month": "2026-06",
             "cancelPct": 0.45
           }
-        }
+        },
+        "label": "Shipped-vs-cancel · Snell agency",
+        "file": "SnellSales&AdsSheet.xlsx"
       },
       "monarch-seo": {
         "source": "monarch-seo",
@@ -23171,7 +23852,9 @@ export const BUNDLED_BUSINESS = {
             "movementAll": -31
           }
         ],
-        "totalKeywords": 44
+        "totalKeywords": 44,
+        "label": "Monarch website SEO keyword ranks",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },
       "monarch-platform": {
         "source": "monarch-platform",
@@ -23391,7 +24074,9 @@ export const BUNDLED_BUSINESS = {
           "gConv": 12,
           "mSale": 25,
           "mConv": 28
-        }
+        },
+        "label": "Monarch website platform totals",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },
       "bm-repeats": {
         "source": "bm-repeats",
@@ -23484,7 +24169,9 @@ export const BUNDLED_BUSINESS = {
             "repeatShare": 9.51,
             "salesFromRepeatShare": 11.71
           }
-        ]
+        ],
+        "label": "Repeat-customer history · Business Model",
+        "file": "Naturesum_BusinessModel.xlsx"
       },
       "bm-returns": {
         "source": "bm-returns",
@@ -23575,7 +24262,9 @@ export const BUNDLED_BUSINESS = {
             "grossInr": 671502,
             "returnPct": 15.4
           }
-        ]
+        ],
+        "label": "Returns history · Business Model",
+        "file": "Naturesum_BusinessModel.xlsx"
       },
       "snell-ordermix": {
         "source": "snell-ordermix",
@@ -23789,7 +24478,9 @@ export const BUNDLED_BUSINESS = {
           "reviewAmt": 18,
           "organicAmt": 19
         },
-        "columnFallbacks": []
+        "columnFallbacks": [],
+        "label": "Order-mix · Snell agency (Non-Advt/Review/Organic)",
+        "file": "SnellSales&AdsSheet.xlsx"
       },
       "monarch-extra": {
         "source": "monarch-extra-tabs",
@@ -24703,7 +25394,9 @@ export const BUNDLED_BUSINESS = {
               ]
             }
           ]
-        }
+        },
+        "label": "Monarch extra tabs (Mar-25 daily · weekly)",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
       },
       "cogs-history": {
         "source": "Naturesum_Unit_COGS Notes column",
@@ -24913,148 +25606,532 @@ export const BUNDLED_BUSINESS = {
             "changed": true,
             "noteRaw": "RM: Rs470/L landed estimate (user, 11-Jun-26; was Rs200). Pkg: Rs107.3 bottle, carried from Apr'26 MIS, confirmed unchanged"
           }
-        }
+        },
+        "label": "Unit COGS history (Notes column)",
+        "tier": "cogs",
+        "file": "Naturesum_Unit_COGS_116.xlsx"
       }
     },
     "skuIdentity": {
       "NSACDT30": {
         "fuzzy": false,
         "fuzzyVia": [],
+        "titleVia": [],
         "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
       },
       "NSJO100": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSMP100": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSMP250": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSB100": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSB250": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSB500": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSBBO15": {
         "fuzzy": false,
         "fuzzyVia": [],
+        "titleVia": [],
         "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
       },
       "NSSBBO30": {
         "fuzzy": false,
         "fuzzyVia": [],
+        "titleVia": [],
         "note": "Resolved by an exact identifier map across every source (ASIN/MSKU/FK-SKU/Item-Id/Shopify-SKU/Snell-column/COGS-name)."
       },
       "NSSBDB100": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSBDB250": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSBDB500": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSBJ300": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
       },
       "NSSBJ500": {
-        "fuzzy": true,
-        "fuzzyVia": [
+        "fuzzy": false,
+        "fuzzyVia": [],
+        "titleVia": [
           {
             "source": "ads-google",
             "method": "exact-needle",
             "basis": "free-text Google product title (numeric size token pinned exactly; brand/variant matched by needle)"
           }
         ],
-        "note": "Ad spend on this SKU was attributed from a free-text Google product TITLE by similarity (numeric size token pinned exactly; brand/variant matched by needle) — not an exact identifier. All sales/units still resolve via exact identifier maps; verify the ad attribution if a title is renamed."
+        "note": "Ad spend attributed from the Google product title, but the numeric size token pinned a SINGLE candidate (exact-needle) — a high-confidence, map-like resolution. All sales/units resolve via exact identifier maps."
+      }
+    },
+    "skuVariantFold": {
+      "NSSBJ300": {
+        "canonical": "NSSBJ300",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSBJ300",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBJ300ML",
+                "units": 158,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBJ300ML_MP",
+                "units": 34,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GRMC94JJ"
+            ],
+            "label": "NSSBJ300 = NSSBJ300ML + NSSBJ300ML_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSSB500": {
+        "canonical": "NSSB500",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSB500",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP500",
+                "units": 102,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP500_MP",
+                "units": 18,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GHQVMC93"
+            ],
+            "label": "NSSB500 = NSSBP500 + NSSBP500_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSSB100": {
+        "canonical": "NSSB100",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP100_MP",
+                "units": 86,
+                "isMp": true,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP100",
+                "units": 28,
+                "isMp": false,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0FPMJMRW7"
+            ],
+            "label": "NSSB100 = NSSBP100_MP + NSSBP100 folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSSB250": {
+        "canonical": "NSSB250",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSB250",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBP250",
+                "units": 170,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBP250_MP",
+                "units": 29,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0FPMDD8ZS"
+            ],
+            "label": "NSSB250 = NSSBP250 + NSSBP250_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSSBJ500": {
+        "canonical": "NSSBJ500",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSBJ500",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBJ500ML_MP",
+                "units": 181,
+                "isMp": true,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBJ500ML",
+                "units": 95,
+                "isMp": false,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0GRMG2BLQ"
+            ],
+            "label": "NSSBJ500 = NSSBJ500ML_MP + NSSBJ500ML folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSSBDB100": {
+        "canonical": "NSSBDB100",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSSBDB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBDB100g",
+                "units": 68,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "NSSBDB100g_MP",
+                "units": 43,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0DV5K7BB4"
+            ],
+            "label": "NSSBDB100 = NSSBDB100g + NSSBDB100g_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          },
+          "flipkart": {
+            "channel": "flipkart",
+            "canonical": "NSSBDB100",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "NSSBDB100g",
+                "mult": 1,
+                "orderRows": 58,
+                "baseUnits": 58,
+                "foldedUnits": 58,
+                "isMultipack": false
+              },
+              {
+                "rawSku": "NSSBDB100g*2",
+                "mult": 2,
+                "orderRows": 29,
+                "baseUnits": 29,
+                "foldedUnits": 58,
+                "isMultipack": true
+              }
+            ],
+            "label": "NSSBDB100 = NSSBDB100g + NSSBDB100g*2 folded",
+            "rule": "Flipkart SKU `<base> * N` is a multipack order: it folds into the base canonical counting N base units (qty × N). Components retained pre-fold (raw SKU, multiplier, base vs folded units) so the multipack identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
+      },
+      "NSACDT30": {
+        "canonical": "NSACDT30",
+        "byChannel": {
+          "amazon": {
+            "channel": "amazon",
+            "canonical": "NSACDT30",
+            "folded": true,
+            "components": [
+              {
+                "rawSku": "DI-TE-1-A",
+                "units": 31,
+                "isMp": false,
+                "viaAsin": false
+              },
+              {
+                "rawSku": "DI-TE-1-A_MP",
+                "units": 3,
+                "isMp": true,
+                "viaAsin": false
+              }
+            ],
+            "asins": [
+              "B0F88G8DYP"
+            ],
+            "label": "NSACDT30 = DI-TE-1-A + DI-TE-1-A_MP folded",
+            "rule": "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable."
+          }
+        },
+        "anyFolded": true
       }
     },
     "latestDataDate": "2026-06-10",
-    "appBuildDate": "2026-06-13"
+    "appBuildDate": "2026-06-13",
+    "sourceLabels": {
+      "amazon-orders": {
+        "label": "Amazon All-Orders (native export)",
+        "tier": "native",
+        "file": "amazonmaysales.txt"
+      },
+      "amazon-order-composition": {
+        "label": "Amazon order composition (FBA/MFN · B2B/B2C · basket)",
+        "tier": "native",
+        "file": "amazonmaysales.txt"
+      },
+      "fk-sales": {
+        "label": "Flipkart Sales Report (native export)",
+        "tier": "native",
+        "file": "flipkart may sales.xlsx"
+      },
+      "blinkit-sales": {
+        "label": "Blinkit Sales Report (native export)",
+        "tier": "native",
+        "file": "blinkit may sales.xlsx"
+      },
+      "shopify-net": {
+        "label": "Shopify net sales/units (native export)",
+        "tier": "native",
+        "file": "shopify net sales net units.csv"
+      },
+      "shopify-daily": {
+        "label": "Shopify daily website sales (native)",
+        "tier": "native",
+        "file": "Website Sales of all SKUs.csv"
+      },
+      "ads-amazon-sp": {
+        "label": "Amazon Sponsored Products (per-ASIN ads)",
+        "tier": "native",
+        "file": "may_product_wise_sp.xlsx"
+      },
+      "ads-fk-pla": {
+        "label": "Flipkart PLA (per-SKU ads)",
+        "tier": "native",
+        "file": "flipkart may ads.csv"
+      },
+      "ads-google": {
+        "label": "Google product-wise ads (title-matched)",
+        "tier": "native-fuzzy",
+        "file": "google may ads.csv"
+      },
+      "snell-agency": {
+        "label": "Snell agency channel spend (Sale tab)",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
+      },
+      "snell-history": {
+        "label": "Snell agency full daily history",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
+      },
+      "snell-sku-units": {
+        "label": "Snell agency per-SKU units (Categorywise)",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
+      },
+      "snell-ordermix": {
+        "label": "Order-mix · Snell agency (Non-Advt/Review/Organic)",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
+      },
+      "snell-cancel": {
+        "label": "Shipped-vs-cancel · Snell agency",
+        "tier": "agency",
+        "file": "SnellSales&AdsSheet.xlsx"
+      },
+      "monarch-web": {
+        "label": "Monarch website Google/Meta spend",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
+      },
+      "monarch-history": {
+        "label": "Monarch website full history (orders/conv)",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
+      },
+      "monarch-platform": {
+        "label": "Monarch website platform totals",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
+      },
+      "monarch-seo": {
+        "label": "Monarch website SEO keyword ranks",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
+      },
+      "monarch-extra": {
+        "label": "Monarch extra tabs (Mar-25 daily · weekly)",
+        "tier": "monarch",
+        "file": "MonarchWebsiteSales&AdsSheet.xlsx"
+      },
+      "bm-repeats": {
+        "label": "Repeat-customer history · Business Model",
+        "tier": "businessmodel",
+        "file": "Naturesum_BusinessModel.xlsx"
+      },
+      "bm-returns": {
+        "label": "Returns history · Business Model",
+        "tier": "businessmodel",
+        "file": "Naturesum_BusinessModel.xlsx"
+      },
+      "cogs-history": {
+        "label": "Unit COGS history (Notes column)",
+        "tier": "cogs",
+        "file": "Naturesum_Unit_COGS_116.xlsx"
+      }
+    },
+    "sourceRecency": {
+      "amazon-orders": "2026-05-31",
+      "amazon-order-composition": "2026-05-28",
+      "fk-sales": "2026-05-31",
+      "blinkit-sales": "2026-05-31",
+      "shopify-net": "2026-05-31",
+      "ads-amazon-sp": "2026-05-31",
+      "ads-fk-pla": "2026-05-31",
+      "ads-google": "2026-05-31",
+      "snell-agency": "2026-05-31",
+      "snell-history": "2026-06-10",
+      "snell-sku-units": "2026-06-10",
+      "monarch-web": "2026-06-10",
+      "monarch-history": "2026-06-10",
+      "monarch-seo": "2026-02-18",
+      "monarch-extra": "2026-05-31",
+      "cogs-history": "2026-06-10"
+    }
   }
 };

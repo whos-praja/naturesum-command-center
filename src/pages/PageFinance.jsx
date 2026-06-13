@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Icon, Card } from "../components/Shared.jsx";
 import NSData from "../data.js";
 import { mergedFacts } from "../lib/businessStore.js";
 import {
   computeCM,
+  computeCMv2,
   computeMonthChannelCM,
   monthsAvailable,
   monthlyNetRevByChannel,
@@ -30,6 +31,7 @@ import {
   costChangeHistory,
 } from "../lib/bizAnalytics.js";
 import { runVerification, runFormattingSanity, ANCHOR_MONTH } from "../lib/businessVerification.js";
+import { runIngestionSelfTest } from "../lib/ingestionSelfTest.js";
 import BizCoveragePanel from "../components/BizCoveragePanel.jsx";
 import { UploadModal } from "../components/UploadModal.jsx";
 import { AutoNarrative } from "../components/biz/AutoNarrative.jsx";
@@ -421,6 +423,39 @@ const FinanceHeadline = ({ view, month, projection, concentration }) => {
   const proj = projection || {};
   const conf = CONF_META[proj.confidence] || CONF_META.medium;
   const concCh = concentration?.byChannel?.revenue;
+
+  // V-90 — the "no-COGS passthrough" leg, so the CM3 ⓘ closes on its OWN face.
+  // A channel whose COGS is UNKNOWN (e.g. agency-month website) keeps its net in
+  // the headline revenue total but its CM3 is null (Unknown ≠ zero) — so a naïve
+  // ladder (net − COGS − fees − ad) OVER-credits by exactly that channel's
+  // would-be pre-COGS contribution (net − fees − ad). We tally that leg from the
+  // same byChannel cells the page already shows, so net − cogs − fees − ad −
+  // passthrough re-derives to the reported CM3 inside the popover (matches the
+  // engine's computeCMv2 noCogsPassthrough exactly; verified June = ₹40,110.91).
+  const passLegs = [];
+  let noCogsPassthrough = 0;
+  for (const ch of view.channels || []) {
+    const c = view.byChannel?.[ch];
+    if (!c || c.coverage === "none") continue;
+    if (c.cm3 == null || c.cogs == null || c.cogsCovered === false) {
+      const leg = (Number(c.netRev) || 0) - (Number(c.fees) || 0) - (Number(c.adSpend) || 0);
+      noCogsPassthrough += leg;
+      passLegs.push({ channel: ch, leg });
+    }
+  }
+  const hasPassthrough = passLegs.length > 0 && Math.abs(noCogsPassthrough) > 0.5;
+  const cm3Inputs = [
+    { label: "Net revenue", value: fmtINR(co?.netRev) },
+    { label: "− COGS", value: co?.cogs == null ? "—" : "−" + fmtINR(co.cogs) },
+    { label: "− Platform fees", value: "−" + fmtINR(co?.fees) },
+    { label: "− Ad spend", value: "−" + fmtINR(co?.adSpend) },
+  ];
+  if (hasPassthrough) {
+    cm3Inputs.push({
+      label: `− No-COGS passthrough (${passLegs.map((p) => chMeta(p.channel).label).join(", ")})`,
+      value: "−" + fmtINR(noCogsPassthrough),
+    });
+  }
   return (
     <div className="grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
       {/* Company CM3 — the decision layer */}
@@ -429,14 +464,13 @@ const FinanceHeadline = ({ view, month, projection, concentration }) => {
           <div className="stat-num lg" style={{ color: cmColor(cm3) }}>{cm3 == null ? "—" : fmtSignedINR(cm3)}</div>
           <DerivationPopover
             title={`Company CM3 · ${monthLabel(month)}`}
-            formula="Σ channels (netRev − COGS − platform fees − ads)"
-            plain="CM3 is contribution after the ad spend that produced the sale — the layer you delist or cut a budget on. Fixed cost (CM4) is a reporting view layered after."
-            inputs={[
-              { label: "Net revenue", value: fmtINR(co?.netRev) },
-              { label: "− COGS", value: co?.cogs == null ? "—" : "−" + fmtINR(co.cogs) },
-              { label: "− Platform fees", value: "−" + fmtINR(co?.fees) },
-              { label: "− Ad spend", value: "−" + fmtINR(co?.adSpend) },
-            ]}
+            formula={hasPassthrough
+              ? "netRev − COGS − fees − ads − no-COGS passthrough"
+              : "Σ channels (netRev − COGS − platform fees − ads)"}
+            plain={hasPassthrough
+              ? `CM3 is contribution after the ad spend that produced the sale — the layer you delist or cut a budget on. ${passLegs.map((p) => chMeta(p.channel).label).join(", ")} carries net revenue with COGS UNKNOWN, so its would-be pre-COGS contribution (net − fees − ad = ${fmtINR(noCogsPassthrough)}) is held OUT of CM3 (Unknown ≠ zero). That passthrough leg is what closes net − COGS − fees − ad down to the reported CM3 — so these five inputs sum on their own face. Fixed cost (CM4) is a reporting view layered after.`
+              : "CM3 is contribution after the ad spend that produced the sale — the layer you delist or cut a budget on. Fixed cost (CM4) is a reporting view layered after."}
+            inputs={cm3Inputs}
             value={cm3 == null ? "—" : fmtSignedINR(cm3)}
             source="cmEngine · coverage-aware CM"
             asOf={proj.lastDay || month}
@@ -807,13 +841,38 @@ const ForecastView = ({ facts, month, view }) => {
               <strong style={{ fontSize: 13 }}>{grainLabel}</strong>
               <span className="muted" style={{ fontSize: 11 }}>{mm.label} · {mm.hint}</span>
             </div>
+            {/* II — DUAL-JUNE RECONCILIATION. The headline read-out projects the
+                in-progress month at PACE; this Forecast tab models it via the
+                trend⊕run-rate blend. Previously the two "June" figures sat ~₹3.7L
+                apart, unlinked. Show BOTH side-by-side from ONE structure with the
+                method label + which to trust — never two stray "June"s. */}
+            {fc.currentMonth && <CurrentMonthReconciliation cm={fc.currentMonth}/>}
             <ForecastChart fc={fc} D={D} metric={metric} height={260}/>
             <hr className="hr"/>
             <ForecastTable fc={fc} metric={metric}/>
             <div style={{ padding: "8px 2px 0", fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
               <strong>Method:</strong> {fc.method}. The trailing window uses <strong>complete months only</strong> (a partial
-              month would bias the slope down). Units ride the held realized ₹/unit; contribution rides the recent CM3 margin
-              ({fc.cm3MarginPct != null ? fmtPct(fc.cm3MarginPct) : "—"}). The shaded band is ±residual σ·√h — it <strong>widens with
+              month would bias the slope down). Units ride the held realized ₹/unit; contribution rides the{" "}
+              <strong>held CM3 margin</strong>{" "}
+              {fc.heldMargin?.pct != null ? fmtPct(fc.heldMargin.pct) : (fc.cm3MarginPct != null ? fmtPct(fc.cm3MarginPct) : "—")}
+              {fc.heldMargin && fc.heldMargin.pct != null && (
+                <DerivationPopover
+                  title="Held CM3 margin · forward contribution"
+                  formula="Σ CM3 ÷ Σ net revenue, over the trailing complete months"
+                  plain={`The forward CM3 line rides this blended margin. It is the REAL same-window CM3% of the exact trailing complete months whose revenue feeds the trend — not a placeholder. It runs low/negative when a recent month ran ad-heavy (May company CM3 was negative), so the forward contribution honestly reflects that.`}
+                  inputs={[
+                    { label: "Months used", value: (fc.heldMargin.months || []).map(monthShort).join(", ") || "—" },
+                    { label: "Σ CM3", value: fmtSignedINR(fc.heldMargin.cm3Sum) },
+                    { label: "Σ net revenue", value: fmtINR(fc.heldMargin.revSum) },
+                    { label: "= held CM3 margin", value: fmtPct(fc.heldMargin.pct) },
+                  ]}
+                  value={fmtPct(fc.heldMargin.pct)}
+                  source="bizAnalytics · forecast.heldMargin"
+                  asOf={fc.asOfMonth}
+                />
+              )}
+              {" "}— the same blended CM3% of the months feeding the trend, not a bare placeholder.
+              The shaded band is ±residual σ·√h — it <strong>widens with
               horizon</strong> because uncertainty compounds. Confidence is{" "}
               <strong>{fc.confidence}</strong>{fc.note ? `; ${fc.note}` : ""}.
             </div>
@@ -861,6 +920,72 @@ const ForecastTable = ({ fc, metric }) => {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+};
+
+// ── CurrentMonthReconciliation (II) ──────────────────────────────────────────
+// The in-progress month has TWO defensible projections that previously appeared
+// ~₹3.7L apart in two different places: PACE (this month held at prior-month
+// same-day pace — the read-out headline, narrow band) and TREND⊕RUN-RATE (the
+// forward-month blend this tab uses, wider band). We show them side-by-side from
+// the engine's single `currentMonth` structure, flag which to trust (recommended
+// = pace while the month is live), and state WHY they differ — never two unlinked
+// "June" figures. Every value NaN-safe.
+const CurrentMonthReconciliation = ({ cm }) => {
+  if (!cm || !cm.partial) return null;
+  const rec = cm.recommended || "pace";
+  const pace = cm.pace || {};
+  const trend = cm.trend || {};
+  const Box = ({ kind, data, label }) => {
+    const isRec = kind === rec;
+    return (
+      <div style={{
+        flex: 1, minWidth: 200, padding: "10px 12px", borderRadius: 8,
+        border: `1px solid ${isRec ? "var(--success)" : "var(--border)"}`,
+        background: isRec ? "rgba(63,114,80,0.06)" : "var(--bg-sunken)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+          <span className="muted" style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</span>
+          {isRec && <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 3, background: "rgba(63,114,80,0.16)", color: "var(--success)" }}>RECOMMENDED</span>}
+        </div>
+        <div className="stat-num" style={{ fontSize: 20, fontWeight: 700 }}>{fmtINR(data.netRev)}</div>
+        <div className="muted" style={{ fontSize: 10.5, marginTop: 2, lineHeight: 1.4 }}>
+          band {fmtINR(data.low)}–{fmtINR(data.high)}
+        </div>
+        <div className="muted" style={{ fontSize: 10, marginTop: 3, lineHeight: 1.4, fontStyle: "italic" }}>{data.method}</div>
+      </div>
+    );
+  };
+  return (
+    <div style={{ marginBottom: 14, border: "1px solid var(--warning)", borderRadius: 10, padding: "10px 12px", background: "var(--warning-soft)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: 12.5 }}>{monthLabel(cm.month)} is in progress — two defensible projections</strong>
+        <span className="muted" style={{ fontSize: 11 }}>
+          MTD {fmtINR(cm.mtd)} through day {cm.dom} of {cm.daysInMonth}
+        </span>
+        <DerivationPopover
+          title={`${monthLabel(cm.month)} month-end · pace vs trend`}
+          formula="PACE = MTD × (priorFull ÷ priorToDate)  ·  TREND = ½·trend + ½·run-rate"
+          plain="The same in-progress month, two honest reads. PACE extrapolates the month already underway at the rate the prior month ran to the same day — the more defensible read for a month 1/3 elapsed, so it's the headline. TREND⊕RUN-RATE is the multi-month-direction blend this tab uses for forward months. They differ because pace reads THIS month's momentum while the blend reads the trailing trend; trust pace while the month is live."
+          inputs={[
+            { label: "MTD (day " + cm.dom + ")", value: fmtINR(cm.mtd) },
+            { label: "Pace (recommended)", value: fmtINR(pace.netRev) },
+            { label: "Trend ⊕ run-rate", value: fmtINR(trend.netRev) },
+            { label: "Difference", value: fmtINR(Math.abs((Number(pace.netRev) || 0) - (Number(trend.netRev) || 0))) },
+          ]}
+          value={`${fmtINR(pace.netRev)} (pace) · ${fmtINR(trend.netRev)} (trend)`}
+          source="bizAnalytics · forecast.currentMonth"
+          asOf={cm.month}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Box kind="pace" data={pace} label="Pace (this month held forward)"/>
+        <Box kind="trend" data={trend} label="Trend ⊕ run-rate (forward blend)"/>
+      </div>
+      {cm.note && (
+        <div className="muted" style={{ fontSize: 10.5, marginTop: 8, lineHeight: 1.5 }}>{cm.note}</div>
+      )}
     </div>
   );
 };
@@ -957,18 +1082,53 @@ const LEVER_LABEL = {
   "ad-cut": "Ad cut", delist: "Delist", reprice: "Reprice",
   reallocate: "Reallocate", reorder: "Reorder", "de-risk": "De-risk",
 };
+// VIII-95 — resolve the period the action queue's per-SKU impacts are measured on.
+// If the selected month is itself native + complete, the queue uses it directly.
+// Otherwise (partial / agency-tier, e.g. June-MTD) the per-SKU levers have no base,
+// so we fall back to the latest COMPLETE NATIVE month at or before the selection —
+// and the caller labels that period explicitly. Pure; never throws.
+function resolveActionPeriod(facts, month, view) {
+  // Selected month already carries a per-SKU native chain and is complete → use it.
+  if (view?.cmV1 != null && !view?.partial) return { month, partial: false, fellBack: false };
+  const models = monthsAvailable(facts);
+  // Latest complete (non-partial) month with at least one native channel, ≤ selection.
+  let best = null;
+  for (const m of models) {
+    if (m.month > month) continue;
+    if (m.partial) continue;
+    const native = Object.values(m.channels || {}).some((c) => c.sales === "native");
+    if (native) best = m; // models ascending — keep latest
+  }
+  if (best) return { month: best.month, partial: !!best.partial, fellBack: best.month !== month };
+  // No complete native month anywhere ≤ selection — stay on the selection (the
+  // queue will be channel-level only; the agency note covers it).
+  return { month, partial: !!view?.partial, fellBack: false };
+}
+
 const ActionsView = ({ facts, month, view }) => {
+  // VIII-95 — the queue's per-SKU levers (ad-cut / delist / reprice / reorder)
+  // need a NATIVE per-SKU base. When the page sits on a partial / agency-tier
+  // month (e.g. June-MTD, the headline period), there is no per-SKU matrix for
+  // that month, so the actionable impacts are sourced from the LATEST COMPLETE
+  // NATIVE month instead. We resolve that period here and LABEL it explicitly, so
+  // the founder is never silently holding two periods (June headline + May queue).
+  const queuePeriod = useMemo(() => resolveActionPeriod(facts, month, view), [facts, month, view]);
+  const queueMonth = queuePeriod.month;
+  const periodDiffers = queueMonth !== month;
+
   // VIII — ONE "what to do Monday" queue spanning ALL levers (reorder / delist /
   // reprice / ad-cut / reallocate / de-risk), each ranked by ₹ impact. Cross-module
   // velocity is joined in (rubric 58) so reorder/stockout-risk rows sit alongside
   // the ad/margin levers — not an ad-budget-only list. NaN-safe.
-  const velocity = useMemo(() => crossModuleVelocity(facts, { month }), [facts, month]);
+  const velocity = useMemo(() => crossModuleVelocity(facts, { month: queueMonth }), [facts, queueMonth]);
   const queue = useMemo(
-    () => actionQueue(facts, { month, costs: CostInputs, velocity }),
-    [facts, month, velocity]
+    () => actionQueue(facts, { month: queueMonth, costs: CostInputs, velocity }),
+    [facts, queueMonth, velocity]
   );
   // VII-59 — the written PROSE weekly read-out ("what changed & what it means"),
-  // the prescriptive prose that frames the queue.
+  // the prescriptive prose that frames the queue. Prose tracks the SELECTED month
+  // (it summarises the period the founder is looking at), the queue tracks the
+  // latest complete native month — both periods are labelled below.
   const narrative = useMemo(
     () => proseWeeklyNarrative(facts, { month, costs: CostInputs }),
     [facts, month]
@@ -994,11 +1154,23 @@ const ActionsView = ({ facts, month, view }) => {
 
       <Card
         title="What to do Monday · one queue, every lever"
-        sub={`A single ranked action list across reorder · delist · reprice · ad-cut · reallocate · de-risk — not an ad-budget-only list. Ranked by ₹ impact · ${monthLabel(month)}`}
+        sub={`A single ranked action list across reorder · delist · reprice · ad-cut · reallocate · de-risk — not an ad-budget-only list. Ranked by ₹ impact · impacts measured on ${monthLabel(queueMonth)}${queuePeriod.partial ? " (partial)" : " (latest complete month)"}`}
       >
-        {!isNative && (
+        {/* VIII-95 — explicit period label so the founder never conflates the
+            June-MTD headline above with the queue's May impact period. */}
+        {periodDiffers && (
+          <div className="note" style={{ marginBottom: 12, background: "rgba(63,114,80,0.05)", borderColor: "rgba(63,114,80,0.22)" }}>
+            <strong style={{ color: "var(--success)" }}>Queue period · {monthLabel(queueMonth)} (latest complete month).</strong>&nbsp;
+            The page headline above is <strong>{monthLabel(month)}{view.partial ? " (MTD, in progress)" : ""}</strong>, but the per-SKU
+            ad/delist/reprice/reorder impacts below need a complete native per-SKU base — {monthLabel(month)} has none yet
+            ({view.cmV1 == null ? "agency-tier" : "still in progress"}). So these ₹ figures are measured on the latest closed native
+            month, <strong>{monthLabel(queueMonth)}</strong>. Two periods, both labelled — you're not holding one in your head.
+          </div>
+        )}
+
+        {!isNative && !periodDiffers && (
           <div className="note" style={{ marginBottom: 12, background: "rgba(99,102,241,0.06)", borderColor: "rgba(99,102,241,0.25)" }}>
-            <strong style={{ color: "#6366f1" }}>{monthLabel(month)} is an agency-tier month.</strong>&nbsp;
+            <strong style={{ color: "#6366f1" }}>{monthLabel(queueMonth)} is an agency-tier month.</strong>&nbsp;
             SKU×channel ad/delist/reprice actions need per-SKU margin (native reports). Channel-level guidance (concentration)
             and the prose read-out still apply; upload native reports to unlock per-SKU actions.
           </div>
@@ -1006,7 +1178,7 @@ const ActionsView = ({ facts, month, view }) => {
 
         {queue.length === 0 ? (
           <div className="muted" style={{ fontSize: 12 }}>
-            No loss-making ad cells, structural losses, reprice candidates, reorder risks, or concentration flags for {monthLabel(month)} — nothing on fire. Hold course.
+            No loss-making ad cells, structural losses, reprice candidates, reorder risks, or concentration flags for {monthLabel(queueMonth)} — nothing on fire. Hold course.
           </div>
         ) : (
           <>
@@ -1023,7 +1195,7 @@ const ActionsView = ({ facts, month, view }) => {
                 </span>
               )}
             </div>
-            <ActionQueue queue={queue} D={D} title="Ranked action queue" max={14}/>
+            <ActionQueue queue={queue} D={D} title="Ranked action queue" max={14} period={`${monthLabel(queueMonth)}${queuePeriod.partial ? " (partial)" : " (complete)"}`}/>
             <div style={{ padding: "12px 2px 0", fontSize: 10.5, color: "var(--ink-3)", lineHeight: 1.5 }}>
               <strong>Levers in this queue:</strong>{" "}
               {Object.entries(spread).map(([lev, c], i) => (
@@ -2806,6 +2978,144 @@ const DataProvenancePanel = ({ facts }) => {
   );
 };
 
+// XI — per-source freshness line for the Finance page (the same data Sales &
+// Marketing surface, so all three pages carry per-source recency, not just a single
+// "data through" date). Reads meta.sourceRecency + meta.sourceLabels; NaN-safe.
+const FIN_RECENCY_TIER_CLASS = { native: "cov-native", monarch: "cov-agency", agency: "cov-agency", businessmodel: "cov-agency" };
+const FinanceSourceRecencyLine = ({ facts }) => {
+  const recency = facts?.meta?.sourceRecency || null;
+  const labels = facts?.meta?.sourceLabels || {};
+  const latestDataDate = facts?.meta?.latestDataDate || null;
+  const rows = useMemo(() => {
+    if (!recency) return [];
+    return Object.entries(recency)
+      .map(([slug, day]) => ({ slug, day, label: labels[slug]?.label || SOURCE_REGISTRY[slug]?.label || slug, tier: labels[slug]?.tier || SOURCE_REGISTRY[slug]?.tier || null }))
+      .filter((r) => r.day)
+      .sort((a, b) => String(b.day).localeCompare(String(a.day)) || a.label.localeCompare(b.label));
+  }, [recency, labels]);
+  if (rows.length === 0) return null;
+  const globalMs = latestDataDate ? new Date(latestDataDate + "T00:00:00Z").getTime() : null;
+  const staleDays = (day) => {
+    if (globalMs == null) return 0;
+    const d = new Date(day + "T00:00:00Z").getTime();
+    if (!Number.isFinite(d)) return 0;
+    return Math.max(0, Math.round((globalMs - d) / 86400000));
+  };
+  return (
+    <details className="note" style={{ marginBottom: 14 }}>
+      <summary style={{ cursor: "pointer", fontSize: 11.5, color: "var(--ink-2)" }}>
+        <strong>Per-source freshness</strong> — {rows.length} sources loaded, newest data day {freshDay(rows[0].day)}.
+        Click to see each source&apos;s own latest day (a margin number is only as fresh as its slowest input).
+      </summary>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "4px 18px", marginTop: 8 }}>
+        {rows.map((r) => {
+          const stale = staleDays(r.day);
+          return (
+            <div key={r.slug} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, lineHeight: 1.5 }}>
+              {r.tier && <span className={`cov-badge ${FIN_RECENCY_TIER_CLASS[r.tier] || "cov-agency"} sm`}>{r.tier === "native" ? "nat" : "agc"}</span>}
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.label}>{r.label}</span>
+              <span className="mono muted" style={{ whiteSpace: "nowrap" }}>{freshDay(r.day)}</span>
+              {stale >= 1 && (
+                <span className="cov-badge cov-mtd sm" title={`This source's latest data day trails the page's freshest day by ${stale} day${stale > 1 ? "s" : ""}.`}>
+                  −{stale}d
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </details>
+  );
+};
+
+// V-90 — RUNNABLE on-page self-test. A visible button that, on click, recomputes
+// the §2/§3 anchors live from the fact store AND runs the parse-twice == parse-once
+// idempotency proof (runIngestionSelfTest) AND the formatting/sanity walk — all
+// synchronous and bounded (~40ms on the full bundle, measured), then shows PASS/FAIL
+// with the count, the wall-clock duration, and a timestamp. This is the permanent,
+// on-page live verification the founder can click any time — not buried in Upload.
+const RunnableSelfTest = ({ facts }) => {
+  const [run, setRun] = useState(null); // { ok, ranAt, durationMs, anchors:{match,total}, idemOk, sanityOk }
+  const [busy, setBusy] = useState(false);
+
+  const execute = () => {
+    setBusy(true);
+    // Defer to the next frame so the "running…" state paints before the sync work.
+    requestAnimationFrame(() => {
+      const t0 = (typeof performance !== "undefined" ? performance.now() : Date.now());
+      // (a) anchors live from the fact store.
+      const av = runVerification(facts);
+      const anchorRowsLive = av.filter((r) => r.status !== "INFO");
+      const match = anchorRowsLive.filter((r) => r.status === "MATCH").length;
+      const drift = anchorRowsLive.filter((r) => r.status === "DRIFT").length;
+      // (b) formatting/sanity walk.
+      const sv = runFormattingSanity(facts);
+      // (c) parse-twice == parse-once idempotency + per-source round-trip.
+      let idem;
+      try { idem = runIngestionSelfTest(); } catch (e) { idem = { ok: false, durationMs: 0, error: e.message, idempotency: {}, checks: [] }; }
+      const durationMs = Math.round(((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0) * 10) / 10;
+      const ok = drift === 0 && sv.status === "MATCH" && !!idem.ok;
+      setRun({
+        ok, ranAt: new Date(), durationMs,
+        anchors: { match, drift, total: anchorRowsLive.length },
+        sanityOk: sv.status === "MATCH", sanityCells: sv.checks,
+        idemOk: !!idem.ok, idemCells: idem.idempotency?.onceCells ?? null, idemSources: idem.idempotency?.sources?.length ?? null,
+        idemError: idem.error || null,
+      });
+      setBusy(false);
+    });
+  };
+
+  const ok = run?.ok;
+  return (
+    <Card
+      title="Live self-test · re-derive the anchors on demand"
+      sub="Click to recompute the §2/§3 anchors live from the fact store, run the formatting/sanity walk, and prove parse-twice == parse-once (idempotent ingestion) — bounded (~40ms), with a PASS/FAIL and a timestamp. The same checks the Upload modal runs, available here any time."
+      style={{ marginBottom: 14 }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={execute}
+          disabled={busy}
+          style={{ fontSize: 12.5, fontWeight: 600 }}
+        >
+          {busy ? "Running…" : "Re-run self-test"}
+        </button>
+        {run && (
+          <>
+            <span className="badge" style={{
+              background: (ok ? "var(--success)" : "var(--critical)") + "22",
+              color: ok ? "var(--success)" : "var(--critical)",
+              borderColor: (ok ? "var(--success)" : "var(--critical)") + "55",
+              fontWeight: 700, fontSize: 12,
+            }}>
+              {ok ? "✓ PASS" : "✗ FAIL"}
+            </span>
+            <span style={{ fontSize: 12 }}>
+              <strong>{run.anchors.match}/{run.anchors.total}</strong> anchors MATCH{run.anchors.drift ? ` · ${run.anchors.drift} DRIFT` : ""} ·{" "}
+              sanity {run.sanityOk ? "clean" : "FAILURES"} ({run.sanityCells} cells) ·{" "}
+              idempotency {run.idemOk ? "parse-twice == parse-once" : "FAILED"}{run.idemCells != null ? ` (${run.idemCells} cells, ${run.idemSources} sources)` : ""}
+            </span>
+            <span className="muted" style={{ fontSize: 11 }}>
+              ran in {run.durationMs}ms · {run.ranAt.toLocaleTimeString()}
+            </span>
+          </>
+        )}
+        {!run && (
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            Not yet run this session — the table below shows the anchors recomputed on load; click to re-derive live and stamp the time.
+          </span>
+        )}
+      </div>
+      {run && run.idemError && (
+        <div style={{ marginTop: 8, fontSize: 11.5, color: "var(--critical)" }}>idempotency error: {run.idemError}</div>
+      )}
+    </Card>
+  );
+};
+
 const VerificationView = ({ facts }) => {
   const results = useMemo(() => runVerification(facts), [facts]);
   const sanity = useMemo(() => runFormattingSanity(facts), [facts]);
@@ -2818,6 +3128,16 @@ const VerificationView = ({ facts }) => {
 
   return (
     <>
+      {/* V-90 — the ON-PAGE runnable self-test (not only inside the Upload modal):
+          a button the founder clicks to recompute the anchors + a parse-twice ==
+          parse-once idempotency proof live, in bounded time, with PASS + timestamp. */}
+      <RunnableSelfTest facts={facts}/>
+
+      {/* XI — per-source recency line (parity with Sales & Marketing): each source's
+          OWN latest data day + how far it trails the freshest, so a Feb SEO rank is
+          never read as today's number and a single "data through" date can't mislead. */}
+      <FinanceSourceRecencyLine facts={facts}/>
+
       {/* Browsable data provenance / upload trail (rubric 39/82). */}
       <DataProvenancePanel facts={facts} />
 

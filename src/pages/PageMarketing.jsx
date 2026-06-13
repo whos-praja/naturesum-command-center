@@ -404,6 +404,11 @@ const PageMarketing = () => {
           gets, for the website ad rupee (rubric 51/52). ───────────────────────── */}
       <WebsiteDailyEfficiency facts={facts} D={D} />
 
+      {/* ── XI / 83 · Per-source freshness — each ad/sales feed's true latest data
+          day + days behind the live front. Placed just above the SEO panel since the
+          SEO tab is the slow-cadence feed the founder most needs framed by recency. */}
+      <SourceRecency facts={facts} />
+
       {/* ── 5. (View B) SEO keyword-rank panel ────────────────────────────── */}
       <SeoKeywordRanks facts={facts} />
 
@@ -892,6 +897,18 @@ const WebsiteSplit = ({ facts, D }) => {
   const mTot = rows.reduce((a, r) => a + r.meta, 0);
   const grand = gTot + mTot;
 
+  // III-96 · website ad-total reconciliation. The Google+Meta per-platform columns
+  // (what we plot) vs Monarch's OWN "Total Spend" column — surface the delta as an
+  // explicit reconciliation line (the same discipline Amazon's AMS / SP recon gets),
+  // never silently absorbing the un-broken-out remainder. Same-window (per month).
+  const webSpend = facts?.meta?.bySource?.["monarch-web"]?.monarchWebSpend || null;
+  const webHistory = facts?.meta?.bySource?.["monarch-web"]?.monarchWebHistory || {};
+  // months where Monarch's own total exceeds the platform split (a real delta to show).
+  const reconMonths = Object.entries(webHistory)
+    .map(([month, v]) => ({ month, googleMeta: num(v.googleMeta), totalSpend: num(v.totalSpend), reconDelta: num(v.reconDelta) }))
+    .filter((r) => Math.abs(r.reconDelta) > 0.5)
+    .sort((a, b) => a.month.localeCompare(b.month));
+
   return (
     <Card
       title="Website spend · Google vs Meta"
@@ -937,8 +954,125 @@ const WebsiteSplit = ({ facts, D }) => {
             </span>
             &nbsp;· * = partial MTD
           </div>
+
+          {/* III-96 · website ad-total reconciliation — Monarch's own "Total Spend"
+              column vs the Google+Meta platform split we plot. The ~₹5.1K (May) delta
+              is the un-broken-out spend in Monarch's total not attributed to a
+              platform; surfaced as an explicit recon line (like Amazon's), not absorbed. */}
+          {webSpend && Math.abs(num(webSpend.reconDelta)) > 0.5 && (
+            <div className="note" style={{ marginTop: 12, borderLeft: "3px solid var(--warning)", paddingLeft: 10 }}>
+              <div style={{ fontSize: 11.5, lineHeight: 1.55 }}>
+                <strong style={{ color: "var(--ink-2)" }}>Spend reconciliation · {fmtMonth(webSpend.month)}.</strong>{" "}
+                Google <strong>{D.fmtINR(webSpend.googleTotal)}</strong> + Meta <strong>{D.fmtINR(webSpend.metaTotal)}</strong> ={" "}
+                <strong>{D.fmtINR(webSpend.attributed)}</strong> attributed by platform; Monarch&apos;s own{" "}
+                <em>Total&nbsp;Spend</em> column reads <strong>{D.fmtINR(webSpend.monarchTotalSpend)}</strong> ·{" "}
+                <span style={{ color: "var(--warning)", fontWeight: 600 }}>delta {D.fmtINR(webSpend.reconDelta)}</span>.
+              </div>
+              <div className="muted" style={{ fontSize: 10.5, marginTop: 4, lineHeight: 1.5 }}>
+                The {D.fmtINR(webSpend.reconDelta)} is un-broken-out website spend in Monarch&apos;s total that isn&apos;t split per
+                platform — shown here, not folded silently into the chart. The Google-vs-Meta efficiency view below uses only the
+                platform-attributed split (so each ROAS/CPA stays same-window). Source: Monarch website Master Sheet — Google Spend +
+                Meta Spend columns vs the Total Spend column.
+                {reconMonths.length > 1 && (
+                  <>
+                    {" "}This delta appears in {reconMonths.length} month{reconMonths.length === 1 ? "" : "s"}
+                    {" "}({reconMonths.map((r) => `${fmtMonthShort(r.month)} ${D.fmtINR(r.reconDelta)}`).join(" · ")}); every other month the
+                    platform split equals Monarch&apos;s total exactly (delta ₹0).
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
+    </Card>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * XI / 83 — PER-SOURCE RECENCY LINE.
+ * The page header carries a single "Data through <latest>" pill, but the ad/sales
+ * feeds update on DIFFERENT cadences — Amazon/Flipkart/Google ad files land monthly
+ * (May), Snell + Monarch website run daily (to Jun-10), and the Monarch SEO tab lags
+ * a quarter (Feb-18). One global date hides that. This line shows, per source this
+ * page reads, its true latest data day and how many days behind the live front it
+ * sits — so the founder never reads a Feb SEO rank as today's. Reads the engine's
+ * meta.sourceRecency (already clamped to latestDataDate so a forward-dated label can't
+ * overstate freshness) + meta.sourceLabels for the human name + tier.
+ * ════════════════════════════════════════════════════════════════════════ */
+// the ad/sales sources THIS page surfaces, in reading order. Only sources actually
+// present in the store render; anything missing is skipped (never a blank row).
+const MKT_RECENCY_SOURCES = [
+  "ads-amazon-sp", "ads-fk-pla", "ads-google",
+  "snell-history", "snell-agency",
+  "monarch-web", "monarch-platform", "monarch-seo",
+];
+const RECENCY_TIER_PILL = {
+  native:        { bg: "var(--success-soft)", fg: "var(--success)" },
+  "native-fuzzy":{ bg: "rgba(183,121,31,0.16)", fg: "#B7791F" },
+  agency:        { bg: "var(--info-soft)", fg: "var(--info)" },
+  monarch:       { bg: "rgba(99,102,241,0.14)", fg: "#4F46E5" },
+};
+const SourceRecency = ({ facts }) => {
+  const recency = facts?.meta?.sourceRecency || {};
+  const labels = facts?.meta?.sourceLabels || {};
+  const latest = facts?.meta?.latestDataDate || null;
+  const rows = MKT_RECENCY_SOURCES
+    .filter((slug) => recency[slug] || labels[slug])               // present at all
+    .map((slug) => {
+      const day = recency[slug] || null;                            // already clamped to latest
+      const st = staleness(day, latest);                            // whole-day lag behind the live front
+      return { slug, day, label: labels[slug]?.label || slug, tier: labels[slug]?.tier || "agency", stale: st };
+    });
+  if (rows.length === 0) return null;
+  return (
+    <Card
+      title="Per-source freshness"
+      sub={`Each ad/sales feed this page reads, with its true latest data day and how far it sits behind the live front (${fmtDay(latest)}). The feeds update on different cadences — the marketplace ad files are monthly, Snell + Monarch website are daily, the SEO tab lags — so a single "data through" date would hide which numbers are current.`}
+      style={{ marginBottom: 14 }}
+      padded={false}
+    >
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Tier</th>
+            <th className="num">Latest data</th>
+            <th className="num">Behind live front</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const pill = RECENCY_TIER_PILL[r.tier] || RECENCY_TIER_PILL.agency;
+            const severe = r.stale?.severe;
+            return (
+              <tr key={r.slug}>
+                <td>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontWeight: 600, fontSize: 12 }}>{r.label}</span>
+                    <span className="muted" style={{ fontFamily: "var(--mono)", fontSize: 10 }}>{r.slug}</span>
+                  </div>
+                </td>
+                <td><span className="badge" style={{ background: pill.bg, color: pill.fg, fontSize: 9.5, fontWeight: 700 }}>{r.tier}</span></td>
+                <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>{r.day ? fmtDay(r.day) : <span className="muted">—</span>}</td>
+                <td className="num" style={{ fontFamily: "var(--mono)", fontSize: 11.5 }}>
+                  {!r.day ? <span className="muted">—</span>
+                    : !r.stale ? <span style={{ color: "var(--success)" }}>current</span>
+                    : <span style={{ color: severe ? "var(--critical)" : "var(--warning)", fontWeight: 600 }}>{severe ? "⚠ " : ""}{r.stale.days}d behind</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="muted" style={{ fontSize: 10.5, padding: "8px 14px", lineHeight: 1.5 }}>
+        &quot;Behind live front&quot; = whole days between this source&apos;s latest data day and the page&apos;s live
+        data-through date ({fmtDay(latest)}); <strong>current</strong> means it reaches the front. Recency is clamped to
+        the live front, so a forward-dated label can never overstate freshness. The per-ASIN / per-SKU / Google ad files
+        are monthly (latest May), Snell and Monarch website run daily, and the Monarch SEO tab is on a slower cadence —
+        re-upload any source from the Upload panel to refresh its window. Consistent with the inventory module&apos;s
+        &quot;Data through&quot; freshness label.
+      </div>
     </Card>
   );
 };
@@ -1277,6 +1411,19 @@ const SkuDeepDive = ({ facts, month, D, skuName, skuVariant }) => {
   // cell's adBasis: ACTUAL if the channel has direct attribution, else ALLOC
   // (channel total spread by revenue), else AGENCY/NONE.
   const rows = useMemo(() => {
+    // I-7 · SKU fuzzy-match identity. Most SKUs resolve by exact identifier across
+    // every source; the website Google ad spend, however, is attributed from a
+    // free-text product TITLE (numeric size pinned exactly, brand/variant by needle)
+    // — a non-exact match. Flag ONLY where it's non-exact, and ONLY on the source it
+    // affects (Google → website ad attribution), so the founder reads the website ad
+    // figures knowing the join is title-based and verifies if a title is renamed.
+    const skuIdentity = facts?.meta?.skuIdentity || {};
+    const fuzzyChannelFor = (code) => {
+      const id = skuIdentity[code];
+      if (!id || !id.fuzzy || !Array.isArray(id.fuzzyVia)) return null;
+      // ads-google fuzz feeds the WEBSITE channel's actual ad attribution.
+      return id.fuzzyVia.some((v) => v.source === "ads-google") ? { channel: "website", note: id.note } : null;
+    };
     const out = [];
     for (const code of Object.keys(cm.matrix)) {
       for (const ch of Object.keys(cm.matrix[code])) {
@@ -1299,6 +1446,10 @@ const SkuDeepDive = ({ facts, month, D, skuName, skuVariant }) => {
         const breakevenAcos = cell.pcts?.cm2 ?? null;     // CM2% = margin available for ads
         // Loss flag ONLY when both ACOS and breakeven are known same-window.
         const losing = !acos.suppressed && acos.value != null && breakevenAcos != null && breakevenAcos > 0 && acos.value > breakevenAcos;
+        // fuzzy ad-attribution flag for THIS row: only when the SKU's fuzzy match
+        // feeds the same channel as this row (website ⇐ Google title match).
+        const fz = fuzzyChannelFor(code);
+        const fuzzy = fz && fz.channel === ch ? fz : null;
         out.push({
           code, ch, spend, rev, units,
           roas: roas.value, roasSup: roas.suppressed,
@@ -1307,15 +1458,18 @@ const SkuDeepDive = ({ facts, month, D, skuName, skuVariant }) => {
           cm3: m.cm3, cm3Pct: m.cm3Pct,
           noCogs: cell.coverage?.cogs === false || cell.cm2 == null,
           zeroSale: spend > 0 && units <= 0,
+          fuzzy,
         });
       }
     }
     out.sort((a, b) => b.spend - a.spend);
     return out;
-  }, [cm, month]);
+  }, [cm, month, facts]);
 
   const spent = rows.filter((r) => r.spend > 0);
   const zeroSale = rows.filter((r) => r.zeroSale);
+  // I-7 · distinct SKUs whose ad spend on a shown channel was title-matched (fuzzy).
+  const fuzzyCodes = [...new Set(spent.filter((r) => r.fuzzy).map((r) => r.code))];
   // M4 — the "losing per ad rupee" COUNT is SKU-ATTRIBUTED only. Alloc-by-rev
   // rows share one channel-level ACOS, so an above-breakeven channel would flag
   // every SKU on it — that is ONE channel decision, not N SKU decisions, and
@@ -1343,6 +1497,14 @@ const SkuDeepDive = ({ facts, month, D, skuName, skuVariant }) => {
           <span className="badge" style={basisPill(AD_BASIS.ALLOC)}>alloc by rev</span> = channel total split across SKUs by net revenue ·&nbsp;
           <span className="badge" style={basisPill(AD_BASIS.AGENCY)}>agency</span> = channel-grain total, no per-SKU split.
           No margin figure is shown without its basis.
+          {fuzzyCodes.length > 0 && (
+            <>
+              {" "}<span className="badge amber" style={{ fontSize: 8.5 }}>~ title-matched</span> = the website Google ad spend on
+              that SKU was attributed from a free-text product <em>title</em> (size token pinned exactly, brand/variant by needle),
+              not an exact identifier — sales/units still resolve exactly; verify the ad join if a title is renamed
+              ({fuzzyCodes.length} SKU{fuzzyCodes.length === 1 ? "" : "s"} flagged).
+            </>
+          )}
           {spent.some((r) => r.basis === AD_BASIS.ALLOC) && (
             <>
               {" "}<span style={{ color: "var(--ink-4)", fontStyle: "italic" }}>Greyed ROAS/ACOS/breakeven</span> cells are <span className="badge" style={basisPill(AD_BASIS.ALLOC)}>alloc by rev</span> rows — those
@@ -1419,7 +1581,17 @@ const SkuDeepDive = ({ facts, month, D, skuName, skuVariant }) => {
               <td className="num">{r.units <= 0 ? <span style={{ color: "var(--critical)" }}>0</span> : D.fmtN(r.units)}</td>
               <td className="num">{D.fmtINR(r.rev)}</td>
               <td className="num">{D.fmtINR(r.spend)}</td>
-              <td><span className="badge" style={basisPill(r.basis)}>{basisLabel(r.basis, r.ch)}</span></td>
+              <td>
+                <span className="badge" style={basisPill(r.basis)}>{basisLabel(r.basis, r.ch)}</span>
+                {/* I-7 · fuzzy-match badge — ONLY on the website rows whose ad spend
+                    was attributed from a Google product TITLE (non-exact), and only
+                    when that channel carries actual (Google product-wise) attribution. */}
+                {r.basis === AD_BASIS.ACTUAL && r.fuzzy && (
+                  <span className="badge amber" style={{ marginLeft: 5, fontSize: 8.5, cursor: "help" }} title={r.fuzzy.note}>
+                    ~ title-matched
+                  </span>
+                )}
+              </td>
               <td className="num" style={ratioStyle} title={isAlloc ? allocTip : undefined}>{r.roasSup ? <WindowMismatch /> : (r.roas == null ? <span className="muted">—</span> : r.roas.toFixed(2) + "×")}</td>
               <td className="num" style={isAlloc ? ratioStyle : { color: r.losing ? "var(--critical)" : undefined }} title={isAlloc ? allocTip : undefined}>
                 {r.acosSup ? <WindowMismatch /> : (r.acos == null ? <span className="muted">—</span> : fmtPct0(r.acos))}
@@ -1814,7 +1986,7 @@ const MarketingActionQueue = ({ queue, month, D }) => {
       action={recoverable > 0 ? <span className="badge" style={{ ...basisPill(AD_BASIS.ACTUAL), fontSize: 10 }}>~{D.fmtINR(recoverable)}/mo CM3 recoverable</span> : null}
       style={{ marginBottom: 14 }}
     >
-      <ActionQueue queue={queue} D={D} title="Ad actions · ranked by ₹/mo" max={10} />
+      <ActionQueue queue={queue} D={D} title="Ad actions · ranked by ₹/mo" max={10} period={fmtMonth(month)} />
       <div className="muted" style={{ fontSize: 10.5, marginTop: 10, lineHeight: 1.5 }}>
         These rows are the <strong>ad-cut</strong> and <strong>reallocate</strong> levers of the shared cross-lever
         queue (the engine&apos;s <code style={{ fontFamily: "var(--mono)" }}>actionQueue()</code>). The full queue —

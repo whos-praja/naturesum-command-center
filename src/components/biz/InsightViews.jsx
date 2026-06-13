@@ -310,6 +310,15 @@ export function BasketTrendView({ data, D = defaultD, title = "Basket / units-pe
   if (!w.length && !oh.length) return <Shell title={title} note={data?.note}><div className="muted" style={{ fontSize: 12.5 }}>No website order-count data.</div></Shell>;
   // VI-a — em-dash + "no order grain" tag where units/AOV aren't joinable, NEVER 0.
   const cell = (v, fmt) => (v == null ? <span className="muted" title="Order count exists, but no native per-SKU units this month — units-per-order / order-AOV not joinable.">— <span style={{ fontSize: 9 }}>no order grain</span></span> : fmt(v));
+  // BUG-2 (II-88) — UPO is its OWN deferral: a true units-per-order needs an
+  // order-level export (website units = Shopify net items, orders = Monarch gross
+  // count — different sources, so their ratio is not a valid UPO and a sub-1 value
+  // is logically impossible). NEVER print a number here; show the honest reason.
+  const upoCell = (r) => (
+    Number.isFinite(r.upo) && r.upo >= 1
+      ? r.upo.toFixed(2)
+      : <span className="muted" title={r.upoReason || "needs order-level export — website units (Shopify net items) and orders (Monarch gross count) are different sources/grains"}>— <span style={{ fontSize: 9 }}>needs order-level export</span></span>
+  );
   const maxOrders = Math.max(1, ...oh.map((r) => Number(r.orders) || 0));
   const cov = data?.coverage || {};
   return (
@@ -339,7 +348,7 @@ export function BasketTrendView({ data, D = defaultD, title = "Basket / units-pe
               <th style={{ padding: "5px 8px" }}>Orders</th>
               <th style={{ padding: "5px 8px" }}>Units</th>
               <th style={{ padding: "5px 8px" }}>UPO</th>
-              <th style={{ padding: "5px 8px" }}>AOV</th>
+              <th style={{ padding: "5px 8px" }} title="Revenue per ORDER — Monarch net ÷ Monarch orders (same-source). Not a true AOV (no order-level units).">Rev/order</th>
             </tr>
           </thead>
           <tbody>
@@ -348,7 +357,7 @@ export function BasketTrendView({ data, D = defaultD, title = "Basket / units-pe
                 <td style={{ textAlign: "left", padding: "5px 8px" }}>{fmtMonth(r.month)}</td>
                 <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{u(r.orders)}</td>
                 <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{cell(r.units, u)}</td>
-                <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{cell(r.upo, (v) => v.toFixed(2))}</td>
+                <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{upoCell(r)}</td>
                 <td className="mono" style={{ textAlign: "right", padding: "5px 8px" }}>{cell(r.aov, inr)}</td>
               </tr>
             ))}

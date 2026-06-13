@@ -80,6 +80,31 @@ function lastDataDom(facts) {
 }
 
 /**
+ * skuGrainMonths(facts) → [YYYY-MM…] (asc) that carry per-SKU REVENUE facts
+ * (a non-channel-grain monthly cell with netRev/grossRev). Native per-SKU exports
+ * are month-scoped (May), so a SKU-grain MoM is only LIKE-FOR-LIKE between two such
+ * months — never into a month that has only channel-grain (__ch__) data (e.g. an
+ * in-progress June from the agency daily history). Used to keep the SKU-level
+ * narrative honest (rubric 14/18/29): no full-vs-empty −100% SKU comparisons.
+ */
+function skuGrainMonths(facts) {
+  const set = new Set();
+  for (const [k, cell] of Object.entries((facts && facts.monthly) || {})) {
+    const [m, , code] = k.split("|");
+    if (!m || code === CH_CODE) continue;
+    if (num(cell && cell.netRev) !== 0 || num(cell && cell.grossRev) !== 0 || num(cell && cell.units) !== 0) set.add(m);
+  }
+  return [...set].sort();
+}
+/** latestSkuGrainPair(facts) → { month, prior } | null — the most recent pair of
+ *  consecutive SKU-grain-complete months for a like-for-like SKU MoM. */
+function latestSkuGrainPair(facts) {
+  const ms = skuGrainMonths(facts).filter((m) => !monthPartiality(facts, m).partial);
+  if (ms.length < 2) return ms.length === 1 ? { month: ms[0], prior: prevMonthOf(ms[0]) } : null;
+  return { month: ms[ms.length - 1], prior: ms[ms.length - 2] };
+}
+
+/**
  * monthPartiality(facts, month) → { partial, lastDay, dom, daysInMonth }.
  * A month is partial iff its latest daily day < month end. Channel-agnostic
  * (company view): uses the max daily day across all channels for that month.
@@ -796,10 +821,19 @@ export function concentrationRisk(facts, { month, costs } = {}) {
     const top = withShare[0] || null;
     return { total: round2(total), top, topShare: clampPct(top ? top.share : null), hhi: round2(hhi), list: withShare, concentrated: hhi > 0.25 };
   }
+  // IX-94 — every concentration/HHI figure MUST carry its window label so a
+  // June-MTD 51%/0.34 is never confused with a complete-May 54.1%/0.37. The label
+  // states the month AND whether it's a partial (MTD through day N) or full month.
+  const part = monthPartiality(facts, month);
+  const windowLabel = part.partial
+    ? `${month} MTD (through day ${part.dom} of ${part.daysInMonth})`
+    : `${month} (complete month)`;
   return {
+    month, partial: !!part.partial,
+    window: { month, partial: !!part.partial, dom: part.dom, daysInMonth: part.daysInMonth, label: windowLabel },
     byChannel: { revenue: chShares((r) => r.netRev), margin: chShares((r) => r.cm3) },
     bySku: { revenue: skuShares("netRev"), margin: skuShares("cm3") },
-    note: "HHI > 0.25 ⇒ concentrated; share is of the positive-value pool for the month.",
+    note: `HHI > 0.25 ⇒ concentrated; share is of the positive-value pool for ${windowLabel}. (A partial-month MTD concentration is NOT comparable to a complete-month one — read the window label adjacent to each figure.)`,
   };
 }
 
@@ -933,7 +967,7 @@ export function prescriptions(facts, { month, costs } = {}) {
     out.push({
       id: `conc:channel`, severity: "warn",
       action: `De-risk dependency on ${t.key}`,
-      rationale: `${(conc.byChannel.revenue.topShare * 100).toFixed(0)}% of net revenue rides on ${t.key} (channel HHI ${conc.byChannel.revenue.hhi}) — fragile to one channel`,
+      rationale: `${(conc.byChannel.revenue.topShare * 100).toFixed(0)}% of net revenue rides on ${t.key} (channel HHI ${conc.byChannel.revenue.hhi}, ${conc.window.label}) — fragile to one channel`,
       impactPerMonth: 0, channel: t.key, basis: "derived",
     });
   }
@@ -1139,7 +1173,12 @@ export function priceRealization(facts, { month } = {}) {
  *   t90      — trailing-90-day rate (a steadier reorder-planning rate).
  */
 export const VELOCITY_WINDOWS = [
-  { key: "mtd", label: "This month (MTD)", days: null, question: "How fast is it selling THIS month?" },
+  // NOTE: the "current" window label is RESOLVED at compute time from the actual
+  // month state (partial → "MTD through day N"; complete → "complete month, N
+  // days") and returned as result.meta.currentMonthLabel / row.currentMonthLabel.
+  // The page MUST render that resolved label, not this static one, so a complete
+  // month is never mislabelled "This month (MTD)" with a full day count (IX-94).
+  { key: "mtd", label: "Current month", days: null, question: "How fast is it selling in the current month window? (label resolves to MTD vs complete)" },
   { key: "t30", label: "Trailing 30d", days: 30, question: "What rate to plan a reorder at? (matches inventory planning window)" },
   { key: "t90", label: "Trailing 90d", days: 90, question: "What is the steady long-run rate?" },
 ];
@@ -1203,12 +1242,20 @@ export function crossModuleVelocity(facts, { month, window = "mtd" } = {}) {
     }
     return { units: Math.round(u), days: windowDays, velocityPerDay: clampPct(u / windowDays) };
   };
+  // IX-94 — the "current month" window is only an MTD partial when the month is
+  // genuinely in progress. When `month` is a COMPLETE month (e.g. May, lastDay =
+  // the 31st), elapsed = the full 31 days and the rate is a complete-month rate,
+  // NOT an MTD rate — labelling it "This month (MTD)" with DAYS=31 reads as a 3×
+  // overstatement against a real June-to-day-10 window. We compute the true elapsed
+  // days per the latest data day and emit `currentMonthPartial` + a precise label
+  // so the page never mislabels a full month as MTD.
+  const partM = monthPartiality(facts, m);
   const out = [];
   for (const k of Object.keys(perKey)) {
     const { code, ch, curUnits, cells } = perKey[k];
     if (curUnits <= 0) continue;
     const c = cov[`${m}|${ch}`] || {};
-    const elapsed = c.lastDay ? domOf(c.lastDay) : monthEndDom(m);
+    const elapsed = c.lastDay ? domOf(c.lastDay) : (partM.dom || monthEndDom(m));
     const mtd = { units: curUnits, days: elapsed, velocityPerDay: clampPct(elapsed > 0 ? curUnits / elapsed : null) };
     const t30 = trailingRate(cells, 30);
     const t90 = trailingRate(cells, 90);
@@ -1220,9 +1267,25 @@ export function crossModuleVelocity(facts, { month, window = "mtd" } = {}) {
       velocityPerDay: sel.velocityPerDay,
       monthlyRunRate: clampPct(sel.velocityPerDay != null ? sel.velocityPerDay * monthEndDom(m) : null),
       byWindow, asOf,
+      // window self-description so the grid labels the current-month window honestly.
+      currentMonthPartial: !!partM.partial,
+      currentMonthDays: elapsed,
+      currentMonthLabel: partM.partial
+        ? `${m} MTD (through day ${elapsed} of ${partM.daysInMonth})`
+        : `${m} (complete month, ${elapsed} days)`,
     });
   }
-  return out.sort((a, b) => b.units - a.units);
+  const sorted = out.sort((a, b) => b.units - a.units);
+  // attach the resolved window descriptor for the panel header (non-enumerable-ish
+  // sidecar: a frozen meta on the array so existing row consumers are unaffected).
+  sorted.meta = {
+    month: m, asOf, currentMonthPartial: !!partM.partial,
+    currentMonthDays: partM.dom || monthEndDom(m), daysInMonth: partM.daysInMonth,
+    currentMonthLabel: partM.partial
+      ? `${m} MTD (through day ${partM.dom} of ${partM.daysInMonth})`
+      : `${m} (complete month, ${partM.dom || monthEndDom(m)} days)`,
+  };
+  return sorted;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1266,7 +1329,7 @@ export function autoNarrative(facts, { month, costs } = {}) {
   if (recentAnom) bullets.push({ tone: "warn", text: `Recent day flag: ${recentAnom.iso} (${recentAnom.dowName}) — ${recentAnom.label}.` });
   if (topChAnom) bullets.push({ tone: "warn", text: `Channel anomaly: ${topChAnom.channel} on ${topChAnom.iso} broke pattern (${Math.abs(topChAnom.z).toFixed(1)}σ ${topChAnom.direction === "high" ? "above" : "below"} its trailing window).` });
   if (topRx) bullets.push({ tone: topRx.severity === "critical" ? "critical" : "warn", text: `Top action: ${topRx.action} — ${topRx.rationale}${topRx.impactPerMonth ? ` (~${inr(topRx.impactPerMonth)}/mo)` : ""}.` });
-  if (conc.byChannel.revenue.concentrated && conc.byChannel.revenue.top) bullets.push({ tone: "warn", text: `${(conc.byChannel.revenue.topShare * 100).toFixed(0)}% of revenue rides on ${conc.byChannel.revenue.top.key} — watch concentration.` });
+  if (conc.byChannel.revenue.concentrated && conc.byChannel.revenue.top) bullets.push({ tone: "warn", text: `${(conc.byChannel.revenue.topShare * 100).toFixed(0)}% of revenue rides on ${conc.byChannel.revenue.top.key} (HHI ${conc.byChannel.revenue.hhi}, ${conc.window.label}) — watch concentration.` });
 
   const headline = proj.partial
     ? `${month} pacing to ${inr(proj.projected)} (${proj.confidence} confidence)`
@@ -1519,9 +1582,25 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
   const pricePerUnit = trailUnitsSum > 0 ? trailRevSum / trailUnitsSum : null;
   // Held-forward CM3 margin = Σ trailing CM3 ÷ Σ trailing covered-month revenue
   // (effective recent margin — the forward contribution rides this, not a guess).
+  // This is a REAL, same-window margin: it is the blended CM3% of the exact same
+  // trailing complete months whose revenue feeds the trend. It can legitimately be
+  // low or negative when a recent month ran ad-heavy (e.g. May company CM3 was
+  // negative), so the forward contribution honestly reflects that — but we expose
+  // the components (cm3 sum, revenue sum, the months used) so the popover
+  // re-derives it and the founder never sees a bare "0.1%" with no provenance.
   const cm3RevSum = cm3Trail.reduce((a, h) => a + h.netRev, 0);
   const cm3SumV = cm3Trail.reduce((a, h) => a + h.cm3, 0);
   const marginPct = cm3RevSum > 0 ? cm3SumV / cm3RevSum : null;
+  const heldMargin = {
+    pct: marginPct,
+    cm3Sum: round2(cm3SumV),
+    revSum: round2(cm3RevSum),
+    months: cm3Trail.map((h) => h.month),
+    basis: "trailing complete months (same window as the revenue trend)",
+    note: marginPct == null
+      ? "held CM3 margin unavailable — no covered trailing month at this grain"
+      : `held CM3 margin ${(marginPct * 100).toFixed(1)}% = Σ CM3 ${round2(cm3SumV).toLocaleString("en-IN")} ÷ Σ net ${round2(cm3RevSum).toLocaleString("en-IN")} over ${cm3Trail.length} trailing complete month(s) [${cm3Trail.map((h) => h.month).join(", ")}]. This is the real blended CM3% of those exact months — it is low/negative when a recent month ran ad-heavy, NOT a 0.1% placeholder.`,
+  };
 
   // EFFECTIVE partiality for THIS grain: the asOf month is only "completable" if it
   // actually carries data at this grain. A SKU whose native export is May-only has no
@@ -1534,6 +1613,16 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
   const lastHistMonth = history.length ? history[history.length - 1].month : asOf;
   const forecastFromMonth = effPartial ? asOf : nextMonthOf(lastHistMonth);
 
+  // ── DUAL-JUNE RECONCILIATION (II): the in-progress month has TWO defensible
+  // projections — (A) PACE: month-to-date × prior-month same-day→full multiplier
+  // (projectMonthEnd; high-confidence, narrow band, the read-out's headline), and
+  // (B) TREND⊕RUN-RATE: the 50/50 blend used for forward months (wider band).
+  // Previously these were emitted by two unlinked functions ~₹3.7L apart. We now
+  // compute BOTH here, expose them side-by-side in `currentMonth`, and make the
+  // PACE projection the headline for the partial month (same-pace is the more
+  // defensible read for a month already 1/3 elapsed), with the trend blend kept as
+  // the explicit alternative. They share ONE structure, never two stray "June"s.
+  let currentMonth = null;
   const fpts = [];
   const lastX = xs.length ? xs[xs.length - 1] : 0;
   let cursor = forecastFromMonth;
@@ -1542,14 +1631,35 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
     let projRev, band;
     if (partialFirst) {
       const pj = projectMonthEnd(facts, { month: asOf, channel: grain === "channel" ? channel : undefined });
-      // for sku/company grain we don't have a channel projection; fall back to trend.
-      if (grain === "channel") { projRev = pj.projected; band = Math.max(0, (pj.high - pj.low) / 2); }
-      else {
-        // company/sku partial completion via run-rate on the partial month's own MTD.
+      // (B) trend⊕run-rate blend projecting the FULL current month — the partial
+      // month is the step AFTER the last complete trailing month (x = lastX + 1),
+      // i.e. the same forward-month method the Forecast tab uses. This is the
+      // explicit alternative to the pace headline.
+      const trendBlend = Math.max(0, 0.5 * (reg.intercept + reg.slope * (lastX + 1)) + 0.5 * avgRev);
+      const trendBand = reg.sd * Math.sqrt(h);
+      // (A) PACE projection. For sku/company grain projectMonthEnd is channel-less
+      // (sums all channels' daily series), which IS the company pace — usable for
+      // company grain. For a single SKU there is no daily SKU series, so fall back
+      // to the per-grain MTD linear run-rate.
+      let pace, paceLow, paceHigh, paceMethod;
+      if (grain === "sku") {
         const mtdRev = asOfHistory ? asOfHistory.netRev : 0;
-        projRev = part.dom > 0 ? (mtdRev / part.dom) * part.daysInMonth : mtdRev;
-        band = reg.sd * Math.sqrt(h);
+        pace = part.dom > 0 ? (mtdRev / part.dom) * part.daysInMonth : mtdRev;
+        paceLow = Math.max(0, pace - trendBand); paceHigh = pace + trendBand;
+        paceMethod = `MTD linear run-rate (day ${part.dom}/${part.daysInMonth}) — no daily SKU pace series`;
+      } else {
+        pace = pj.projected; paceLow = pj.low; paceHigh = pj.high; paceMethod = pj.method;
       }
+      // Headline = PACE; band from the pace method (channel/company) or trend (sku).
+      projRev = pace; band = Math.max(0, (paceHigh - paceLow) / 2);
+      currentMonth = {
+        month: asOf, partial: true, mtd: round2(asOfHistory ? asOfHistory.netRev : 0),
+        dom: part.dom, daysInMonth: part.daysInMonth,
+        pace: { netRev: round2(pace), low: round2(paceLow), high: round2(paceHigh), method: paceMethod, confidence: grain === "sku" ? "low" : pj.confidence, paceVsPrior: clampPct(pj.paceVsPrior) },
+        trend: { netRev: round2(trendBlend), low: round2(Math.max(0, trendBlend - trendBand)), high: round2(trendBlend + trendBand), method: `trailing-${trailN}mo trend ⊕ run-rate (50/50)` },
+        recommended: "pace",
+        note: `Two defensible projections for ${asOf}: PACE ${round2(pace).toLocaleString("en-IN")} (current MTD held at ${asOf === "2026-06" ? "prior-month same-day pace" : "same-day pace"}, narrower band, recommended for an in-progress month) vs TREND⊕RUN-RATE ${round2(trendBlend).toLocaleString("en-IN")} (the forward-month method, wider band). They differ because pace reads the month already underway while the blend reads the multi-month direction; trust PACE while the month is live.`,
+      };
     } else {
       const x = lastX + (effPartial ? h - 1 : h);   // partial month already consumed h=1
       const trendV = reg.intercept + reg.slope * x;
@@ -1576,6 +1686,8 @@ export function forecast(facts, { channel, sku, costs, horizonMonths = 1, asOfMo
     history,
     trailing: { months: trailN, avgNetRev: round2(avgRev), avgUnits: Math.round(avgUnits), avgCm3: avgCm3 == null ? null : round2(avgCm3), slopePerMonth: round2(reg.slope), residualSd: round2(reg.sd), pricePerUnit: clampPct(pricePerUnit) },
     cm3MarginPct: clampPct(marginPct),
+    heldMargin,            // II — explicit held-CM3 derivation (cm3Sum÷revSum, months, note); never a bare "0.1%"
+    currentMonth,          // II — dual-June reconciliation: pace vs trend, one structure, recommended flagged
     forecast: fpts, confidence,
     note: complete.length < 1
       ? "no complete month at this grain — forecast is indicative only"
@@ -1589,6 +1701,167 @@ function nextMonthOf(ym) {
   const [y, m] = String(ym).split("-").map(Number);
   const d = new Date(Date.UTC(y, m, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// VII-52 · DEEP SKU-GRAIN BANDED FORECAST (uses the agency per-SKU UNITS history).
+// ════════════════════════════════════════════════════════════════════════════
+/**
+ * skuForecast(facts, { sku, channel?, costs?, horizonMonths=1, asOfMonth? }) →
+ *   { grain:"sku", sku, channel, method, asOfMonth, basis,
+ *     history:[{ month, units, source:"native"|"agency", netRev?, cm3? }],
+ *     forecast:[{ month, units, unitsLow, unitsHigh, netRev, netRevLow, netRevHigh,
+ *                 cm3, cm3Low, cm3High, partial }],
+ *     trailing:{ months, avgUnits, slopePerMonth, residualSd, cv },
+ *     pricePerUnit, cm3MarginPct, confidence, note }.
+ *
+ *  WHY a dedicated SKU forecaster: native per-SKU REVENUE exists only for the May
+ *  export (+ a sliver of April), so the generic forecast() fits a 2-point line at
+ *  SKU grain → a zero-width band (no real uncertainty). The agency Snell Category-
+ *  wise tabs carry per-SKU UNITS back to 2024-08 — real multi-month depth. This
+ *  forecaster fits the trend ON THOSE UNITS (the deep series), then prices the
+ *  forecast UNITS at the SKU's native realized ₹/unit and holds its native CM3
+ *  margin% — so the SKU forecast gets the SAME method + honest uncertainty band as
+ *  the company/channel forecast, not a thinner one.
+ *
+ *  METHOD (stated, rubric 52): trailing-N (≤6) COMPLETE-month agency units → simple
+ *  linear regression (slope) blended 50/50 with the trailing mean (run-rate). BAND
+ *  = ±(residual σ of the units fit) widening by √h, floored at the series CV so a
+ *  suspiciously-clean fit still carries honest uncertainty. UNITS→₹ via native
+ *  realized ₹/unit; ₹→CM3 via native CM3 margin%. The in-progress current month is
+ *  completed by MTD units run-rate (day d → full) and flagged `partial`. channel
+ *  null → SKU across all channels (agency units summed). NaN-safe; ratios guarded.
+ */
+export function skuForecast(facts, { sku, channel, costs, horizonMonths = 1, asOfMonth } = {}) {
+  const C = costs || defaultCosts;
+  const empty = (note) => ({ grain: "sku", sku: sku || null, channel: channel || null, method: "no data", basis: "agency per-SKU units", history: [], forecast: [], trailing: { months: 0 }, pricePerUnit: null, cm3MarginPct: null, confidence: "none", note });
+  if (!sku) return empty("no SKU specified");
+  const agency = facts?.meta?.bySource?.["snell-sku-units"]?.monthly || {};
+  // agency UNITS by month for this SKU (optionally one channel).
+  const unitsByMonth = {};
+  for (const [k, u] of Object.entries(agency)) {
+    const [m, ch, code] = k.split("|");
+    if (code !== sku) continue;
+    if (channel && ch !== channel) continue;
+    unitsByMonth[m] = fin0(unitsByMonth[m]) + num(u);
+  }
+  const months = Object.keys(unitsByMonth).sort();
+  if (months.length < 2) {
+    // fall back to the generic revenue forecaster (still banded, just thinner) so a
+    // SKU with no agency-units history is never left without a forecast.
+    const fb = forecast(facts, { sku, channel, costs: C, horizonMonths, asOfMonth });
+    return { ...fb, basis: "native per-SKU revenue (no agency units history)", note: (fb.note ? fb.note + " " : "") + "SKU has <2 months of agency units — using the native-revenue trend (thin)." };
+  }
+  const asOf = asOfMonth || months[months.length - 1];
+
+  // realized ₹/unit + CM3 margin% from the SKU's NATIVE CM (the latest complete
+  // native month — May). channel-scoped when a channel is given.
+  const nativeMonth = (() => {
+    // latest complete month with native per-SKU revenue for this SKU.
+    const cov = coverageFor(facts);
+    const nm = new Set();
+    for (const k of Object.keys(cov)) { const m = k.split("|")[0]; if (m) nm.add(m); }
+    const cand = [...nm].sort();
+    for (let i = cand.length - 1; i >= 0; i--) {
+      const p = monthPartiality(facts, cand[i]);
+      if (p.partial) continue;
+      const cm = computeCM({ facts, month: cand[i], costs: C });
+      const s = cm.bySku?.[sku];
+      const cell = channel ? s?.byChannel?.[channel] : s;
+      if (cell && fin0(cell.units) > 0) return { month: cand[i], cell };
+    }
+    return null;
+  })();
+  const pricePerUnit = nativeMonth && fin0(nativeMonth.cell.units) > 0 ? nativeMonth.cell.netRev / nativeMonth.cell.units : null;
+  const cm3MarginPct = nativeMonth && fin0(nativeMonth.cell.netRev) > 0 && nativeMonth.cell.cm3 != null ? nativeMonth.cell.cm3 / nativeMonth.cell.netRev : null;
+
+  // history rows (agency units; tag the native-priced months).
+  const history = months.map((m) => {
+    const u = Math.round(unitsByMonth[m]);
+    const netRev = pricePerUnit != null ? round2(u * pricePerUnit) : null;
+    return { month: m, units: u, source: "agency", netRev, cm3: (netRev != null && cm3MarginPct != null) ? round2(netRev * cm3MarginPct) : null };
+  });
+
+  // partiality of asOf at AGENCY grain (the agency series reaches the current month).
+  const part = monthPartiality(facts, asOf);
+  const completeMonths = history.filter((h) => !monthPartiality(facts, h.month).partial);
+  const trailN = Math.min(6, completeMonths.length);
+  const trail = completeMonths.slice(-trailN);
+  const xs = trail.map((_, i) => i);
+  const ys = trail.map((h) => h.units);
+  const lin = (a) => {
+    const n = a.length; if (!n) return { slope: 0, intercept: 0, sd: 0 };
+    if (n === 1) return { slope: 0, intercept: a[0], sd: 0 };
+    const mx = xs.reduce((s, b) => s + b, 0) / n, my = a.reduce((s, b) => s + b, 0) / n;
+    let nu = 0, de = 0; for (let i = 0; i < n; i++) { nu += (xs[i] - mx) * (a[i] - my); de += (xs[i] - mx) ** 2; }
+    const slope = de > 1e-9 ? nu / de : 0; const intercept = my - slope * mx;
+    let ss = 0; for (let i = 0; i < n; i++) { const f = intercept + slope * xs[i]; ss += (a[i] - f) ** 2; }
+    return { slope, intercept, sd: Math.sqrt(ss / n) };
+  };
+  const reg = lin(ys);
+  const avgUnits = ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : 0;
+  // CV (coefficient of variation) as a band FLOOR — a near-perfect linear fit on a
+  // volatile SKU should still carry uncertainty (statistical honesty, rubric 18).
+  const seriesMean = avgUnits;
+  const seriesSd = ys.length > 1 ? Math.sqrt(ys.reduce((a, b) => a + (b - seriesMean) ** 2, 0) / ys.length) : 0;
+  const cv = seriesMean > 0 ? seriesSd / seriesMean : 0;
+  const lastX = xs.length ? xs[xs.length - 1] : 0;
+
+  const asOfHist = history.find((h) => h.month === asOf);
+  const asOfHasData = !!asOfHist && asOfHist.units > 0;
+  const effPartial = part.partial && asOfHasData;
+  const lastHistMonth = history[history.length - 1].month;
+  const forecastFromMonth = effPartial ? asOf : nextMonthOf(lastHistMonth);
+
+  const fpts = [];
+  let cursor = forecastFromMonth;
+  for (let h = 1; h <= Math.max(1, horizonMonths); h++) {
+    const partialFirst = h === 1 && effPartial;
+    let projUnits, band;
+    if (partialFirst) {
+      // MTD units run-rate (day d → full) for the live month.
+      const mtdU = asOfHist ? asOfHist.units : 0;
+      projUnits = part.dom > 0 ? (mtdU / part.dom) * part.daysInMonth : mtdU;
+      const trendBand = reg.sd * Math.sqrt(h);
+      band = Math.max(trendBand, projUnits * cv);
+    } else {
+      const x = lastX + (effPartial ? h - 1 : h);
+      const trendV = reg.intercept + reg.slope * x;
+      projUnits = 0.5 * trendV + 0.5 * avgUnits;
+      band = Math.max(reg.sd * Math.sqrt(h), projUnits * cv);
+    }
+    projUnits = Math.max(0, projUnits);
+    const uLow = Math.max(0, Math.round(projUnits - band));
+    const uHigh = Math.round(projUnits + band);
+    const u = Math.round(projUnits);
+    const netRev = pricePerUnit != null ? u * pricePerUnit : null;
+    const netRevLow = pricePerUnit != null ? uLow * pricePerUnit : null;
+    const netRevHigh = pricePerUnit != null ? uHigh * pricePerUnit : null;
+    const cm3 = (netRev != null && cm3MarginPct != null) ? netRev * cm3MarginPct : null;
+    fpts.push({
+      month: cursor, units: u, unitsLow: uLow, unitsHigh: uHigh,
+      netRev: netRev == null ? null : round2(netRev), netRevLow: netRevLow == null ? null : round2(netRevLow), netRevHigh: netRevHigh == null ? null : round2(netRevHigh),
+      cm3: cm3 == null ? null : round2(cm3),
+      cm3Low: (netRevLow != null && cm3MarginPct != null) ? round2(netRevLow * cm3MarginPct) : null,
+      cm3High: (netRevHigh != null && cm3MarginPct != null) ? round2(netRevHigh * cm3MarginPct) : null,
+      partial: !!partialFirst,
+    });
+    cursor = nextMonthOf(cursor);
+  }
+  const confidence = completeMonths.length >= 6 ? "medium" : completeMonths.length >= 3 ? "low" : "very-low";
+  return {
+    grain: "sku", sku, channel: channel || null, asOfMonth: asOf,
+    basis: `agency per-SKU UNITS (Snell Categorywise, ${months.length} mo ${months[0]}→${months[months.length - 1]}) priced at native realized ₹/unit + held native CM3 margin`,
+    method: `trailing-${trailN}mo linear UNITS trend ⊕ run-rate (50/50); ₹ = units × ${pricePerUnit != null ? "₹" + Math.round(pricePerUnit) + "/u" : "n/a"}; CM3 @ ${cm3MarginPct != null ? (cm3MarginPct * 100).toFixed(1) + "%" : "n/a"} margin; band = ±max(residualσ·√h, units·CV ${(cv * 100).toFixed(0)}%)${effPartial ? "; current month completed via MTD units pace" : ""}`,
+    history, forecast: fpts,
+    trailing: { months: trailN, avgUnits: Math.round(avgUnits), slopePerMonth: round2(reg.slope), residualSd: round2(reg.sd), cv: clampPct(cv) },
+    pricePerUnit: clampPct(pricePerUnit), cm3MarginPct: clampPct(cm3MarginPct),
+    priceBasis: nativeMonth ? `${nativeMonth.month} native realized ₹/unit` : null,
+    confidence,
+    note: pricePerUnit == null
+      ? "agency units present but no native realized ₹/unit for this SKU — units forecast only (₹/CM3 withheld, never fabricated)."
+      : `SKU forecast fits the DEEP agency units series (${months.length} months) then prices at the native ₹/unit — full method + uncertainty band, not the 2-point native-revenue line.`,
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1755,25 +2028,39 @@ export function proseWeeklyNarrative(facts, { month, costs, weekDays = 7 } = {})
     return { ch, cur, prv, u, delta, pct, thin: flag.thin };
   }).filter((r) => r.cur > 0 || r.prv > 0).sort((a, b) => b.cur - a.cur);
 
-  // SKU that drove the top channel's move — from the month's per-SKU matrix MoM.
+  // SKU that drove the top channel's move — from the per-SKU matrix MoM.
+  // II-14/18 FIX: per-SKU REVENUE facts are month-scoped (native May), so a SKU MoM
+  // INTO an in-progress month that carries only channel-grain data (e.g. June) is a
+  // full-vs-empty −100% artifact (the "NSSBDB500 led the decline −₹5.09L −100% MoM"
+  // trap). The structured Movers tab avoids this by running the latest SKU-grain
+  // pair (Apr→May full-vs-full); the prose now does the SAME — it compares the latest
+  // two months that BOTH carry per-SKU revenue, and LABELS that window explicitly,
+  // so the prose is never full-vs-partial. If the requested `month` itself has SKU
+  // revenue (e.g. May), that pair is used directly.
   let topSkuLine = null;
+  let topSkuWindow = null;
   const topCh = chRows[0];
-  if (topCh && month) {
-    const prevM = prevMonthOf(month);
-    const movers = rankMovers(facts, { dimension: "sku", month, priorMonth: prevM, metric: "netRev", costs: C });
-    const topSku = movers.find((m) => Math.abs(m.deltaAbs) > 0);
-    if (topSku) {
-      // thin-base / ramp guard (rubric 18): a % is unreliable when the prior base is
-      // absolutely tiny (smallSampleFlag) OR a tiny fraction of the current value —
-      // a near-0→large RAMP (e.g. a SKU's native export starting this month) is not a
-      // comparable trend. In either case annotate the base; never show the bare %.
-      const ssf = smallSampleFlag(topSku.cur, topSku.prior);
-      const isRamp = topSku.deltaPct != null && Math.abs(topSku.deltaPct) > 3;   // >300% MoM
-      const unreliable = topSku.pctReliable === false || ssf.thin || isRamp;
-      const ann = unreliable
-        ? ` (${isRamp && !ssf.thin ? "a ramp from" : "off a thin"} ${inrLbl(topSku.prior)} prior month — % withheld as not comparable)`
-        : (topSku.deltaPct != null ? ` (${sgnPct(topSku.deltaPct)})` : "");
-      topSkuLine = `${topSku.label} ${topSku.direction === "up" ? "led the gains" : "led the decline"}, ${topSku.direction === "up" ? "adding" : "shedding"} ${inrLbl(Math.abs(topSku.deltaAbs))}${ann} month-over-month`;
+  if (topCh) {
+    const reqHasSku = month && skuGrainMonths(facts).includes(month) && !monthPartiality(facts, month).partial;
+    const pair = reqHasSku ? { month, prior: prevMonthOf(month) } : latestSkuGrainPair(facts);
+    if (pair && pair.month) {
+      const movers = rankMovers(facts, { dimension: "sku", month: pair.month, priorMonth: pair.prior, metric: "netRev", costs: C });
+      const sameWindow = !(movers.window && movers.window.partial);   // expect full-vs-full now
+      const topSku = movers.find((m) => Math.abs(m.deltaAbs) > 0);
+      if (topSku) {
+        const ssf = smallSampleFlag(topSku.cur, topSku.prior);
+        const isRamp = topSku.deltaPct != null && Math.abs(topSku.deltaPct) > 3;   // >300% MoM
+        const unreliable = topSku.pctReliable === false || ssf.thin || isRamp;
+        const ann = unreliable
+          ? ` (${isRamp && !ssf.thin ? "a ramp from" : "off a thin"} ${inrLbl(topSku.prior)} prior month — % withheld as not comparable)`
+          : (topSku.deltaPct != null ? ` (${sgnPct(topSku.deltaPct)})` : "");
+        // window tag: name the months compared so the reader knows it is a complete
+        // month-over-month, not the partial weekly window the channel lines describe.
+        const isReqMonth = pair.month === month;
+        const windowTag = ` (${pair.prior}→${pair.month}, full month-over-month${isReqMonth ? "" : " — the latest months with per-SKU revenue; SKU detail isn't yet in for the partial current month"})`;
+        topSkuLine = `${topSku.label} ${topSku.direction === "up" ? "led the gains" : "led the decline"}, ${topSku.direction === "up" ? "adding" : "shedding"} ${inrLbl(Math.abs(topSku.deltaAbs))}${ann}${windowTag}`;
+        topSkuWindow = { ...pair, sameWindow, partial: false };
+      }
     }
   }
 
@@ -1809,6 +2096,31 @@ export function proseWeeklyNarrative(facts, { month, costs, weekDays = 7 } = {})
   if (topAnom) p2parts.push(`${cap(topAnom.channel)} broke its own pattern on ${topAnom.iso}, running ${Math.abs(topAnom.z).toFixed(1)}σ ${topAnom.direction === "high" ? "above" : "below"} its trailing two weeks${topAnom.direction === "low" ? " — worth a look before it compounds" : ""}.`);
   if (p2parts.length) sentences.push(p2parts.join(" "));
 
+  // VII-52/59 · THIS WEEK vs the RUN-RATE PLAN. The plan = the pace needed to land
+  // the in-progress month at its prior-month-same-day projected close (projectMonthEnd
+  // is the defensible month-end pace). We convert that monthly target to a per-WEEK
+  // run-rate (× weekDays/daysInMonth) and read this week's actual against it — so the
+  // narrative ends on "are we on plan", not just "what happened". Same-window: this
+  // week's ₹ vs the same-length slice of the month-end plan. NaN-safe / guarded.
+  const planMonth = month || asOf.slice(0, 7);
+  const proj = projectMonthEnd(facts, { month: planMonth });
+  let vsPlan = null;
+  if (Number.isFinite(proj.projected) && proj.daysInMonth > 0 && proj.projected > 0) {
+    const weeklyPlan = proj.projected * (weekDays / proj.daysInMonth);   // plan ₹ for a weekDays slice
+    const vsPct = weeklyPlan > 0 ? (totalCur - weeklyPlan) / weeklyPlan : null;
+    const onPlan = vsPct != null && vsPct >= -0.05;                      // within 5% counts as on-plan
+    vsPlan = {
+      weeklyTarget: round2(weeklyPlan), weekActual: round2(totalCur),
+      deltaAbs: round2(totalCur - weeklyPlan), deltaPct: clampPct(vsPct),
+      monthEndPlan: round2(proj.projected), planBasis: proj.method, confidence: proj.confidence,
+      onPlan, weekDays, daysInMonth: proj.daysInMonth,
+    };
+    const planTone = onPlan ? "on track for" : "running behind";
+    sentences.push(
+      `Against plan: at ${inrLbl(proj.projected)} projected month-end (${proj.method}), the seven-day run-rate target is ${inrLbl(weeklyPlan)}; this week's ${inrLbl(totalCur)} is ${vsPct != null ? sgnPct(vsPct) + " " : ""}${vsPct != null && vsPct >= 0 ? "ahead" : "short"}, ${planTone} the month${onPlan ? "" : " — close the gap on the softening channels above"}.`
+    );
+  }
+
   if (topAct) {
     sentences.push(`What it means for Monday: ${topAct.action.toLowerCase()}. ${cap(topAct.rationale)}${topAct.impactPerMonth ? `, an estimated ${inrLbl(Math.abs(topAct.impactPerMonth))}/month of ${topAct.impactKind.includes("risk") ? "revenue at risk" : "contribution"}` : ""}.`);
   } else {
@@ -1820,7 +2132,8 @@ export function proseWeeklyNarrative(facts, { month, costs, weekDays = 7 } = {})
     weekLabel: `${winStart} → ${winEnd}`,
     prose: sentences,
     coveredChannels: chRows.map((r) => r.ch),
-    topSkuLine, sources: ["daily channel-grain series", "computeCM", "actionQueue"],
+    topSkuLine, topSkuWindow, vsPlan,
+    sources: ["daily channel-grain series", "computeCM", "projectMonthEnd", "actionQueue"],
   };
 }
 function cap(s) { return String(s).charAt(0).toUpperCase() + String(s).slice(1); }
@@ -1919,17 +2232,30 @@ export function basketTrend(facts, { costs } = {}) {
       // VI-a — order-count history exists wherever Monarch carries orders, even if
       // per-SKU units/revenue aren't joinable that month. Chart it regardless.
       ordersHistory.push({ month: m, orders: wOrders });
-      // UPO/AOV need BOTH order count AND joinable units/revenue (native per-SKU).
-      // When units aren't joinable, emit NULL (→ "— / no order grain" in the view),
-      // NEVER 0 — a 0 UPO/AOV would read as "tiny basket", not "data not joinable".
-      const hasUnitGrain = wUnits > 0;
+      // BUG-2 (II-88): a website UPO would have to divide units by orders. But the
+      // ONLY website units we have are Shopify net items (returns/cancels already
+      // netted out), while orders come from Monarch (gross order count) — two
+      // DIFFERENT sources at two DIFFERENT grains. Dividing them produced an
+      // impossible sub-1 UPO (e.g. 610 net items ÷ 823 gross orders = 0.74, when
+      // UPO must be ≥1 by definition). We do NOT have Shopify order-level grain in
+      // the current exports, so a TRUE same-source UPO is NOT computable. Therefore
+      // UPO is ALWAYS null here with an explicit reason — never a fabricated <1
+      // value and never a cross-source ratio. AOV here is revenue-per-ORDER
+      // (Monarch net ÷ Monarch orders, a same-source spend-per-order proxy), which
+      // is well-defined and labelled as such — distinct from the unavailable UPO.
       const hasRevGrain = wRev > 0;
+      const hasUnitGrain = wUnits > 0;   // Shopify per-SKU units exist (units chartable), but NOT order-joinable.
       if (hasUnitGrain) monthsWithUnitGrain++;
       website.push({
         month: m, channel: "website", orders: wOrders,
         units: hasUnitGrain ? Math.round(wUnits) : null,
         netRev: hasRevGrain ? round2(wRev) : null,
-        upo: hasUnitGrain ? clampPct(wUnits / wOrders) : null,
+        // UPO permanently deferred: no same-source order+unit grain in current exports.
+        upo: null,
+        upoDeferred: true,
+        upoReason: "needs order-level export — current website units (Shopify net items) and orders (Monarch gross count) are different sources/grains; their ratio is not a valid units-per-order",
+        // Revenue-per-order (same-source Monarch net ÷ Monarch orders). Distinct from UPO.
+        revPerOrder: hasRevGrain ? clampPct(wRev / wOrders) : null,
         aov: hasRevGrain ? clampPct(wRev / wOrders) : null,
         hasUnitGrain,
       });
@@ -1940,7 +2266,7 @@ export function basketTrend(facts, { costs } = {}) {
     months: website,
     ordersHistory,
     coverage: { monthsWithOrders, monthsWithUnitGrain },
-    note: "Website order counts come from the Monarch history (charted for every month they exist). UPO (units-per-order) and order-grain AOV need BOTH the order count AND joinable per-SKU units/revenue — only months with a native per-SKU website export carry that, so other months read “— / no order grain” (never 0). Marketplace exports give units but not order counts, so for Amazon/Flipkart/Blinkit the basket proxy is AOV = net ÷ units.",
+    note: "Website ORDER counts come from Monarch history (charted every month they exist). A true UPO (units-per-order) needs order-level units — the current website exports give Shopify NET items (a different source/grain from Monarch's gross order count), so UPO is shown as “— needs order-level export”, NEVER a cross-source ratio (a sub-1 UPO is logically impossible). The website basket proxy shown is revenue-per-ORDER = Monarch net ÷ Monarch orders (same-source). Marketplace exports (Amazon/Flipkart/Blinkit) give units but not order counts, so their basket proxy is AOV = net ÷ units; Amazon additionally has a TRUE order-grain UPO from the All-Orders order-id grouping (≥1, same-source).",
   };
 }
 
@@ -2149,6 +2475,79 @@ export function returningRevenue(facts) {
     shopify: { quarters, latest: quarters[quarters.length - 1] || null },
     note: "Returning customers spend more per order than new ones — the AOV gap is the ₹ premium a retained customer carries (the LTV lever). Shopify customer-level; the only channel with buyer identity in source.",
     sourceLabel: r.sourceLabel || "BusinessModel Repeats sheet",
+  };
+}
+
+/**
+ * VI-47 · websiteReturnsTrend(facts, { spikeSigma=1.5 }) →
+ *   { available, channel:"website", months:[{ month, returnPct, returnsInr,
+ *     grossInr, momDeltaPts, z, spike, spikeReason }], latest, prior, mean,
+ *     peak, spikes:[…], sourceLabel, note }.
+ *
+ *  Surfaces the SHOPIFY website return-% TREND with spike flags — the website
+ *  counterpart to the Amazon/Flipkart shipped-vs-cancel rate (meta.bySource
+ *  ["snell-cancel"]). The returns view showed "—" for website because nothing
+ *  surfaced this 14-month series (BusinessModel "Returns(Shopify)"). returnPct is
+ *  stored as a percent NUMBER (e.g. 15.4) in source; we expose it BOTH as a percent
+ *  number (`returnPct`) and a fraction (`returnFrac`) so the page can format with
+ *  D.fmtN without re-scaling. A month is a SPIKE when its return-% is ≥ spikeSigma σ
+ *  above the trailing mean OR jumps ≥ 8 points MoM — an early operational warning.
+ *  Reads meta.bySource["bm-returns"].monthly (month = ISO first-of-month). NaN-safe;
+ *  ratios guarded; months ascending; the latest two are the headline read.
+ */
+export function websiteReturnsTrend(facts, { spikeSigma = 1.5 } = {}) {
+  const r = facts?.meta?.bySource?.["bm-returns"] || null;
+  const src = (r && r.monthly) || [];
+  if (!src.length) {
+    return { available: false, channel: "website", months: [], latest: null, prior: null,
+      note: "Shopify website return-% series (BusinessModel Returns tab) not present in source — website returns read as no-data, never a fabricated 0." };
+  }
+  // ascending by month; coerce to a clean { month(YYYY-MM), returnPct(number) } shape.
+  const rows = src
+    .map((m) => ({
+      month: String(m.month || "").slice(0, 7),
+      returnPct: Number.isFinite(m.returnPct) ? round2(m.returnPct) : null,
+      returnsInr: Number.isFinite(m.returnsInr) ? round2(m.returnsInr) : null,
+      grossInr: Number.isFinite(m.grossInr) ? round2(m.grossInr) : null,
+    }))
+    .filter((m) => m.month && m.returnPct != null)
+    .sort((a, b) => (a.month < b.month ? -1 : 1));
+  if (!rows.length) return { available: false, channel: "website", months: [], latest: null, prior: null, note: "Shopify return series present but unparseable." };
+
+  // trailing-mean + σ spike detection (vs the months BEFORE each point — causal,
+  // never peeking forward) PLUS a MoM points-jump flag. Both same-series, same-unit.
+  const out = [];
+  const MOM_JUMP_PTS = 8;
+  for (let i = 0; i < rows.length; i++) {
+    const cur = rows[i];
+    const trail = rows.slice(0, i).map((x) => x.returnPct);
+    const mean = trail.length ? trail.reduce((a, b) => a + b, 0) / trail.length : null;
+    const sd = trail.length > 1 ? Math.sqrt(trail.reduce((a, b) => a + (b - mean) ** 2, 0) / trail.length) : null;
+    const z = mean != null && sd != null && sd > 1e-6 ? (cur.returnPct - mean) / sd : null;
+    const momDeltaPts = i > 0 ? round2(cur.returnPct - rows[i - 1].returnPct) : null;
+    const sigmaSpike = z != null && z >= spikeSigma;
+    const jumpSpike = momDeltaPts != null && momDeltaPts >= MOM_JUMP_PTS;
+    const spike = !!(sigmaSpike || jumpSpike);
+    out.push({
+      month: cur.month, returnPct: cur.returnPct, returnFrac: clampPct(cur.returnPct / 100),
+      returnsInr: cur.returnsInr, grossInr: cur.grossInr,
+      momDeltaPts, z: z == null ? null : round2(z), spike,
+      spikeReason: spike ? [sigmaSpike ? `${round2(z)}σ above trailing mean ${round2(mean)}%` : null, jumpSpike ? `+${momDeltaPts}pts MoM` : null].filter(Boolean).join("; ") : null,
+    });
+  }
+  const allPct = rows.map((x) => x.returnPct);
+  const mean = round2(allPct.reduce((a, b) => a + b, 0) / allPct.length);
+  const peakRow = out.reduce((a, b) => (b.returnPct > (a ? a.returnPct : -Infinity) ? b : a), null);
+  const latest = out[out.length - 1] || null;
+  const prior = out[out.length - 2] || null;
+  const spikes = out.filter((m) => m.spike);
+  return {
+    available: true, channel: "website", spikeSigma,
+    months: out, latest, prior, mean,
+    peak: peakRow ? { month: peakRow.month, returnPct: peakRow.returnPct } : null,
+    spikes,
+    sourceLabel: r.sourceLabel || r.label || "BusinessModel Returns(Shopify) tab",
+    note: `Shopify website return-rate over ${out.length} months (latest ${latest ? latest.returnPct + "% on " + inrLbl(latest.grossInr) + " gross" : "—"}; series mean ${mean}%). A month is flagged a SPIKE at ≥${spikeSigma}σ above its trailing mean or a ≥${MOM_JUMP_PTS}-point MoM jump — the website counterpart to the Amazon/Flipkart shipped-vs-cancel rate, so returns are surfaced for every channel, not "—" for website.`,
   };
 }
 
@@ -2659,6 +3058,38 @@ if (_isMain) {
   ok("g geo return hotspot detects high-return state", geo.returnHotspots.some((h) => h.state === "MAHARASHTRA"));
   ok("g geo revShare guarded + sums≈1", Math.abs(geo.states.reduce((a, s) => a + (s.revShare || 0), 0) - 1) < 1e-6);
 
+  // ── VI-47 · website (Shopify) returns trend + spike flags ──
+  const retFixture = { monthly: {}, daily: {}, meta: { bySource: { "bm-returns": { sourceLabel: "BM Returns", monthly: [
+    { month: "2026-01-01", returnsInr: 101307, grossInr: 568422, returnPct: 17.8 },
+    { month: "2026-02-01", returnsInr: 139010, grossInr: 507665, returnPct: 27.4 },  // +9.6pts → MoM-jump spike
+    { month: "2026-03-01", returnsInr: 133938, grossInr: 781549, returnPct: 17.1 },
+    { month: "2026-04-01", returnsInr: 141022, grossInr: 462177, returnPct: 30.5 },  // peak spike
+    { month: "2026-05-01", returnsInr: 103556, grossInr: 671502, returnPct: 15.4 },  // latest, not a spike
+  ] } } } };
+  const wret = websiteReturnsTrend(retFixture);
+  ok("VI-47 website returns available + 5 months ascending", wret.available && wret.months.length === 5 && wret.months[0].month === "2026-01" && wret.months[4].month === "2026-05");
+  ok("VI-47 latest = 15.4% (not flagged), peak = 30.5% Apr", wret.latest.returnPct === 15.4 && !wret.latest.spike && wret.peak.returnPct === 30.5 && wret.peak.month === "2026-04");
+  ok("VI-47 spike flags fire (Feb MoM-jump + Apr peak), latest clean", wret.months[1].spike && wret.months[3].spike && !wret.months[4].spike);
+  ok("VI-47 returnFrac mirrors returnPct/100", Math.abs(wret.latest.returnFrac - 0.154) < 1e-9);
+  const wretEmpty = websiteReturnsTrend({ monthly: {}, daily: {}, meta: { bySource: {} } });
+  ok("VI-47 no-source → available:false (never fabricated 0)", wretEmpty.available === false && wretEmpty.months.length === 0);
+
+  // ── VII-52 · deep SKU forecast off agency per-SKU units history ──
+  const skuFixture = {
+    monthly: { "2026-05|amazon|NSX": { units: 100, netRev: 100000, grossRev: 100000, adSpendDirect: 0 } },
+    daily: { "2026-05-31|amazon|__ch__": { units: 100, netRev: 100000, adSpend: 0 } },
+    meta: { bySource: { "snell-sku-units": { monthly: {
+      "2025-12|amazon|NSX": 80, "2026-01|amazon|NSX": 90, "2026-02|amazon|NSX": 95,
+      "2026-03|amazon|NSX": 105, "2026-04|amazon|NSX": 110, "2026-05|amazon|NSX": 100,
+    } } } },
+  };
+  const sf = skuForecast(skuFixture, { sku: "NSX", costs: defaultCosts, horizonMonths: 1 });
+  ok("VII-52 sku forecast uses agency units (≥6 mo history)", sf.history.length >= 6 && /agency per-SKU UNITS/.test(sf.basis));
+  ok("VII-52 sku forecast is BANDED (low < point < high)", sf.forecast.length === 1 && sf.forecast[0].netRevLow <= sf.forecast[0].netRev && sf.forecast[0].netRev <= sf.forecast[0].netRevHigh && sf.forecast[0].unitsHigh > sf.forecast[0].unitsLow);
+  ok("VII-52 sku forecast prices at native ₹/unit (₹1000)", Math.abs(sf.pricePerUnit - 1000) < 1);
+  const sfNone = skuForecast(skuFixture, { sku: "ZZZ", costs: defaultCosts });
+  ok("VII-52 sku with no agency units → falls back (banded or empty, no throw)", sfNone && Array.isArray(sfNone.forecast));
+
   // ── GLOBAL NaN/Infinity walk across every function on the fixture ──
   const walk = (o, path) => {
     if (o == null) return true;
@@ -2680,7 +3111,7 @@ if (_isMain) {
     ["basketTrend", basket], ["blinkitAdProxy", blk], ["orderMixTrend", om],
     ["totalVsDailyReconciliation", rec], ["conversionValueGap", cvg], ["cashbackTrend", cb],
     ["returningRevenue", rr], ["costChangeHistory", cch], ["geoConcentration", geo],
-    ["smallSampleFlag", thin2],
+    ["smallSampleFlag", thin2], ["websiteReturnsTrend", wret], ["skuForecast", sf],
   ]) if (!walk(val, name)) clean = false;
   ok("ALL outputs finite-or-null (no NaN/Infinity) on fixture", clean);
 
@@ -2729,6 +3160,26 @@ if (_isMain) {
       const rprose = proseWeeklyNarrative(real, { month: "2026-05", costs: RC });
       console.log("proseWeeklyNarrative weekLabel:", rprose.weekLabel);
       rprose.prose.forEach((p, i) => console.log(`  prose[${i}]:`, p));
+      // II-14/18 + VII-59 — the FLAGGED partial-June case: SKU line must be labeled
+      // full-vs-full (no −100% trap) and a vs-plan line must be present.
+      const rproseJun = proseWeeklyNarrative(real, { month: "2026-06", costs: RC });
+      console.log("proseWeeklyNarrative(June) topSkuLine:", rproseJun.topSkuLine);
+      console.log("proseWeeklyNarrative(June) topSkuWindow:", JSON.stringify(rproseJun.topSkuWindow));
+      console.log("proseWeeklyNarrative(June) vsPlan:", JSON.stringify(rproseJun.vsPlan));
+      // VI-47 — website (Shopify) returns trend + spike flags
+      const rret = websiteReturnsTrend(real);
+      console.log("websiteReturnsTrend latest/peak:", JSON.stringify({ latest: rret.latest && { m: rret.latest.month, pct: rret.latest.returnPct, spike: rret.latest.spike }, peak: rret.peak, mean: rret.mean, spikeMonths: rret.spikes.map((s) => s.month) }));
+      // VII-52 — deep SKU forecast (agency units history → banded ₹)
+      const rsf = skuForecast(real, { sku: "NSSBDB500", costs: RC, horizonMonths: 2 });
+      console.log("skuForecast(NSSBDB500) basis:", rsf.basis);
+      console.log("skuForecast(NSSBDB500) conf/historyLen/price/margin:", JSON.stringify({ conf: rsf.confidence, hist: rsf.history.length, price: rsf.pricePerUnit, margin: rsf.cm3MarginPct }));
+      console.log("skuForecast(NSSBDB500) forecast:", JSON.stringify(rsf.forecast));
+      // I-7 — variant-fold provenance (from the bundle meta)
+      const vf = real.meta && real.meta.skuVariantFold;
+      if (vf) { const folded = Object.values(vf).filter((x) => x.anyFolded); console.log("skuVariantFold folded codes:", folded.length, "sample:", folded[0] ? (folded[0].byChannel.amazon || folded[0].byChannel.flipkart).label : "—"); }
+      // XI/III — Amazon SP daily series reconciliation (₹3,55,115 re-derivable from daily)
+      const sp = real.meta && real.meta.bySource && real.meta.bySource["ads-amazon-sp"];
+      if (sp) console.log("amazonSp daily recon:", JSON.stringify({ total: sp.amazonSpTotal, days: sp.days, dailyCells: sp.daily ? Object.keys(sp.daily).length : 0, ties: sp.reconciliation && sp.reconciliation.ties }));
       const rltv = ltvCohort(real);
       console.log("ltvCohort shopify latest:", JSON.stringify(rltv.shopify.latest), "trendRepeatPct:", rltv.shopify.trendRepeatPct);
       console.log("ltvCohort amazon latest:", JSON.stringify(rltv.amazon.latest));

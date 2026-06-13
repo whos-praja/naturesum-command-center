@@ -249,6 +249,16 @@ export async function parseAmazonOrders(file, _opts = {}) {
   const mcf = {};            // code → mcf units (website-fulfilment proxy for mcfShare)
   let mcfTotal = 0, unmapped = 0, returnUnits = 0, returnValue = 0;
   const dates = new Set();
+  // I-7 · VARIANT-FOLD provenance — retain the pre-fold marketplace-SKU components
+  // per canonical (Amazon `_MP` website-fulfilment variant folds into its base
+  // MSKU's canonical). foldByCode[code] = { components:{ rawSku → {units, isMp, viaAsin} } }.
+  const foldByCode = {};
+  const noteFold = (code, rawSku, asin, q) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {} });
+    const key = rawSku || asin || "(blank)";
+    const comp = (fb.components[key] = fb.components[key] || { units: 0, isMp: /_MP$/i.test(rawSku || ""), viaAsin: !rawSku && !!asin });
+    comp.units += q;
+  };
   // (g) GEO: monthly per-state demand/returns concentration. "YYYY-MM|STATE" →
   // { units, netRev, returns }. Mirrors build-business-data.buildAmazon exactly.
   const geo = {};
@@ -307,12 +317,28 @@ export async function parseAmazonOrders(file, _opts = {}) {
     } else {
       bumpMonthly(facts, month, "amazon", code, { units: q, grossRev: rev, netRev: rev / 1.05 });
       bumpGeo(month, st, q, rev, false);
+      noteFold(code, rawSku, asin, q);
     }
   }
 
   for (const k of Object.keys(geo)) geo[k].netRev = r2(geo[k].netRev);
+  // Finalise the variant-fold map (folded = >1 raw SKU resolved, or an `_MP` present).
+  const skuVariantFold = {};
+  for (const [code, fb] of Object.entries(foldByCode)) {
+    const components = Object.entries(fb.components)
+      .map(([rawSku, c0]) => ({ rawSku, units: c0.units, isMp: c0.isMp, viaAsin: c0.viaAsin }))
+      .sort((a, b) => b.units - a.units);
+    const folded = components.length > 1;
+    if (!folded && !components.some((c0) => c0.isMp)) continue;
+    skuVariantFold[code] = {
+      channel: "amazon", canonical: code, folded, components,
+      label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
+      rule: "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable.",
+    };
+  }
   facts.meta.mcf = { byCode: mcf, totalUnits: mcfTotal };
   facts.meta.amazonReturns = { units: returnUnits, value: r2(returnValue) };
+  facts.meta.skuVariantFold = skuVariantFold;   // I-7 — pre-fold `_MP` components per canonical
   facts.meta.geo = { source: "amazon-all-orders ship-state", byMonthState: geo };
   if (unmapped > 5) dq.push({ level: "warn", code: "AMZ_UNMAPPED_MORE", msg: `${unmapped} total unmapped Amazon rows.` });
   if (Object.keys(facts.monthly).length === 0) dq.push({ level: "error", code: "AMZ_NOFACTS", msg: "Amazon parse produced no facts — check sales-channel filter." });
@@ -356,6 +382,17 @@ export async function parseFlipkartSales(file, _opts = {}) {
   }
   const facts = emptyFacts();
   let unmapped = 0, returnRows = 0;
+  // I-7 · VARIANT-FOLD provenance (Flipkart `*N` multipacks fold into the base
+  // canonical at N base units). foldByCode[code] = { components:{ rawSku → {mult,
+  // orderRows, baseUnits, foldedUnits} } } — retained pre-fold so the tooltip can
+  // prove "NSSBDB100 = NSSBDB100g + NSSBDB100g*2 folded".
+  const foldByCode = {};
+  const noteFold = (code, rawSku, mult, baseQty) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {} });
+    const key = String(rawSku).replace(/"/g, "").replace(/^SKU:/i, "").trim();
+    const comp = (fb.components[key] = fb.components[key] || { rawSku: key, mult, orderRows: 0, baseUnits: 0, foldedUnits: 0 });
+    comp.orderRows += 1; comp.baseUnits += baseQty; comp.foldedUnits += baseQty * mult;
+  };
   for (let i = 1; i < grid.length; i++) {
     const r = grid[i];
     if (!r || r[C.sku] === "" || r[C.sku] == null) continue;
@@ -366,9 +403,11 @@ export async function parseFlipkartSales(file, _opts = {}) {
     const month = monthOf(iso);
     if (!month) { dq.push({ level: "warn", code: "FK_NODATE", msg: `Flipkart row dropped — no parseable date (sku ${r[C.sku]}).` }); continue; }
     const bia = num(r[C.bia]);                       // native sign — returns are negative
-    const qty = num(r[C.qty]) * mult;                // *N multipack folds into base units
+    const baseQty = num(r[C.qty]);
+    const qty = baseQty * mult;                      // *N multipack folds into base units
     const isReturn = String(r[C.eventType] || "").toLowerCase().includes("return") || bia < 0;
     if (isReturn) returnRows++;
+    else noteFold(code, r[C.sku], mult, baseQty);
     // BIA already net of GST? No — spec says net = Σ BIA ÷ 1.05. grossRev = Σ BIA.
     bumpMonthly(facts, month, "flipkart", code, {
       units: isReturn ? -Math.abs(qty) : qty,
@@ -400,7 +439,22 @@ export async function parseFlipkartSales(file, _opts = {}) {
     dq.push({ level: "info", code: "FK_CASHBACK", msg: `Flipkart cashback ₹${r2(cb)} (${cn} notes, ${Object.keys(cbByMonth).length} months) — excluded from CM, reported as net-realization/settlement-drag note.` });
   }
   if (unmapped > 5) dq.push({ level: "warn", code: "FK_UNMAPPED_MORE", msg: `${unmapped} total unmapped Flipkart SKUs.` });
-  dq.push({ level: "info", code: "FK_OK", msg: `Flipkart: ${Object.keys(facts.monthly).length} cells; ${returnRows} return/cancel rows native-netted.` });
+  // Finalise the FK variant-fold map (folded = >1 raw SKU, or any `*N` multipack).
+  const skuVariantFold = {};
+  for (const [code, fb] of Object.entries(foldByCode)) {
+    const components = Object.values(fb.components)
+      .map((c0) => ({ rawSku: c0.rawSku, mult: c0.mult, orderRows: c0.orderRows, baseUnits: c0.baseUnits, foldedUnits: c0.foldedUnits, isMultipack: c0.mult > 1 }))
+      .sort((a, b) => b.foldedUnits - a.foldedUnits);
+    const folded = components.length > 1 || components.some((c0) => c0.isMultipack);
+    if (!folded) continue;
+    skuVariantFold[code] = {
+      channel: "flipkart", canonical: code, folded, components,
+      label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
+      rule: "Flipkart SKU `<base> * N` is a multipack order: it folds into the base canonical counting N base units (qty × N). Components retained pre-fold (raw SKU, multiplier, base vs folded units) so the multipack identity resolution is inspectable.",
+    };
+  }
+  facts.meta.skuVariantFold = skuVariantFold;   // I-7 — pre-fold `*N` multipack components per canonical
+  dq.push({ level: "info", code: "FK_OK", msg: `Flipkart: ${Object.keys(facts.monthly).length} cells; ${returnRows} return/cancel rows native-netted; ${Object.keys(skuVariantFold).length} variant-fold groups.` });
   return { facts, dq };
 }
 
@@ -525,8 +579,11 @@ export async function parseShopifyDaily(file, _opts = {}) {
 // ═══════════════════════════════════════════════════════════════════════════
 // 6 · AMAZON SP ADS (may_product_wise_sp.xlsx — DAILY, per-ASIN)  (amazon)
 // ═══════════════════════════════════════════════════════════════════════════
-// Product-attributed Amazon ad spend. Sums "Spend" by Advertised ASIN → code,
-// per month (from Date). Stored as monthly adSpendDirect on the amazon channel.
+// Product-attributed Amazon ad spend. The source is DAILY per-ASIN. We sum "Spend"
+// by Advertised ASIN → code into monthly adSpendDirect on the amazon channel, AND
+// (XI/III) expose the DAILY per-SKU series + by-day/by-month rollups in
+// meta.amazonSp so the ₹3,55,115 attributed-spend anchor re-derives END-TO-END from
+// the daily export (Σ daily = Σ monthly cells = total — an explicit equation).
 export async function parseAmazonSpAds(file, _opts = {}) {
   const dq = [];
   const wb = await fileToWorkbook(file);
@@ -538,22 +595,42 @@ export async function parseAmazonSpAds(file, _opts = {}) {
     if (v === -1) { dq.push({ level: "error", code: "SP_SCHEMA", msg: `Amazon SP ads missing column "${k}".` }); throw new Error(`Amazon SP ads: missing column (${k}). Schema drift.`); }
   }
   const facts = emptyFacts();
-  let total = 0, unmapped = 0;
+  let total = 0, unmapped = 0, unmappedSpend = 0;
+  const daily = {}, byDay = {}, byMonth = {};
+  const span = { first: null, last: null };
+  const addD = (map, key, v) => { map[key] = r2((map[key] || 0) + v); };
   for (let i = 1; i < grid.length; i++) {
     const r = grid[i];
     const asin = String(r[C.asin] || "").trim();
     if (!asin) continue;
     const code = ASIN_MAP[asin];
-    if (!code) { unmapped++; if (unmapped <= 5) dq.push({ level: "warn", code: "SP_UNMAPPED", msg: `Unmapped SP ASIN ${asin}.` }); continue; }
     const iso = excelToISODate(r[C.date]);
     const month = monthOf(iso);
-    if (!month) continue;
     const sp = num(r[C.spend]);
+    if (!code) { if (sp) { unmapped++; unmappedSpend += sp; if (unmapped <= 5) dq.push({ level: "warn", code: "SP_UNMAPPED", msg: `Unmapped SP ASIN ${asin}.` }); } continue; }
+    if (!month) continue;
     total += sp;
     bumpMonthly(facts, month, "amazon", code, { adSpendDirect: sp });
+    addD(daily, `${iso}|amazon|${code}`, sp);
+    addD(byDay, iso, sp);
+    addD(byMonth, month, sp);
+    if (!span.first || iso < span.first) span.first = iso;
+    if (!span.last || iso > span.last) span.last = iso;
   }
+  const sumDaily = r2(Object.values(daily).reduce((a, v) => a + v, 0));
+  const sumByDay = r2(Object.values(byDay).reduce((a, v) => a + v, 0));
   facts.meta.amazonSpTotal = r2(total);
-  dq.push({ level: "info", code: "SP_OK", msg: `Amazon SP product-attributed ₹${r2(total)} across ${Object.keys(facts.monthly).length} cells.` });
+  facts.meta.amazonSp = {
+    amazonSpTotal: r2(total), span, days: Object.keys(byDay).length,
+    daily, byDay, byMonth, unmappedRows: unmapped, unmappedSpend: r2(unmappedSpend),
+    reconciliation: {
+      sumDailyPerSku: sumDaily, sumByDay, monthlyCellsTotal: r2(total),
+      ties: Math.abs(sumDaily - r2(total)) < 1 && Math.abs(sumByDay - r2(total)) < 1,
+      note: `Σ daily-per-SKU = Σ by-day = Σ monthly attributed cells = ₹${r2(total)}. The attributed-spend anchor re-derives from the daily per-ASIN export end-to-end.`,
+    },
+    source: "may_product_wise_sp.xlsx (Date · Advertised ASIN · Spend), daily per-ASIN",
+  };
+  dq.push({ level: "info", code: "SP_OK", msg: `Amazon SP product-attributed ₹${r2(total)} across ${Object.keys(byDay).length} days / ${Object.keys(daily).length} daily per-SKU cells (Σ daily ties to total: ${Math.abs(sumDaily - r2(total)) < 1}).` });
   return { facts, dq };
 }
 

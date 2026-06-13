@@ -26,7 +26,7 @@ const LEVER = {
 };
 const SEV_RAIL = { critical: "var(--critical)", warn: "var(--warning)", opportunity: "var(--success)" };
 
-export function ActionQueue({ queue, D = defaultD, title = "What to do Monday", max = 12, onPick }) {
+export function ActionQueue({ queue, D = defaultD, title = "What to do Monday", max = 12, onPick, period }) {
   const inr = (n) => (D && D.fmtINR ? (Number.isFinite(Number(n)) ? D.fmtINR(Number(n)) : "—") : defaultInr(n));
   if (!Array.isArray(queue) || queue.length === 0) {
     return (
@@ -43,7 +43,17 @@ export function ActionQueue({ queue, D = defaultD, title = "What to do Monday", 
   return (
     <div className="card" style={{ padding: "14px 16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-        <div className="muted" style={{ fontSize: 10.5, letterSpacing: 0.4, textTransform: "uppercase" }}>{title}</div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 7, flexWrap: "wrap" }}>
+          <span className="muted" style={{ fontSize: 10.5, letterSpacing: 0.4, textTransform: "uppercase" }}>{title}</span>
+          {/* VIII-95 — the queue's impacts are computed off the latest COMPLETE month,
+              which differs from the page's June-MTD headline. Label the period right
+              on the queue header so the founder never holds two periods at once. */}
+          {period && (
+            <span className="cov-badge cov-agency sm" title="Impacts are computed off the latest COMPLETE month (a partial MTD month would understate monthly ₹). This differs from the page's live-month headline.">
+              impacts · {period}
+            </span>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {Object.entries(counts).map(([lev, c]) => (
             <span key={lev} className="cov-badge sm" title={`${c} ${LEVER[lev]?.label || lev} action(s)`}

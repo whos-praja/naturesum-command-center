@@ -112,14 +112,17 @@ const BIZ_ZONE_META = {
   "snell-agency":  { tier: "agency", unlocks: "May channel-total ad spend (AMS / FK / Blinkit) — the v1 single-month spend pins." },
   "snell-history": { tier: "agency", unlocks: "FULL daily channel history — Amazon Aug-24→, Flipkart Jun-25→, Blinkit Dec-25→ (incl. June MTD): units, gross/net revenue & ad spend. This is what powers the multi-month sales & spend charts." },
   "snell-sku-units": { tier: "agency", unlocks: "Daily per-SKU UNITS from the Categorywise tabs (units only, never revenue) — fills the SKU-units drill where native reports haven't landed yet." },
+  "snell-ordermix":  { tier: "agency", unlocks: "Amazon order-mix from the Snell Sale tab — Non-Advt / Review / Organic unit & ₹ split per month, plus the Total-row vs daily-series reconciliation. Powers the Amazon organic-vs-review composition view and the agency↔native recon check." },
   // ── Tier-3 MONARCH (website) ──
   "monarch-web":     { tier: "monarch", unlocks: "May website Google + Meta channel-total spend." },
   "monarch-history": { tier: "monarch", unlocks: "FULL daily website history Jun-25→ — conversion value, cancels & Google/Meta spend. Powers the 12-month website trend." },
+  "monarch-extra":   { tier: "monarch", unlocks: "Monarch March-2025 daily + Weekly-Comparison tabs — website order-count history and week-over-week comparison. Powers the website order-count chart and the WoW basket read." },
   // ── V2 upside views (analytics-only meta) ──
   "snell-cancel":     { tier: "agency", unlocks: "Cancel-rate per channel per month (shipped vs cancelled units) — powers the Sales cancel-rate trend with threshold coloring." },
   "monarch-seo":      { tier: "monarch", unlocks: "SEO keyword rank-over-time (top 30) — rank now vs ~30d/earliest, movement arrows. Powers the Marketing SEO panel." },
   "monarch-platform": { tier: "monarch", unlocks: "Google vs Meta monthly ROAS + CPA side-by-side — the budgeting decision view on Marketing." },
   "bm-repeats":       { tier: "businessmodel", unlocks: "Historical repeat % + returns trend (Shopify repeat by quarter, Amazon repeat share, Shopify returns % by month) — powers the Sales retention/returns panel." },
+  "cogs-history":     { tier: "businessmodel", unlocks: "Per-SKU COGS change log from the Unit_COGS Notes column (current RM/pkg cost + prior values, as-of dates, ₹0-packaging placeholder flags) — the cost-card provenance behind every CM ladder." },
 };
 const bizZoneMeta = (key) => BIZ_ZONE_META[key] || { tier: "native", unlocks: null };
 

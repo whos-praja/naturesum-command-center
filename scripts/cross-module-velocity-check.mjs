@@ -37,7 +37,7 @@ for (const [code, ch] of PROBES) {
   const unitsTrace = b != null && Number.isFinite(b.units) && b.units > 0;
   if (!bothPresent || !unitsTrace) fail = true;
   console.log(`${code} · ${ch}:`);
-  console.log(`  business  ${b ? b.velocityPerDay.toFixed(2) + "/day (" + b.units + "u ÷ " + b.days + "d MTD)" : "n/a"}  [ns.businessPerf]`);
+  console.log(`  business  ${b ? b.velocityPerDay.toFixed(2) + "/day (" + b.units + "u ÷ " + b.days + "d · " + (b.currentMonthPartial ? "MTD" : "complete month") + ")" : "n/a"}  [ns.businessPerf]`);
   console.log(`  inventory ${invVel != null ? invVel + "/day" : "n/a"}  [agency sales30d=${agencyUnits30}, MAX(30,15)+shopify-fold]`);
   console.log(`  units trace to same store: ${unitsTrace ? "YES" : "NO"}; both present: ${bothPresent ? "YES" : "NO"}`);
 }
