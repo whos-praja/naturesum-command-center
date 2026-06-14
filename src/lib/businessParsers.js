@@ -58,6 +58,33 @@ const FK_SKU_MAP = {
   "NSJ&RHO100ML": "NSJO100", "DI-TE-1-A": "NSACDT30",
 };
 
+// Amazon Orders Insights "Master SKU" → canonical (NEW authoritative source,
+// founder-approved 2026-06-14 basis A). The cleaned export's "Master SKU" column
+// is ALREADY canonical-ish (e.g. NSSBDB500) and already folds ML/_MP marketplace
+// variants into one master, so the identity map is mostly pass-through. We keep an
+// explicit map (rather than trusting the raw string) so a future header rename or
+// stray variant fails LOUD into "unmapped" instead of silently splitting a code.
+// `resolveMasterSku()` also strips a trailing _MP / *N just in case a raw cell
+// arrives un-folded.
+const AMZ_MASTER_SKU_MAP = {
+  NSMP100: "NSMP100", NSMP250: "NSMP250",
+  NSSB100: "NSSB100", NSSB250: "NSSB250", NSSB500: "NSSB500",
+  NSSBDB100: "NSSBDB100", NSSBDB250: "NSSBDB250", NSSBDB500: "NSSBDB500",
+  NSSBJ300: "NSSBJ300", NSSBJ500: "NSSBJ500",
+  NSSBBO15: "NSSBBO15", NSSBBO30: "NSSBBO30",
+  NSJO100: "NSJO100", NSACDT30: "NSACDT30",
+};
+// Master SKU → canonical, defensively folding a trailing _MP (MCF/website
+// variant) and a trailing *N multipack tag, then falling back to the marketplace
+// MSKU map for any un-folded raw SKU. Returns null (→ unmapped, never silent) when
+// nothing resolves.
+function resolveMasterSku(raw) {
+  let s = String(raw ?? "").trim();
+  if (!s) return null;
+  s = s.replace(/_MP$/i, "").replace(/\s*\*\s*\d+\s*$/, "");
+  return AMZ_MASTER_SKU_MAP[s] || AMZ_MSKU_MAP[s] || ASIN_MAP[s] || null;
+}
+
 // Shopify variant SKU → canonical (from CODE_MAP `shp`).
 const SHP_SKU_MAP = {
   "NS-SBDR-100": "NSSBDB100", "NS-SBDR-250": "NSSBDB250", "NS-SBDR-500": "NSSBDB500",
@@ -343,6 +370,200 @@ export async function parseAmazonOrders(file, _opts = {}) {
   if (unmapped > 5) dq.push({ level: "warn", code: "AMZ_UNMAPPED_MORE", msg: `${unmapped} total unmapped Amazon rows.` });
   if (Object.keys(facts.monthly).length === 0) dq.push({ level: "error", code: "AMZ_NOFACTS", msg: "Amazon parse produced no facts — check sales-channel filter." });
   dq.push({ level: "info", code: "AMZ_OK", msg: `Amazon: ${Object.keys(facts.monthly).length} month×SKU cells; returns ${returnUnits}u/₹${r2(returnValue)}; MCF ${mcfTotal}u.` });
+  return { facts, dq };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 1·NEW · AMAZON ORDERS INSIGHTS xlsx — "Data (cleaned)" tab  (channel: amazon)
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTHORITATIVE Amazon source (founder-approved 2026-06-14, basis A — SUPERSEDES
+// the old amazonmaysales.txt All-Orders TSV). Row-level cleaned export, columns:
+//   Day | Order type | Sales channel | Fulfilment | Master SKU | SKU | Product |
+//   Qty | Item price (₹) | Line revenue (₹) | Status bucket | Order status |
+//   Revenue-bearing? | Shipped? | State (norm) | City | Service level |
+//   Business order? | Promo? | Promo disc (₹)
+//
+// BINDING BASIS (founder approval 2026-06-14 — FBA-ONLY; SUPERSEDES the erroneous
+// FBA+EasyShip re-base that DOUBLE-COUNTED website Easy Ship orders):
+//   • Amazon channel = ONLY rows whose Order type is "Amazon.in marketplace (FBA)"
+//     AND Revenue-bearing? starts with "Y" (priced & not cancelled). net = Σ Line
+//     revenue ÷ 1.05 (GST-incl rule). This reproduces the founder's Executive
+//     Summary FBA line EXACTLY: 995 units / gross ₹10,85,267 / net ₹10,33,588 (May).
+//   • Website D2C (Easy Ship) rows are EXCLUDED from Amazon — they are website D2C
+//     demand already counted in the Shopify-net website figure (₹4,28,378); folding
+//     them into Amazon double-counts website. (Per spec §2: Amazon = Amazon.in only.)
+//   • MCF (non-Amazon channels) rows are Revenue-bearing?="No" / ₹0 → website-
+//     fulfilment-through-Amazon units captured as MCF units for mcfShare, NEVER as
+//     Amazon demand units/revenue.
+//   • Returns = "Returned/Rejected" bucket WITHIN FBA — which is EMPTY (the
+//     14u/₹9,500 Returned/Rejected rows are all Website D2C Easy Ship, NOT Amazon),
+//     so Amazon returns = 0. Kept defensively so any future FBA return surfaces.
+//   • Geo = SAME FBA revenue-bearing basis, by State (norm), net÷1.05 → geo total ==
+//     Amazon channel net (reconciles; Punjab #1 ≈ ₹1,30,471 net).
+//   • Master SKU is the per-SKU grain (already canonical; resolveMasterSku folds
+//     any stray _MP/*N). Order composition (B2B/B2C, single/multi) from the same
+//     FBA revenue-bearing rows via Fulfilment / Business order? / Qty (all FBA now).
+const AMZ_INSIGHTS_SHEET = "Data (cleaned)";
+// FBA-only channel membership (founder 2026-06-14). Website D2C (Easy Ship) and MCF
+// (non-Amazon channels) are NOT the Amazon channel.
+const AMZ_FBA_ORDER_TYPE = "Amazon.in marketplace (FBA)";
+const MCF_ORDER_TYPE = "MCF (non-Amazon channels)";
+const RR_BUCKET = "Returned/Rejected";
+
+export async function parseAmazonInsights(file, _opts = {}) {
+  const dq = [];
+  const wb = await fileToWorkbook(file);
+  const ws = wb.Sheets[AMZ_INSIGHTS_SHEET];
+  if (!ws) { dq.push({ level: "error", code: "AMZI_NOSHEET", msg: `Amazon Orders Insights: missing "${AMZ_INSIGHTS_SHEET}" tab.` }); throw new Error(`Amazon Orders Insights: tab "${AMZ_INSIGHTS_SHEET}" not found (tabs: ${wb.SheetNames.join(", ")}).`); }
+  const grid = sheetGrid(ws);
+  if (grid.length < 2) { dq.push({ level: "error", code: "AMZI_EMPTY", msg: "Amazon Orders Insights: no data rows." }); throw new Error("Amazon Orders Insights: empty Data (cleaned) tab."); }
+  const H = grid[0].map((h) => String(h ?? "").trim());
+  const col = (n) => H.indexOf(n);
+  const C = {
+    day: col("Day"), orderType: col("Order type"), salesCh: col("Sales channel"),
+    ful: col("Fulfilment"), masterSku: col("Master SKU"), sku: col("SKU"),
+    qty: col("Qty"), itemPrice: col("Item price (₹)"), lineRev: col("Line revenue (₹)"),
+    bucket: col("Status bucket"), revBearing: col("Revenue-bearing?"),
+    state: col("State (norm)"), biz: col("Business order?"),
+  };
+  for (const [k, v] of Object.entries(C)) {
+    // state is OPTIONAL (geo cut) — its absence suppresses geo only. Everything
+    // else is required: schema drift fails LOUD (never a silent 0). Order type is
+    // REQUIRED here — it is the FBA-only channel-membership filter.
+    if (v === -1 && k !== "state") { dq.push({ level: "error", code: "AMZI_SCHEMA", msg: `Amazon Orders Insights missing column "${k}".` }); throw new Error(`Amazon Orders Insights: missing expected column (${k}). Schema drift in Data (cleaned).`); }
+  }
+
+  const facts = emptyFacts();
+  const mcf = {};                       // code → MCF units (website-fulfilment proxy)
+  let mcfTotal = 0, unmapped = 0, retUnits = 0, retValue = 0;
+
+  // ── BOUNDARY-SPILL FOLD ──────────────────────────────────────────────────
+  // The cleaned export is a SINGLE-MONTH file (the founder's approved May 2026
+  // export). Its "Day" column is Excel serials whose range can spill ONE boundary
+  // day into the next month (May export reaches 2026-06-01 for a unit that shipped
+  // just past midnight). The founder-approved FBA total ₹10,33,588 / 995u INCLUDES
+  // that boundary row, so we attribute EVERY row to the export's MODAL month (the
+  // overwhelming majority) rather than splitting one unit out — the file IS one
+  // month's data. A truly multi-month future export (no single dominant month)
+  // would fall back to each row's own month.
+  const monthCounts = {};
+  for (let i = 1; i < grid.length; i++) {
+    const m0 = monthOf(excelToISODate(grid[i]?.[C.day]));
+    if (m0) monthCounts[m0] = (monthCounts[m0] || 0) + 1;
+  }
+  const sortedMonths = Object.entries(monthCounts).sort((a, b) => b[1] - a[1]);
+  const totalDated = sortedMonths.reduce((s, [, n]) => s + n, 0);
+  // Treat as single-month (fold spill) only when one month is ≥80% of dated rows.
+  const modalMonth = (sortedMonths[0] && sortedMonths[0][1] / Math.max(1, totalDated) >= 0.8) ? sortedMonths[0][0] : null;
+  const attribMonth = (m0) => (modalMonth ? modalMonth : m0);
+  if (modalMonth && sortedMonths.length > 1) {
+    const spill = totalDated - sortedMonths[0][1];
+    dq.push({ level: "info", code: "AMZI_MONTHFOLD", msg: `Single-month export: ${spill} boundary-day row(s) folded into modal month ${modalMonth}.` });
+  }
+  // GEO: "YYYY-MM|STATE" → { units, netRev, returns }. Keyed UPPERCASE to match the
+  // legacy byMonthState contract bizAnalytics.geoConcentration consumes. Accumulate
+  // RAW gross per state, ÷1.05 ONCE at finalise so geo net == channel net to paise.
+  const geo = {};
+  const bumpGeo = (m, st, q, rev, isReturn) => {
+    const state = String(st || "").trim().toUpperCase() || "UNKNOWN";
+    const k = `${m}|${state}`;
+    const cur = geo[k] || { units: 0, gross: 0, returns: 0 };
+    if (isReturn) { cur.returns += q; }   // returns are a separate bucket — tally only, never net into demand
+    else { cur.units += q; cur.gross += rev; }
+    geo[k] = cur;
+  };
+  // Variant-fold provenance per canonical (raw Master SKU + SKU components).
+  const foldByCode = {};
+  const noteFold = (code, masterSku, sku, q) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {} });
+    const key = sku || masterSku || "(blank)";
+    const comp = (fb.components[key] = fb.components[key] || { units: 0, isMp: /_MP$/i.test(sku || ""), masterSku });
+    comp.units += q;
+  };
+
+  for (let i = 1; i < grid.length; i++) {
+    const row = grid[i];
+    if (!row || row.length === 0) continue;
+    const orderType = String(row[C.orderType] ?? "").trim();
+    const bucket = String(row[C.bucket] ?? "").trim();
+    const masterSku = String(row[C.masterSku] ?? "").trim();
+    const skuRaw = String(row[C.sku] ?? "").trim();
+    const code = resolveMasterSku(masterSku) || resolveMasterSku(skuRaw);
+    const iso = excelToISODate(row[C.day]);
+    const month = attribMonth(monthOf(iso));   // boundary-day spill folds into the modal month
+    const q = num(row[C.qty]);
+    const lineRev = num(row[C.lineRev]);
+    const revBearing = /^y/i.test(String(row[C.revBearing] ?? "").trim());
+    const st = C.state === -1 ? "" : row[C.state];
+
+    // ── MCF (non-Amazon channels): website-fulfilment-through-Amazon units only
+    // (Revenue-bearing?="No", ₹0) → captured for mcfShare, NEVER Amazon demand.
+    // Scoped to its own Order type so the FBA-only Amazon channel stays clean.
+    if (orderType === MCF_ORDER_TYPE) {
+      if (!revBearing && code) { mcf[code] = (mcf[code] || 0) + q; mcfTotal += q; }
+      continue;
+    }
+
+    // ── FBA-ONLY channel membership (founder 2026-06-14). Anything that is NOT
+    // Order type "Amazon.in marketplace (FBA)" — i.e. Website D2C (Easy Ship) — is
+    // EXCLUDED from Amazon: it is website D2C already in the Shopify-net website
+    // figure, so folding it in double-counts website. This is the fix.
+    if (orderType !== AMZ_FBA_ORDER_TYPE) continue;
+
+    // ── Returns: separate bucket WITHIN FBA. On the FBA-only basis this is EMPTY
+    // (the 14u/₹9,500 Returned/Rejected rows are all Easy Ship/website), so Amazon
+    // returns = 0. Kept defensively so a future FBA return surfaces correctly.
+    if (bucket === RR_BUCKET) {
+      if (code && month) {
+        bumpMonthly(facts, month, "amazon", code, { returnsUnits: q, returnsValue: lineRev });
+      }
+      retUnits += q; retValue += lineRev; bumpGeo(month, st, q, lineRev, true);
+      continue;
+    }
+
+    // ── Revenue-bearing FBA demand only. Non-revenue-bearing FBA rows (Cancelled /
+    // Pending pickup / Unfulfillable / ₹0) are not priced customer demand.
+    if (!revBearing) continue;
+    if (!code) {
+      if (masterSku || skuRaw) { unmapped++; if (unmapped <= 5) dq.push({ level: "warn", code: "AMZI_UNMAPPED", msg: `Unmapped Amazon Insights row masterSku=${masterSku} sku=${skuRaw}` }); }
+      continue;
+    }
+    if (!month) { dq.push({ level: "warn", code: "AMZI_NODATE", msg: `Amazon Insights row with unparseable Day dropped (sku=${skuRaw}).` }); continue; }
+    bumpMonthly(facts, month, "amazon", code, { units: q, grossRev: lineRev });   // netRev finalised below
+    bumpGeo(month, st, q, lineRev, false);
+    noteFold(code, masterSku, skuRaw, q);
+  }
+
+  // Finalise per-SKU netRev ONCE per cell from accumulated raw gross (÷1.05) so
+  // Σ per-SKU netRev == r2(Σ gross ÷ 1.05) == the channel net anchor (no per-row
+  // rounding drift). Geo netRev finalised the same way.
+  for (const k of Object.keys(facts.monthly)) {
+    const [, ch, code] = k.split("|");
+    if (ch === "amazon" && code !== CH_CODE) facts.monthly[k].netRev = r2((facts.monthly[k].grossRev || 0) / 1.05);
+  }
+  for (const k of Object.keys(geo)) { geo[k].netRev = r2((geo[k].gross || 0) / 1.05); delete geo[k].gross; }
+  // Variant-fold map (folded = >1 raw SKU resolved into the canonical, or an _MP present).
+  const skuVariantFold = {};
+  for (const [code, fb] of Object.entries(foldByCode)) {
+    const components = Object.entries(fb.components)
+      .map(([sku, c0]) => ({ rawSku: sku, units: c0.units, isMp: c0.isMp }))
+      .sort((a, b) => b.units - a.units);
+    const folded = components.length > 1;
+    if (!folded && !components.some((c0) => c0.isMp)) continue;
+    skuVariantFold[code] = {
+      channel: "amazon", canonical: code, folded, components,
+      label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
+      rule: "Amazon Orders Insights folds each Master SKU's marketplace SKU variants (e.g. NSSBJ500ML + NSSBJ500ML_MP) into ONE canonical code. The _MP suffix marks the MCF/website-fulfilment twin. Components retained pre-fold so the identity resolution is inspectable.",
+    };
+  }
+
+  facts.meta.mcf = { byCode: mcf, totalUnits: mcfTotal };
+  facts.meta.amazonReturns = { units: retUnits, value: r2(retValue) };
+  facts.meta.skuVariantFold = skuVariantFold;
+  facts.meta.geo = { source: "amazon-orders-insights State (norm)", byMonthState: geo };
+  if (unmapped > 5) dq.push({ level: "warn", code: "AMZI_UNMAPPED_MORE", msg: `${unmapped} total unmapped Amazon Insights rows.` });
+  if (Object.keys(facts.monthly).length === 0) dq.push({ level: "error", code: "AMZI_NOFACTS", msg: "Amazon Insights parse produced no facts — check Order type (FBA) / Revenue-bearing filter." });
+  dq.push({ level: "info", code: "AMZI_OK", msg: `Amazon Orders Insights (Amazon.in marketplace FBA only, ÷1.05): ${Object.keys(facts.monthly).length} month×SKU cells; returns ${retUnits}u/₹${r2(retValue)}; MCF ${mcfTotal}u.` });
   return { facts, dq };
 }
 
@@ -1543,8 +1764,27 @@ export async function parseCogsHistory(file, _opts = {}) {
 // shopify-net, shopify-daily, ads-amazon-sp, ads-fk-pla, ads-google,
 // snell-agency, monarch-web. The list is data-driven so consumers never
 // hardcode the channel/zone set.
+// Amazon-orders zone router (founder 2026-06-14): the AUTHORITATIVE upload is now
+// the "Amazon Orders Insights" multi-tab xlsx (Data (cleaned) tab) on the
+// shipped+delivered ÷1.05 basis. We auto-detect: an xlsx carrying the
+// "Data (cleaned)" tab → parseAmazonInsights; otherwise the legacy All-Orders TSV
+// path (parseAmazonOrders) still works for back-compat.
+async function parseAmazonOrdersZone(file, opts = {}) {
+  const name = String(file?.name || "").toLowerCase();
+  const looksXlsx = /\.xlsx?$/.test(name);
+  if (looksXlsx) {
+    try {
+      const wb = await fileToWorkbook(file);
+      if (wb.SheetNames.includes(AMZ_INSIGHTS_SHEET)) return await parseAmazonInsights(file, opts);
+    } catch {
+      // fall through to TSV path on any workbook-read failure
+    }
+  }
+  return await parseAmazonOrders(file, opts);
+}
+
 export const BUSINESS_FILE_TYPES = {
-  "amazon-orders": { label: "Amazon All-Orders (TSV)", channel: "amazon", parse: parseAmazonOrders },
+  "amazon-orders": { label: "Amazon Orders Insights (xlsx · Data (cleaned)) — or legacy All-Orders TSV", channel: "amazon", parse: parseAmazonOrdersZone },
   "fk-sales": { label: "Flipkart Sales Report (xlsx)", channel: "flipkart", parse: parseFlipkartSales },
   "blinkit-sales": { label: "Blinkit Sales Report (xlsx)", channel: "blinkit", parse: parseBlinkitSales },
   "shopify-net": { label: "Shopify Net Sales/Units (CSV, monthly)", channel: "website", parse: parseShopifyNet },
@@ -1577,6 +1817,6 @@ export async function parseBusinessFile(type, file, opts = {}) {
 }
 
 // Exposed for the offline twin + verification re-derivation.
-export { ASIN_MAP, AMZ_MSKU_MAP, FK_SKU_MAP, SHP_SKU_MAP, BLINKIT_ITEM_MAP, num, r2, excelToISODate };
+export { ASIN_MAP, AMZ_MSKU_MAP, AMZ_MASTER_SKU_MAP, FK_SKU_MAP, SHP_SKU_MAP, BLINKIT_ITEM_MAP, num, r2, excelToISODate, resolveMasterSku };
 // V2 — channel-grain sentinel + Categorywise resolver exposed for the twin/store.
 export { CH_CODE, snellCatHeaderToCode };

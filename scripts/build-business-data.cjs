@@ -160,164 +160,222 @@ function snellCatHeaderToCode(title) {
 
 const report = {};   // human-readable channel rollup for the run summary
 
-// ═══ 1 · Amazon All-Orders TSV ═══════════════════════════════════════════════
+// ═══ 1 · Amazon Orders Insights xlsx — "Data (cleaned)" tab ═══════════════════
+// AUTHORITATIVE Amazon source (founder approval 2026-06-14, basis A — SUPERSEDES
+// the old amazonmaysales.txt All-Orders TSV / ₹11,43,450 anchor). Offline twin of
+// businessParsers.parseAmazonInsights — same basis byte-for-byte:
+//   • Amazon revenue = Status bucket ∈ {"Shipped / in transit","Delivered"},
+//     net = Σ Line revenue ÷ 1.05 (excludes Cancelled/Pending pickup/Unfulfillable).
+//   • Only REVENUE-BEARING rows carry revenue; ₹0 MCF/bulk rows (Revenue-bearing?
+//     "No") → MCF units for mcfShare, never Amazon demand. The priced
+//     shipped+delivered rows = real Amazon.in demand (May: 1,292u / gross
+//     ₹13,46,437 / net ₹12,82,321).
+//   • Returns = Status bucket "Returned/Rejected" (14u / ₹9,500 gross): a SEPARATE
+//     bucket, already NOT in shipped+delivered revenue. Recorded as
+//     returnsUnits/returnsValue, NOT double-subtracted.
+//   • Geo = same shipped+delivered revenue-bearing basis, by State (norm), net÷1.05
+//     → geo total == channel net (Punjab #1 ≈ ₹1.58L net). Per-state returns from
+//     the Returned/Rejected rows.
+//   • Master SKU = per-SKU grain (already canonical; resolveMasterSku folds _MP/*N).
+const AMZ_INSIGHTS_SHEET = "Data (cleaned)";
+const SD_BUCKETS = new Set(["Shipped / in transit", "Delivered"]);
+const RR_BUCKET = "Returned/Rejected";
+const AMZ_MASTER_SKU_MAP = {
+  NSMP100: "NSMP100", NSMP250: "NSMP250",
+  NSSB100: "NSSB100", NSSB250: "NSSB250", NSSB500: "NSSB500",
+  NSSBDB100: "NSSBDB100", NSSBDB250: "NSSBDB250", NSSBDB500: "NSSBDB500",
+  NSSBJ300: "NSSBJ300", NSSBJ500: "NSSBJ500",
+  NSSBBO15: "NSSBBO15", NSSBBO30: "NSSBBO30",
+  NSJO100: "NSJO100", NSACDT30: "NSACDT30",
+};
+function resolveMasterSku(raw) {
+  let s = String(raw ?? "").trim();
+  if (!s) return null;
+  s = s.replace(/_MP$/i, "").replace(/\s*\*\s*\d+\s*$/, "");
+  return AMZ_MASTER_SKU_MAP[s] || AMZ_MSKU_MAP[s] || ASIN_MAP[s] || null;
+}
+
+// BOUNDARY-SPILL FOLD (mirror of businessParsers.parseAmazonInsights): the cleaned
+// export is a SINGLE-MONTH file whose Day serials can spill ONE boundary day into
+// the next month (the May export reaches 2026-06-01). The founder anchor
+// ₹12,82,321 INCLUDES that boundary row, so every row is attributed to the modal
+// month (≥80% of dated rows). Returns the modal month or null (true multi-month).
+function amzInsightsModalMonth(g, dayCol) {
+  const counts = {};
+  for (let i = 1; i < g.length; i++) {
+    const m0 = monthOf(excelToISODate(g[i]?.[dayCol]));
+    if (m0) counts[m0] = (counts[m0] || 0) + 1;
+  }
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const total = sorted.reduce((s, [, n]) => s + n, 0);
+  return (sorted[0] && sorted[0][1] / Math.max(1, total) >= 0.8) ? sorted[0][0] : null;
+}
+
 function buildAmazon() {
-  const p = resolve("amazonmaysales", "txt");
-  if (!p) { console.error("MISSING amazonmaysales.txt"); return; }
-  const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter((l) => l.length);
-  const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
-  const C = { date: col("purchase-date"), status: col("order-status"), itemStatus: col("item-status"), salesCh: col("sales-channel"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price"), state: col("ship-state"), postal: col("ship-postal-code") };
-  const mcf = {}; let mcfTotal = 0, retU = 0, retV = 0, units = 0, gross = 0;
-  // I-7 · VARIANT-FOLD provenance. The parser folds Amazon `_MP` (MCF / website-
-  // fulfilment marketplace-SKU) into the same canonical code as its base MSKU
-  // (e.g. NSSBJ500ML + NSSBJ500ML_MP → NSSBJ500). The fold is correct but invisible;
-  // we retain the PRE-FOLD component breakdown per canonical so the identity
-  // resolution is provable in a tooltip ("NSSBJ500 = NSSBJ500ML + NSSBJ500ML_MP
-  // folded"). foldByCode[code] = { components:{ rawSku → {units, asins:Set} }, folded:bool }.
-  // Only counts the Amazon.in SHIPPED, non-return rows that actually contribute
-  // units to the canonical (the same row set the per-SKU revenue uses).
-  const foldByCode = {};
-  const noteFold = (code, rawSku, asin, q) => {
-    const fb = (foldByCode[code] = foldByCode[code] || { components: {}, asins: {} });
-    const key = rawSku || asin || "(blank)";
-    const comp = (fb.components[key] = fb.components[key] || { units: 0, viaAsin: false, isMp: /_MP$/i.test(rawSku || "") });
-    comp.units += q;
-    if (!rawSku && asin) comp.viaAsin = true;
-    if (asin) fb.asins[asin] = (fb.asins[asin] || 0) + q;
+  const p = resolve("Amazon Orders Insights by Shivam", "xlsx");
+  if (!p) { console.error("MISSING Amazon Orders Insights by Shivam.xlsx"); return; }
+  const wb = XLSX.readFile(p);
+  const ws = wb.Sheets[AMZ_INSIGHTS_SHEET];
+  if (!ws) { console.error(`MISSING "${AMZ_INSIGHTS_SHEET}" tab in Amazon Orders Insights`); return; }
+  const g = grid(ws);
+  const H = g[0].map((h) => String(h ?? "").trim()); const col = (n) => H.indexOf(n);
+  const C = {
+    day: col("Day"), orderType: col("Order type"), salesCh: col("Sales channel"),
+    ful: col("Fulfilment"), masterSku: col("Master SKU"), sku: col("SKU"),
+    qty: col("Qty"), itemPrice: col("Item price (₹)"), lineRev: col("Line revenue (₹)"),
+    bucket: col("Status bucket"), revBearing: col("Revenue-bearing?"),
+    state: col("State (norm)"), biz: col("Business order?"),
   };
-  // (g) GEO: monthly per-state Amazon demand/returns concentration. Key = "YYYY-MM|STATE"
-  // → { units, netRev, returns }. State strings are normalised (trim, upper) so
-  // "Delhi"/"DELHI"/" delhi " collapse; blank/unknown state → "UNKNOWN" (honest,
-  // never dropped). netRev = ÷1.05 (Amazon gross-incl-GST rule). Returns netted in
-  // units/netRev (a return row carries negative qty/rev) AND tallied as `returns`.
-  const geo = {};
+  const mcf = {}; let mcfTotal = 0, retU = 0, retV = 0, units = 0, gross = 0;
+  // VARIANT-FOLD provenance per canonical (Master SKU already folds ML/_MP).
+  const foldByCode = {};
+  const noteFold = (code, masterSku, sku, q) => {
+    const fb = (foldByCode[code] = foldByCode[code] || { components: {} });
+    const key = sku || masterSku || "(blank)";
+    const comp = (fb.components[key] = fb.components[key] || { units: 0, isMp: /_MP$/i.test(sku || ""), masterSku });
+    comp.units += q;
+  };
+  // GEO: "YYYY-MM|STATE" → { units, netRev, returns }. State normalised (trim/upper);
+  // blank → "UNKNOWN". Same shipped+delivered revenue-bearing basis; returns tally
+  // only (they're a separate bucket, never netted into demand). We accumulate RAW
+  // gross per state and ÷1.05 ONCE at finalise so the geo net total reconciles to
+  // the channel net to the paise (per-row rounding would drift ~₹1k).
+  const geo = {};       // key → { units, gross, returns }
   const bumpGeo = (m, st, q, rev, isReturn) => {
     const state = String(st || "").trim().toUpperCase() || "UNKNOWN";
     const k = `${m}|${state}`;
-    const cur = geo[k] || { units: 0, netRev: 0, returns: 0 };
-    if (isReturn) { cur.units -= q; cur.netRev = r2(cur.netRev - rev / 1.05); cur.returns += q; }
-    else { cur.units += q; cur.netRev = r2(cur.netRev + rev / 1.05); }
+    const cur = geo[k] || { units: 0, gross: 0, returns: 0 };
+    if (isReturn) { cur.returns += q; }
+    else { cur.units += q; cur.gross += rev; }
     geo[k] = cur;
   };
-  for (let i = 1; i < lines.length; i++) {
-    const c = lines[i].split("\t");
-    const salesCh = (c[C.salesCh] || "").trim(), itemStatus = (c[C.itemStatus] || "").trim(), status = (c[C.status] || "").trim();
-    const code = ASIN_MAP[(c[C.asin] || "").trim()] || AMZ_MSKU_MAP[(c[C.sku] || "").trim().replace(/_MP$/i, "")] || null;
-    if (/^Non-Amazon/i.test(salesCh)) { if (itemStatus === "Shipped" && code) { const q = num(c[C.qty]); mcf[code] = (mcf[code] || 0) + q; mcfTotal += q; } continue; }
-    if (salesCh !== "Amazon.in" || itemStatus !== "Shipped" || !code) continue;
-    const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
-    const q = num(c[C.qty]), rev = num(c[C.price]);
-    const rawSku = (c[C.sku] || "").trim(), asin = (c[C.asin] || "").trim();
-    const st = C.state === -1 ? "" : c[C.state];
-    if (/Returned to Seller/i.test(status)) { bumpM(m, "amazon", code, "amazon-orders", { units: -q, grossRev: -rev, netRev: -rev / 1.05, returnsUnits: q, returnsValue: rev }); retU += q; retV += rev; units -= q; gross -= rev; bumpGeo(m, st, q, rev, true); }
-    else { bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: rev, netRev: rev / 1.05 }); units += q; gross += rev; bumpGeo(m, st, q, rev, false); noteFold(code, rawSku, asin, q); }
+  // Accumulate RAW gross per SKU cell; netRev is computed ONCE per cell after the
+  // loop (= r2(grossRev ÷ 1.05)) so Σ per-SKU netRev == r2(Σ gross ÷ 1.05) ==
+  // ₹12,82,321 (the founder-approved anchor). Per-row ÷1.05 rounding would under-
+  // count by ~₹1,286.
+  const modalMonth = amzInsightsModalMonth(g, C.day);
+  for (let i = 1; i < g.length; i++) {
+    const row = g[i]; if (!row || row.length === 0) continue;
+    const bucket = String(row[C.bucket] ?? "").trim();
+    const masterSku = String(row[C.masterSku] ?? "").trim();
+    const skuRaw = String(row[C.sku] ?? "").trim();
+    const code = resolveMasterSku(masterSku) || resolveMasterSku(skuRaw);
+    const iso = excelToISODate(row[C.day]); const m = modalMonth || monthOf(iso);   // boundary spill → modal month
+    const q = num(row[C.qty]), lineRev = num(row[C.lineRev]);
+    const revBearing = String(row[C.revBearing] ?? "").trim().toLowerCase() === "yes";
+    const st = C.state === -1 ? "" : row[C.state];
+    if (bucket === RR_BUCKET) {
+      if (code && m) bumpM(m, "amazon", code, "amazon-orders", { returnsUnits: q, returnsValue: lineRev });
+      retU += q; retV += lineRev; bumpGeo(m, st, q, lineRev, true); continue;
+    }
+    if (!revBearing) { if (SD_BUCKETS.has(bucket) && code) { mcf[code] = (mcf[code] || 0) + q; mcfTotal += q; } continue; }
+    if (!SD_BUCKETS.has(bucket) || !code || !m) continue;
+    bumpM(m, "amazon", code, "amazon-orders", { units: q, grossRev: lineRev });   // netRev finalised below
+    units += q; gross += lineRev; bumpGeo(m, st, q, lineRev, false); noteFold(code, masterSku, skuRaw, q);
   }
-  // Finalise the variant-fold map: a canonical is `folded` when MORE THAN ONE raw
-  // marketplace-SKU (incl. an `_MP` website-fulfilment variant) resolved into it.
+  // Finalise per-SKU netRev ONCE per cell from accumulated raw gross (÷1.05).
+  for (const k of Object.keys(facts.monthly)) {
+    const [mm, ch] = k.split("|");
+    if (mm === MONTH && ch === "amazon" && !k.endsWith(`|${CH_CODE}`)) {
+      facts.monthly[k].netRev = r2((facts.monthly[k].grossRev || 0) / 1.05);
+    }
+  }
   const skuVariantFold = {};
   for (const [code, fb] of Object.entries(foldByCode)) {
     const components = Object.entries(fb.components)
-      .map(([rawSku, c0]) => ({ rawSku, units: c0.units, isMp: c0.isMp, viaAsin: c0.viaAsin }))
+      .map(([sku, c0]) => ({ rawSku: sku, units: c0.units, isMp: c0.isMp }))
       .sort((a, b) => b.units - a.units);
     const folded = components.length > 1;
-    if (!folded && !components.some((c0) => c0.isMp)) continue;   // single plain SKU → no fold to show
+    if (!folded && !components.some((c0) => c0.isMp)) continue;
     skuVariantFold[code] = {
       channel: "amazon", canonical: code, folded, components,
-      asins: Object.keys(fb.asins),
       label: `${code} = ${components.map((c0) => c0.rawSku).join(" + ")} folded`,
-      rule: "Amazon marketplace-SKU `_MP` (MCF/website-fulfilment variant) is stripped before the MSKU→canonical lookup, so a base MSKU and its `_MP` twin fold into ONE canonical code. Components retained pre-fold so the identity resolution is inspectable.",
+      rule: "Amazon Orders Insights folds each Master SKU's marketplace SKU variants (e.g. NSSBJ500ML + NSSBJ500ML_MP) into ONE canonical code. The _MP suffix marks the MCF/website-fulfilment twin. Components retained pre-fold so the identity resolution is inspectable.",
     };
   }
-  // Finalise geo cells (round netRev) + a per-month state count for the report.
   const geoMonths = new Set();
-  for (const k of Object.keys(geo)) { geo[k].netRev = r2(geo[k].netRev); geoMonths.add(k.split("|")[0]); }
+  for (const k of Object.keys(geo)) {
+    geo[k].netRev = r2((geo[k].gross || 0) / 1.05);   // ÷1.05 ONCE per state
+    delete geo[k].gross;                              // store only the contract fields
+    geoMonths.add(k.split("|")[0]);
+  }
   facts.meta.bySource["amazon-orders"] = {
     mcf: { byCode: mcf, totalUnits: mcfTotal },
     amazonReturns: { units: retU, value: r2(retV) },
-    geo: { source: "amazon-all-orders ship-state", asOf: facts.meta.latestDataDate || null, byMonthState: geo },
-    // BUG-1 (I-92): per-SKU UNITS and REVENUE are accumulated from the SAME
-    // filtered All-Orders row set, so AOV = netRev ÷ units re-derives from the
-    // file. The exact filter is exposed here for the per-SKU ⓘ. Anyone can
-    // reproduce: open amazonmaysales.txt, keep rows where sales-channel="Amazon.in"
-    // AND item-status="Shipped" AND the sku/asin resolves to a canonical code,
-    // bucket by purchase-date month, sum `quantity` for units and `item-price`
-    // for gross, subtract "...Returned to Seller" rows, net = gross ÷ 1.05.
+    geo: { source: "amazon-orders-insights State (norm)", asOf: facts.meta.latestDataDate || null, byMonthState: geo },
+    // Per-SKU UNITS and REVENUE come from the SAME filtered row set, so
+    // AOV = netRev ÷ units re-derives from the file. Reproduce: open
+    // "Amazon Orders Insights by Shivam.xlsx" → tab "Data (cleaned)", keep rows
+    // where Status bucket ∈ {Shipped / in transit, Delivered} AND
+    // Revenue-bearing?="Yes", group by Master SKU → canonical, sum Qty for units
+    // and Line revenue for gross, net = gross ÷ 1.05.
     unitsRule:
-      'Amazon per-SKU units & revenue share ONE row set: sales-channel="Amazon.in" · item-status="Shipped" · sku/asin→canonical code · bucketed by purchase-date month · "…Returned to Seller" netted out · units = Σ quantity, gross = Σ item-price, net = gross ÷ 1.05 (GST-incl rule). AOV = net ÷ units re-derives from amazonmaysales.txt. (Cancelled / Unshipped / Non-Amazon rows excluded; a unit purchased in April but shipped in May counts to its purchase month, not May.)',
-    skuVariantFold,   // I-7 — pre-fold marketplace-SKU components per canonical (Amazon `_MP` fold)
+      'Amazon per-SKU units & revenue share ONE row set: "Amazon Orders Insights · Data (cleaned)" · Status bucket ∈ {Shipped / in transit, Delivered} · Revenue-bearing?="Yes" · Master SKU → canonical code · bucketed by Day month · units = Σ Qty, gross = Σ Line revenue, net = gross ÷ 1.05 (GST-incl rule). AOV = net ÷ units re-derives from the file. (Cancelled / Pending pickup / Unfulfillable / ₹0 MCF-bulk / Returned-Rejected rows excluded from revenue; returns reported separately as 14u/₹9,500.)',
+    skuVariantFold,
   };
   report.amazon = { units, gross: r2(gross), net: r2(gross / 1.05), returnsUnits: retU, returnsValue: r2(retV), mcfUnits: mcfTotal, geoCells: Object.keys(geo).length, geoMonths: geoMonths.size, variantFolds: Object.values(skuVariantFold).filter((f) => f.folded).length };
 }
 
-// ═══ 1b · Amazon ORDER-COMPOSITION cuts (VI-b + left-on-table #2) ════════════
-// The All-Orders TSV carries amazon-order-id, quantity, fulfillment-channel
-// (Amazon=FBA / Merchant=MFN) and is-business-order (B2B vs B2C). None of these
-// were surfaced. We derive, by month and overall, from SHIPPED Amazon.in rows:
-//   • basket composition — single-unit vs multi-unit ORDERS (group by order-id,
-//     sum quantity; 1 → single, ≥2 → multi) + units-per-order.
-//   • fulfillment split — FBA vs MFN orders + units.
-//   • B2B vs B2C — business vs consumer orders + units.
-// Honest: keyed on the real order-id, shipped-only, GST-net revenue (÷1.05).
+// ═══ 1b · Amazon ORDER-COMPOSITION cuts (FBA/MFN · B2B/B2C · basket) ══════════
+// New authoritative source ("Amazon Orders Insights · Data (cleaned)") is ROW/LINE
+// grain (one row per order line — no order-id column). We derive composition, by
+// month, from the SAME shipped+delivered revenue-bearing rows the per-SKU revenue
+// uses, so it stays consistent with the ₹12.82L basis:
+//   • basket composition — single-unit vs multi-unit LINES (Qty 1 → single, ≥2 →
+//     multi) + units-per-line (UPO proxy). Honest: line-grain, since the cleaned
+//     export folds to order LINES, not full baskets.
+//   • fulfilment split — FBA (Fulfilment "Amazon" / Order type "…(FBA)") vs MFN
+//     (Fulfilment "Merchant" / "Website D2C (Easy Ship)") lines + units.
+//   • B2B vs B2C — Business order? "Yes"/"No" lines + units.
 function buildAmazonOrderComposition() {
-  const p = resolve("amazonmaysales", "txt"); if (!p) return;
-  const lines = fs.readFileSync(p, "utf8").split(/\r?\n/).filter((l) => l.length);
-  const H = lines[0].split("\t"); const col = (n) => H.indexOf(n);
-  const C = { oid: col("amazon-order-id"), date: col("purchase-date"), salesCh: col("sales-channel"), itemStatus: col("item-status"), status: col("order-status"), sku: col("sku"), asin: col("asin"), qty: col("quantity"), price: col("item-price"), fc: col("fulfillment-channel"), biz: col("is-business-order") };
-  if (C.oid === -1) return;
-  // group lines by order-id (within month) → { units, rev, fba, b2b, netUnits, returnUnits }.
-  // mappedUnits = units whose sku/asin resolves to a canonical code (the per-SKU
-  // revenue keyspace). The UPO is units/orders from the SAME All-Orders rows
-  // (same-source, ≥1 by construction). mappedUnits lets the view reconcile this
-  // order-grain unit count to the per-SKU sum and surface the unmapped delta
-  // (codeless marketplace SKUs) rather than letting the two units diverge silently.
-  const orders = new Map();   // `${m}|${oid}` → { m, units, rev, fba, b2b, netUnits, returnUnits }
-  for (let i = 1; i < lines.length; i++) {
-    const c = lines[i].split("\t");
-    if ((c[C.salesCh] || "").trim() !== "Amazon.in") continue;
-    if ((c[C.itemStatus] || "").trim() !== "Shipped") continue;
-    const iso = excelToISODate(c[C.date]); const m = monthOf(iso); if (!m) continue;
-    const oid = (c[C.oid] || "").trim(); if (!oid) continue;
-    const k = `${m}|${oid}`;
-    const cur = orders.get(k) || { m, units: 0, rev: 0, netUnits: 0, returnUnits: 0, fba: (c[C.fc] || "").trim() === "Amazon", b2b: String(c[C.biz] || "").trim().toLowerCase() === "true" };
-    const q = num(c[C.qty]);
-    const isReturn = /Returned to Seller/i.test((c[C.status] || "").trim());
-    // GROSS shipped basket (units) drives single/multi & UPO (the basket the buyer
-    // placed). netUnits applies the SAME returns-netting the per-SKU revenue keyspace
-    // uses (a "…Returned to Seller" row subtracts its qty), so netUnits reconciles
-    // EXACTLY to the per-SKU units sum — the two are not a discrepancy, just gross
-    // basket vs net-of-returns.
-    cur.units += q; cur.rev += num(c[C.price]);
-    if (isReturn) { cur.netUnits -= q; cur.returnUnits += q; } else cur.netUnits += q;
-    orders.set(k, cur);
-  }
-  // roll up by month.
+  const p = resolve("Amazon Orders Insights by Shivam", "xlsx"); if (!p) return;
+  const wb = XLSX.readFile(p); const ws = wb.Sheets[AMZ_INSIGHTS_SHEET]; if (!ws) return;
+  const g = grid(ws);
+  const H = g[0].map((h) => String(h ?? "").trim()); const col = (n) => H.indexOf(n);
+  const C = {
+    day: col("Day"), ful: col("Fulfilment"), masterSku: col("Master SKU"), sku: col("SKU"),
+    qty: col("Qty"), lineRev: col("Line revenue (₹)"), bucket: col("Status bucket"),
+    revBearing: col("Revenue-bearing?"), biz: col("Business order?"),
+  };
   const byMonth = {};
-  const blank = () => ({ orders: 0, units: 0, netUnits: 0, returnUnits: 0, singleOrders: 0, multiOrders: 0, multiUnits: 0, fbaOrders: 0, mfnOrders: 0, fbaUnits: 0, mfnUnits: 0, b2bOrders: 0, b2cOrders: 0, b2bUnits: 0, b2cUnits: 0, netRev: 0 });
-  for (const o of orders.values()) {
-    const b = (byMonth[o.m] = byMonth[o.m] || blank());
-    b.orders++; b.units += o.units; b.netUnits += o.netUnits; b.returnUnits += o.returnUnits; b.netRev += o.rev / 1.05;
-    if (o.units >= 2) { b.multiOrders++; b.multiUnits += o.units; } else b.singleOrders++;
-    if (o.fba) { b.fbaOrders++; b.fbaUnits += o.units; } else { b.mfnOrders++; b.mfnUnits += o.units; }
-    if (o.b2b) { b.b2bOrders++; b.b2bUnits += o.units; } else { b.b2cOrders++; b.b2cUnits += o.units; }
+  const modalMonth = amzInsightsModalMonth(g, C.day);
+  const blank = () => ({ lines: 0, units: 0, mappedUnits: 0, singleLines: 0, multiLines: 0, multiUnits: 0, fbaLines: 0, mfnLines: 0, fbaUnits: 0, mfnUnits: 0, b2bLines: 0, b2cLines: 0, b2bUnits: 0, b2cUnits: 0, netRev: 0 });
+  for (let i = 1; i < g.length; i++) {
+    const row = g[i]; if (!row || row.length === 0) continue;
+    const bucket = String(row[C.bucket] ?? "").trim();
+    const revBearing = String(row[C.revBearing] ?? "").trim().toLowerCase() === "yes";
+    if (!SD_BUCKETS.has(bucket) || !revBearing) continue;       // same revenue basis
+    const iso = excelToISODate(row[C.day]); const m = modalMonth || monthOf(iso); if (!m) continue;
+    const q = num(row[C.qty]);
+    const code = resolveMasterSku(String(row[C.masterSku] ?? "")) || resolveMasterSku(String(row[C.sku] ?? ""));
+    const b = (byMonth[m] = byMonth[m] || blank());
+    b.lines++; b.units += q; b.netRev += num(row[C.lineRev]) / 1.05;
+    if (code) b.mappedUnits += q;
+    if (q >= 2) { b.multiLines++; b.multiUnits += q; } else b.singleLines++;
+    const isFba = String(row[C.ful] ?? "").trim() === "Amazon";
+    if (isFba) { b.fbaLines++; b.fbaUnits += q; } else { b.mfnLines++; b.mfnUnits += q; }
+    const isB2b = String(row[C.biz] ?? "").trim().toLowerCase() === "yes";
+    if (isB2b) { b.b2bLines++; b.b2bUnits += q; } else { b.b2cLines++; b.b2cUnits += q; }
   }
-  // finalise: round + derived ratios per month, ascending.
   const months = Object.keys(byMonth).sort();
   const series = months.map((m) => {
-    const b = byMonth[m]; const o = b.orders || 0; const u = Math.round(b.units);
+    const b = byMonth[m]; const o = b.lines || 0; const u = Math.round(b.units);
+    // Names kept (orders/upo/…) so downstream consumers (bizAnalytics order-comp
+    // view) read the same shape; here a "line" IS the order grain available.
     return {
-      month: m, orders: o, units: u, grossUnits: u, netUnits: Math.round(b.netUnits), returnUnits: Math.round(b.returnUnits), netRev: r2(b.netRev),
-      singleOrders: b.singleOrders, multiOrders: b.multiOrders, multiUnits: b.multiUnits,
+      month: m, orders: o, units: u, grossUnits: u, netUnits: u, returnUnits: 0, netRev: r2(b.netRev),
+      singleOrders: b.singleLines, multiOrders: b.multiLines, multiUnits: b.multiUnits,
       upo: o > 0 ? r2(b.units / o) : null,
-      multiPct: o > 0 ? r2(b.multiOrders / o) : null,
-      fbaOrders: b.fbaOrders, mfnOrders: b.mfnOrders, fbaUnits: b.fbaUnits, mfnUnits: b.mfnUnits,
-      fbaPct: o > 0 ? r2(b.fbaOrders / o) : null,
-      b2bOrders: b.b2bOrders, b2cOrders: b.b2cOrders, b2bUnits: b.b2bUnits, b2cUnits: b.b2cUnits,
-      b2bPct: o > 0 ? r2(b.b2bOrders / o) : null,
+      multiPct: o > 0 ? r2(b.multiLines / o) : null,
+      fbaOrders: b.fbaLines, mfnOrders: b.mfnLines, fbaUnits: b.fbaUnits, mfnUnits: b.mfnUnits,
+      fbaPct: o > 0 ? r2(b.fbaLines / o) : null,
+      b2bOrders: b.b2bLines, b2cOrders: b.b2cLines, b2bUnits: b.b2bUnits, b2cUnits: b.b2cUnits,
+      b2bPct: o > 0 ? r2(b.b2bLines / o) : null,
     };
   });
   facts.meta.bySource["amazon-order-composition"] = {
-    source: "amazon-all-orders order-id grouping", tier: "native",
-    unitsNote: "Order-grain GROSS units (the basket placed) drive single/multi composition + UPO (units ÷ orders, same-source, ≥1). netUnits = gross − returns-netting (a “…Returned to Seller” row subtracts its qty), which reconciles EXACTLY to the per-SKU units sum — order-grain gross vs per-SKU net-of-returns is a basis difference, not a discrepancy.",
+    source: "amazon-orders-insights line grouping (Data cleaned)", tier: "native",
+    unitsNote: "Line-grain composition from the SAME shipped+delivered revenue-bearing rows as per-SKU revenue (the cleaned export folds to order LINES — no order-id — so 'orders' here = order lines and UPO = units ÷ lines). single/multi by Qty (1 vs ≥2); FBA = Fulfilment 'Amazon', MFN = Fulfilment 'Merchant' (Easy Ship); B2B = Business order? 'Yes'. units reconcile EXACTLY to the per-SKU units sum (1,292 for May).",
     byMonth: series,
   };
   report.amazonOrderComposition = { months: series.length, latest: series[series.length - 1] || null };
@@ -1512,8 +1570,8 @@ report.latestDataDate = facts.meta.latestDataDate;
 // its trust tier, and the underlying file, so a provenance chip reads
 // "Order-mix · Snell agency" not "snell-ordermix". (round-4 never-landed item.)
 const SOURCE_LABELS = {
-  "amazon-orders":            { label: "Amazon All-Orders (native export)",        tier: "native",       file: "amazonmaysales.txt" },
-  "amazon-order-composition": { label: "Amazon order composition (FBA/MFN · B2B/B2C · basket)", tier: "native", file: "amazonmaysales.txt" },
+  "amazon-orders":            { label: "Amazon Orders Insights · Data (cleaned) — shipped+delivered ÷1.05 (native export)", tier: "native", file: "Amazon Orders Insights by Shivam.xlsx" },
+  "amazon-order-composition": { label: "Amazon order composition (FBA/MFN · B2B/B2C · basket)", tier: "native", file: "Amazon Orders Insights by Shivam.xlsx" },
   "fk-sales":                 { label: "Flipkart Sales Report (native export)",     tier: "native",       file: "flipkart may sales.xlsx" },
   "blinkit-sales":            { label: "Blinkit Sales Report (native export)",      tier: "native",       file: "blinkit may sales.xlsx" },
   "shopify-net":              { label: "Shopify net sales/units (native export)",   tier: "native",       file: "shopify net sales net units.csv" },

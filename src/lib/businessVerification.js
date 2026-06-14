@@ -96,40 +96,68 @@ function agencyShadowField(facts, channel, field) {
 // filter: human-readable description of exactly which fact keys compute() sums.
 export const ANCHORS = [
   // ── §2 Amazon ──────────────────────────────────────────────
-  // Spec pins POST-return-netting numbers (gross/units quoted are pre-netting).
-  // Both expected values are PENDING until B1's build emits the netted totals.
+  // RE-BASED 2026-06-14 (founder approval) to FBA-ONLY on the authoritative source
+  // "Amazon Orders Insights · Data (cleaned)". Amazon channel = ONLY rows whose
+  // Order type is "Amazon.in marketplace (FBA)" AND Revenue-bearing? starts with
+  // "Y", net = Σ Line revenue ÷ 1.05. This reproduces the founder's Executive
+  // Summary FBA line EXACTLY and SUPERSEDES the erroneous FBA+EasyShip ₹12.82L
+  // re-base — Website D2C (Easy Ship) is website D2C demand already counted in the
+  // Shopify-net website figure (₹4,28,378); folding it into Amazon double-counted
+  // website. (Also supersedes the older amazonmaysales.txt All-Orders ₹11,43,450.)
+  // Amazon returns are now 0 (the 14u/₹9,500 Returned/Rejected rows are all Easy
+  // Ship/website, NOT Amazon).
   {
     id: "amazon-net-rev",
-    label: "Amazon net revenue (May, post-return-net, ÷1.05)",
-    // PINNED from bundled build (2026-06-12): Σ netRev over 2026-05|amazon|*.
-    expected: 1143449.84,
-    guide: null, // spec gives gross ≈1,238,808 pre-net; net target is build-pinned
-    filter: `Σ netRev over ${MONTH}|amazon|* (All-Orders sales-channel=Amazon.in, shipped−returns, ÷1.05)`,
+    label: "Amazon net revenue (May, FBA-only revenue-bearing, ÷1.05)",
+    // PINNED from rebased bundle (2026-06-14): Σ netRev over 2026-05|amazon|* =
+    // Σ r2(per-SKU gross ÷ 1.05) = 1,033,587.61 (displays as ₹10,33,588; geo
+    // reconciles to ₹10,33,587.65; founder Executive Summary FBA net ₹10,33,588).
+    expected: 1033587.61,
+    guide: 1033588, // founder Executive Summary FBA net (displayed, rounded)
+    filter: `Σ netRev over ${MONTH}|amazon|* (Amazon Orders Insights · Data (cleaned): Order type="Amazon.in marketplace (FBA)" · Revenue-bearing="Y…" · ÷1.05)`,
     compute: (facts) => sumChannel(facts, "amazon", "netRev"),
   },
   {
     id: "amazon-units",
-    label: "Amazon units (May, post-return-net)",
-    // PINNED from bundled build: May purchase-date gross = 1,403 units, − 23
-    // return units = 1,380. The §2 guide "1,430" is the ALL-ROWS count (every
-    // purchase-date, returns un-netted, incl. 4 April-dated units); it is NOT
-    // 1,430 − 23. Hence the store holds 1,380 for May.
-    expected: 1380,
-    guide: 1430, // pre-return-netting guide from §2
-    filter: `Σ units over ${MONTH}|amazon|* (shipped − return/refund rows)`,
+    label: "Amazon units (May, FBA-only revenue-bearing)",
+    // PINNED from rebased bundle: Σ Qty over the FBA revenue-bearing rows = 995
+    // (founder Executive Summary FBA units). Easy Ship & ₹0 MCF rows excluded.
+    expected: 995,
+    guide: 995,
+    filter: `Σ units over ${MONTH}|amazon|* (Order type FBA · revenue-bearing demand; Easy Ship & ₹0 MCF excluded)`,
     compute: (facts) => sumChannel(facts, "amazon", "units"),
   },
   {
     id: "amazon-gross-rev",
-    label: "Amazon gross revenue (May, pre-return-net, incl GST)",
-    // PINNED from bundled build: Σ grossRev over 2026-05|amazon|* (net of the
-    // ₹17,155 return value the build subtracts in the same gross field). The §2
-    // "gross ≈1,238,808" guide is the pre-return-netting gross; the store's
-    // grossRev field is already return-netted, hence 1,200,623.
-    expected: 1200623,
-    guide: 1238808, // §2 "gross ≈ ₹12,38,808"
-    filter: `Σ grossRev over ${MONTH}|amazon|* (item-price, before ÷1.05, return rows netted)`,
+    label: "Amazon gross revenue (May, FBA-only, incl GST)",
+    // PINNED from rebased bundle: Σ grossRev = Σ Line revenue over the FBA
+    // revenue-bearing rows = 1,085,267 (= net × 1.05; founder Exec Summary FBA gross).
+    expected: 1085267,
+    guide: 1085267,
+    filter: `Σ grossRev over ${MONTH}|amazon|* (Σ Line revenue, before ÷1.05, Order type FBA revenue-bearing)`,
     compute: (facts) => sumChannel(facts, "amazon", "grossRev"),
+  },
+  {
+    id: "amazon-returns",
+    label: "Amazon returns (May, FBA Returned/Rejected — gross value) = 0",
+    // PINNED: meta.bySource["amazon-orders"].amazonReturns = 0u / ₹0 under FBA-only.
+    // The 14u/₹9,500 Returned/Rejected rows are all Website D2C (Easy Ship), NOT
+    // Amazon, so Amazon returns = 0 (those returns belong to the website channel).
+    expected: 0,
+    guide: 0, // FBA Returned/Rejected bucket is empty
+    filter: `meta.bySource["amazon-orders"].amazonReturns.value (FBA "Returned/Rejected" gross; 0 units — Easy Ship returns are website, not Amazon)`,
+    compute: (facts) => amazonReturnsValue(facts),
+  },
+  {
+    id: "amazon-geo-top-state",
+    label: "Amazon geo #1 state net (May, FBA-only ÷1.05) — Punjab",
+    // PINNED from rebased bundle geo.byMonthState: Punjab ranks #1 at ₹130,471.43
+    // net (Maharashtra #2, Uttar Pradesh #3, Gujarat #4, Haryana #5). Geo sums to
+    // the channel net (reconciles to ₹10,33,587.65).
+    expected: 130471.43,
+    guide: 137000, // ≈₹1.37L Punjab GROSS; net ÷1.05 = ₹1,30,471 (binding net figure)
+    filter: `max netRev over meta.bySource["amazon-orders"].geo.byMonthState["${MONTH}|*"] (Punjab #1, by State (norm), net÷1.05)`,
+    compute: (facts) => amazonGeoTopStateNet(facts),
   },
 
   // ── §2 Flipkart ────────────────────────────────────────────
@@ -356,6 +384,29 @@ function adTotalOverride(facts, channel) {
   }
 }
 
+// ─── Amazon returns + geo accessors (new authoritative source, basis A) ──────
+// Returns VALUE (₹ gross) from the Returned/Rejected bucket. SAFE: absent → null
+// (anchor reports NO-DATA, never a false 0).
+function amazonReturnsValue(facts) {
+  const r = facts?.meta?.bySource?.["amazon-orders"]?.amazonReturns;
+  const v = Number(r?.value);
+  return Number.isFinite(v) ? v : null;
+}
+// Top-ranked state net revenue (₹) for ANCHOR_MONTH from the Amazon geo map. The
+// #1 state must be Punjab on the shipped+delivered ÷1.05 basis; this anchor pins
+// the #1 net VALUE so a drift (or a different #1 state) surfaces. SAFE: absent → null.
+function amazonGeoTopStateNet(facts) {
+  const geo = facts?.meta?.bySource?.["amazon-orders"]?.geo?.byMonthState;
+  if (!geo) return null;
+  let topNet = null;
+  for (const [k, v] of Object.entries(geo)) {
+    if (!k.startsWith(`${MONTH}|`)) continue;
+    const n = Number(v?.netRev);
+    if (Number.isFinite(n) && (topNet === null || n > topNet)) topNet = n;
+  }
+  return topNet;
+}
+
 // Channel total derived from meta.bySource (mirrors cmEngine.deriveChannelAdTotals
 // for the three channels with agency/Monarch totals). Returns a finite number or
 // NaN. Kept local so verification has no import cycle with the engine.
@@ -530,7 +581,9 @@ if (isMain) {
   // deliberate DRIFT.
   const facts = {
     monthly: {
-      "2026-05|amazon|NSMP100": { netRev: 1143449.84, units: 1380, grossRev: 1200623, adSpendDirect: 355115 },
+      // Authoritative Amazon basis (FBA-only): net ₹10,33,587.61 / 995u /
+      // gross ₹10,85,267 on the Order type "Amazon.in marketplace (FBA)" ÷1.05 rows.
+      "2026-05|amazon|NSMP100": { netRev: 1033587.61, units: 995, grossRev: 1085267, adSpendDirect: 355115 },
       "2026-05|website|NSSB100": { netRev: 428378, units: 610, adSpendDirect: 116648.42 },
       "2026-05|blinkit|NSSB100": { grossRev: 281560, netRev: 268153, units: 386 },
       "2026-05|flipkart|NSSBP100": { netRev: 272842.99 }, // exact MATCH (May order-date sum)
@@ -545,6 +598,16 @@ if (isMain) {
         "2026-05|website": { netRev: 0, grossRev: 782875.24, units: 823 },
       },
       bySource: {
+        // FBA-only Amazon source meta: returns = 0 (Easy Ship returns are website)
+        // + geo (Punjab #1 at ₹1,30,471.43 net, Maharashtra #2, UP #3).
+        "amazon-orders": {
+          amazonReturns: { units: 0, value: 0 },
+          geo: { source: "amazon-orders-insights State (norm)", byMonthState: {
+            "2026-05|PUNJAB": { units: 83, netRev: 130471.43, returns: 0 },
+            "2026-05|MAHARASHTRA": { units: 115, netRev: 104504.76, returns: 0 },
+            "2026-05|UTTAR PRADESH": { units: 102, netRev: 95963.81, returns: 0 },
+          } },
+        },
         "snell-history": { mayReconciliation: {
           amazonNet: { agency: 1213768.71, native: 1143449.84, delta: 70318.87, deltaPct: 6.15 },
           flipkartNet: { agency: 274451.08, native: 272842.99, delta: 1608.09, deltaPct: 0.59 },
@@ -557,9 +620,11 @@ if (isMain) {
   const by = Object.fromEntries(res.map((r) => [r.id, r]));
   const check = (label, cond) => { console.log(`${cond ? "PASS" : "FAIL"}  ${label}`); if (!cond) proc.exitCode = 1; };
 
-  check("amazon-net-rev MATCH", by["amazon-net-rev"].status === "MATCH");
-  check("amazon-units MATCH", by["amazon-units"].status === "MATCH");
-  check("amazon-gross-rev MATCH", by["amazon-gross-rev"].status === "MATCH");
+  check("amazon-net-rev MATCH (FBA-only ₹10.34L)", by["amazon-net-rev"].status === "MATCH");
+  check("amazon-units MATCH (995)", by["amazon-units"].status === "MATCH");
+  check("amazon-gross-rev MATCH (₹10.85L)", by["amazon-gross-rev"].status === "MATCH");
+  check("amazon-returns MATCH (₹0 — Easy Ship returns are website)", by["amazon-returns"].status === "MATCH");
+  check("amazon-geo-top-state MATCH (Punjab ₹1.30L net)", by["amazon-geo-top-state"].status === "MATCH");
   check("amazon-ams-total MATCH", by["amazon-ams-total"].status === "MATCH");
   check("website-net-rev MATCH", by["website-net-rev"].status === "MATCH");
   check("website-units MATCH", by["website-units"].status === "MATCH");
@@ -613,9 +678,9 @@ if (isMain) {
       // And the full anchor set against the real bundle (15 v1 + 3 history MATCH).
       const realRes = runVerification(merged);
       const realBy = Object.fromEntries(realRes.map((r) => [r.id, r]));
-      const v1Ids = ["amazon-net-rev","amazon-units","amazon-gross-rev","amazon-ams-total","website-net-rev","website-units","website-google-attributed","website-ad-total","blinkit-gross-rev","blinkit-net-rev","blinkit-units","blinkit-ad-total","flipkart-net-rev","amazon-sp-attributed","flipkart-pla-attributed"];
+      const v1Ids = ["amazon-net-rev","amazon-units","amazon-gross-rev","amazon-returns","amazon-geo-top-state","amazon-ams-total","website-net-rev","website-units","website-google-attributed","website-ad-total","blinkit-gross-rev","blinkit-net-rev","blinkit-units","blinkit-ad-total","flipkart-net-rev","amazon-sp-attributed","flipkart-pla-attributed"];
       const v1Match = v1Ids.every((id) => realBy[id]?.status === "MATCH");
-      check("all 15 v1 anchors MATCH on REAL bundle", v1Match);
+      check(`all ${v1Ids.length} v1 anchors MATCH on REAL bundle`, v1Match);
       if (!v1Match) console.log("  v1 drifts:", v1Ids.filter((id)=>realBy[id]?.status!=="MATCH").map((id)=>`${id}:${realBy[id]?.status}(${realBy[id]?.actual})`).join(", "));
       const histMatch = ["snell-amazon-net-may","snell-flipkart-net-may","monarch-website-conv-may"].every((id) => realBy[id]?.status === "MATCH");
       check("3 history anchors MATCH on REAL bundle", histMatch);

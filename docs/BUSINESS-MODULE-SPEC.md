@@ -15,8 +15,7 @@ dimension everywhere; adding a channel must require only a parser + a fee row).
 
 ## 1 · Founder decisions (the 11 answers, binding)
 1. **COGS set** = `Naturesum_Unit_COGS_116 (1).xlsx` (revised 11-Jun). Numbers in §4.
-2. **Amazon sales** = All-Orders rows with `sales-channel == "Amazon.in"` ONLY.
-   Non-Amazon rows (MCF) are NOT Amazon sales (website fulfilment).
+2. **Amazon sales = `Amazon Orders Insights by Shivam.xlsx` · tab "Data (cleaned)" · Order type "Amazon.in marketplace (FBA)" ONLY** (founder approval 2026-06-14 — Amazon = Amazon.in marketplace (FBA) only per the Executive Summary; SUPERSEDES the erroneous FBA+EasyShip ₹12.82L re-base AND the older `amazonmaysales.txt` All-Orders TSV / ₹11,43,450). Revenue = FBA rows with **Revenue-bearing? starts with "Y"** (priced & not cancelled); net = Σ Line revenue ÷ 1.05 (per cell once) = **₹10,33,588 / 995u / gross ₹10,85,267**. **Website D2C (Easy Ship) (₹3,81,730) is EXCLUDED from Amazon** — it is website D2C demand already counted in the Shopify-net website figure (₹4,28,378); folding it into Amazon would DOUBLE-COUNT website. The ₹0 MCF (non-Amazon channels) rows (Revenue-bearing="No") are NOT Amazon sales — captured as MCF units for mcfShare (website fulfilment). Amazon returns = **0** (the 14u/₹9,500 Returned/Rejected rows are Easy Ship/website, not Amazon).
 3. **Website revenue + units (May)** = the founder's `shopify net sales net
    units.csv` (per-SKU Net sales + Net items sold; net of returns/discounts,
    ex-GST per Shopify "Net sales" semantics — use AS-IS, do NOT ÷1.05).
@@ -42,8 +41,10 @@ dimension everywhere; adding a channel must require only a parser + a fee row).
    unless extremely essential and explicitly justified in a code comment.
 10. **Flipkart cashback** (+₹11,931): settlement-layer line, NOT revenue,
     excluded from CM. Shown as a separate "net realization" note.
-11. **Amazon returns: NET OUT** of Amazon revenue/units (refund/return rows in
-    All-Orders). **CM4: show it**, with an in-tool editable "fixed costs for
+11. **Amazon returns: NET OUT** of Amazon revenue/units. Under basis A the
+    "Returned/Rejected" rows are a SEPARATE Status bucket already EXCLUDED from
+    the shipped+delivered revenue (14 units / ₹9,500 gross for May) — so they are
+    reported as the returns figure, NOT double-subtracted. **CM4: show it**, with an in-tool editable "fixed costs for
     the month" input; allocation = proportional to net revenue across
     channels (and across SKUs within channels). Judgment (founder asked):
     revenue-proportional allocation is the right pragmatic default for a
@@ -60,7 +61,7 @@ REPLACED with real derived data.
 ## 2 · Channel revenue definitions (May 2026 anchors → verifier panel)
 | Channel | Source of truth | Net-revenue rule | May anchors (builder/verifier re-derive exactly) |
 |---|---|---|---|
-| amazon | All-Orders TSV | Σ item-price over `sales-channel=Amazon.in`, item-status shipped/shippable, MINUS return/refund rows; net = gross ÷ 1.05 | gross ≈ ₹12,38,808 · units ≈ 1,430 (pre-return-netting; pin post-netting numbers) |
+| amazon | **Amazon Orders Insights · Data (cleaned)** (xlsx), **Order type "Amazon.in marketplace (FBA)" ONLY** | Σ Line revenue over **FBA** rows that are **Revenue-bearing? "Y…"** (priced & not cancelled); net = Σ ÷ 1.05 (per cell once); group per-SKU by **Master SKU → canonical** (Website D2C Easy Ship EXCLUDED — website D2C; ₹0 MCF excluded → mcfShare; Cancelled/Pending pickup/Unfulfillable excluded) | **net ₹10,33,588 · gross ₹10,85,267 · 995 units** · returns **0** (the 14u/₹9,500 "Returned/Rejected" rows are Easy Ship/website, not Amazon) · geo #1 Punjab ₹1,30,471 net (Maharashtra #2, UP #3, Gujarat #4, Haryana #5).<br>_Amazon = Amazon.in marketplace (FBA) ONLY per Order type (Executive Summary), revenue-bearing priced-&-not-cancelled, net÷1.05 = ₹10,33,588 / 995u; Website Easy Ship (₹3,81,730) is website D2C — EXCLUDED from Amazon to avoid double-counting Shopify-net website; supersedes the erroneous FBA+EasyShip ₹12.82L re-base, founder 2026-06-14._ |
 | flipkart | FK Sales Report xlsx | Σ Buyer Invoice Amount with NATIVE SIGN (negatives auto-net); net = Σ ÷ 1.05; fold `*N` multipacks | net-BIA ≈ ₹2,71,408 · 588 rows |
 | blinkit | Blinkit Sales Report | Σ gross bill; net = gross − (CGST+SGST+cess); key on Item Id | gross ₹2,81,560 · net ≈ ₹2,68,153 · 386 units |
 | website | shopify net csv (monthly) | Net sales AS-IS (already net) | ₹4,28,378 · 610 units |
